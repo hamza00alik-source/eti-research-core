@@ -54,11 +54,11 @@ def test_evolution_candidates_and_baseline_comparison():
 
 def test_decision_requires_risk_gate():
     req = RiskRequest(1000, 100, 98, 100)
-    result = build_research_decision({"short":0.1,"flat":0.1,"long":0.8}, req)
+    result = build_research_decision({"short":0.1,"flat":0.1,"long":0.8}, req, current_positions={})
     assert result["action"] == "long"
     assert result["execution"] == "disabled"
     blocked = build_research_decision({"short":0.1,"flat":0.1,"long":0.8},
-        RiskRequest(1000,100,98,100,leverage=3))
+        RiskRequest(1000,100,98,100,leverage=3), current_positions={})
     assert blocked["action"] == "no_trade"
 
 
