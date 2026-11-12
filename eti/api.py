@@ -9,9 +9,18 @@ from pydantic import BaseModel, Field
 
 from .config import AppConfig
 from .risk import RiskEngine, RiskRequest
+from .portfolio import assess_portfolio
 
 app = FastAPI(title=AppConfig().app_name, version=AppConfig().version)
 risk_engine = RiskEngine()
+
+
+class PortfolioPayload(BaseModel):
+    equity: float = Field(gt=0)
+    current_positions: dict[str, float] = {}
+    proposed_symbol: str
+    proposed_notional: float = Field(gt=0)
+    correlated_group_exposure: float = Field(default=0, ge=0)
 
 
 class RiskPayload(BaseModel):
@@ -47,6 +56,15 @@ def assess_risk(payload: RiskPayload):
     result = risk_engine.assess(request)
     return {"approved": result.approved, "approved_notional": result.approved_notional,
             "quantity": result.quantity, "reasons": result.reasons}
+
+
+@app.post("/portfolio/assess")
+def portfolio_assess(payload: PortfolioPayload):
+    result = assess_portfolio(payload.equity, payload.current_positions,
+                              payload.proposed_symbol, payload.proposed_notional,
+                              payload.correlated_group_exposure)
+    return {"approved": result.approved, "reasons": result.reasons,
+            "resulting_gross_fraction": result.resulting_gross_fraction}
 
 
 @app.get("/execution/status")
