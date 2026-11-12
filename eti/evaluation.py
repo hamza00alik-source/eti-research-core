@@ -21,6 +21,9 @@ def walk_forward_folds(n_rows: int, min_train: int = 500, validation_size: int =
                        test_size: int = 100, step_size: int = 100,
                        purge_bars: int = 6) -> list[Fold]:
     """Expanding-window folds with purge gaps before validation and test windows."""
+    sizes = (n_rows, min_train, validation_size, test_size, step_size, purge_bars)
+    if any(isinstance(v, bool) or not isinstance(v, int) for v in sizes):
+        raise ValueError("Row counts and window sizes must be integers")
     if min(n_rows, min_train, validation_size, test_size, step_size) <= 0 or purge_bars < 0:
         raise ValueError("Row counts and window sizes must be positive; purge cannot be negative")
     folds = []
