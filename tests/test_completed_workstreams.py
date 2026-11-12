@@ -4,7 +4,6 @@ import pytest
 
 from eti.backtest import backtest_positions
 from eti.decision import build_research_decision
-from eti.portfolio import PortfolioLimits
 from eti.device_benchmark import benchmark_inference
 from eti.evaluation import run_walk_forward
 from eti.portfolio import PortfolioLimits
