@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from eti.data import validate_ohlcv
+from eti.data import drop_incomplete_candles, validate_ohlcv
 from eti.features import build_features, make_labels
+from eti.pipeline import _timeframe_seconds, run_experiment
 from eti.simulator import simulate_long_flat
 
 
@@ -20,12 +21,20 @@ def sample_ohlcv(n=400):
     })
 
 
-def test_validation_sorts_and_deduplicates():
+def test_validation_sorts_deduplicates_and_drops_non_finite():
     raw = sample_ohlcv()
+    raw.loc[0, "volume"] = np.inf
     raw = pd.concat([raw.iloc[[2]], raw.iloc[[0]], raw.iloc[[2]]], ignore_index=True)
     clean = validate_ohlcv(raw)
-    assert len(clean) == 2
+    assert len(clean) == 1
     assert clean.timestamp.is_monotonic_increasing
+
+
+def test_incomplete_latest_candle_is_removed():
+    raw = sample_ohlcv(3)
+    now_ms = int(pd.Timestamp("2024-01-01 03:30", tz="UTC").timestamp() * 1000)
+    clean = drop_incomplete_candles(raw, timeframe_ms=60 * 60 * 1000, now_ms=now_ms)
+    assert clean.timestamp.tolist() == [raw.loc[0, "timestamp"]]
 
 
 def test_features_are_causal_at_current_row():
@@ -35,6 +44,20 @@ def test_features_are_causal_at_current_row():
     changed.loc[250:, ["open", "high", "low", "close", "volume"]] *= 1.5
     altered = build_features(changed)
     pd.testing.assert_series_equal(base.loc[249], altered.loc[249], check_names=False)
+
+
+def test_rsi_handles_no_loss_and_flat_series():
+    rising = sample_ohlcv(80)
+    rising["close"] = np.arange(80, dtype=float) + 100
+    rising["open"] = rising["close"]
+    rising["high"] = rising["close"] + 1
+    rising["low"] = rising["close"] - 1
+    rising_rsi = build_features(rising)["rsi_14"].dropna()
+    assert (rising_rsi == 100).all()
+    flat = rising.copy()
+    flat[["open", "high", "low", "close"]] = 100.0
+    flat_rsi = build_features(flat)["rsi_14"].dropna()
+    assert (flat_rsi == 50).all()
 
 
 def test_labels_have_expected_classes_and_tail_nan():
@@ -47,6 +70,21 @@ def test_labels_have_expected_classes_and_tail_nan():
 def test_simulator_applies_signal_next_bar_and_costs():
     close = pd.Series([100.0, 110.0, 121.0, 121.0])
     predictions = pd.Series([2, 2, 1, 1])
-    result = simulate_long_flat(close, predictions, fee_bps=0, slippage_bps=0)
+    result = simulate_long_flat(close, predictions, fee_bps=0, slippage_bps=0, bars_per_year=24)
     assert result["exposure"] == pytest.approx(0.50)
     assert result["total_return"] == pytest.approx(0.21)
+    assert result["bars_per_year"] == 24
+    assert "position_changes" in result
+
+
+def test_timeframe_annualization_is_not_fixed_to_hourly():
+    assert _timeframe_seconds("1h") == 3600
+    assert _timeframe_seconds("15m") == 900
+    assert 4 * _timeframe_seconds("15m") == _timeframe_seconds("1h")
+
+
+def test_end_to_end_research_pipeline_runs():
+    metrics = run_experiment(sample_ohlcv(1200), horizon=6, timeframe="1h")
+    assert metrics["rows"] > 200
+    assert metrics["timeframe"] == "1h"
+    assert metrics["paper_simulation"]["bars_per_year"] == pytest.approx(365.25 * 24)
