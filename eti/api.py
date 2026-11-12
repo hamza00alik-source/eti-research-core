@@ -1,7 +1,10 @@
-"""Minimal research API. All endpoints are read-only; no exchange order routes exist."""
+"""Minimal research API and PWA host. No exchange order routes exist."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import AppConfig
@@ -50,3 +53,8 @@ def assess_risk(payload: RiskPayload):
 def execution_status():
     return {"enabled": False, "live_orders_implemented": False,
             "message": "ETI is research-only. No order execution endpoints are available."}
+
+
+web_dir = Path(__file__).resolve().parent.parent / "web"
+if web_dir.exists():
+    app.mount("/", StaticFiles(directory=web_dir, html=True), name="web")
