@@ -34,3 +34,12 @@ def test_walk_forward_folds_are_ordered_and_purged():
 def test_walk_forward_rejects_insufficient_history():
     with pytest.raises(ValueError):
         walk_forward_folds(100, min_train=500)
+
+
+def test_portfolio_rejects_non_finite_and_invalid_position_values():
+    import math
+    bad_equity = assess_portfolio(math.nan, {}, "BTC/USDT", 10)
+    bad_position = assess_portfolio(1000, {"BTC/USDT": math.inf}, "ETH/USDT", 10)
+    assert not bad_equity.approved
+    assert not bad_position.approved
+    assert "invalid_existing_position" in bad_position.reasons
