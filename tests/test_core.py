@@ -96,7 +96,9 @@ def test_fetch_ohlcv_continues_after_exchange_returns_short_page(monkeypatch):
     import eti.data as data_module
 
     now_ms = int(pd.Timestamp("2025-01-10", tz="UTC").timestamp() * 1000)
-    start_ms = now_ms - 2000 * 60 * 60 * 1000
+    # Match the fetcher's default start cursor: exactly 1,200 hourly candles
+    # ending at the latest completed candle.
+    start_ms = now_ms - 1200 * 60 * 60 * 1000
     all_rows = []
     for i in range(1200):
         ts = start_ms + i * 60 * 60 * 1000
