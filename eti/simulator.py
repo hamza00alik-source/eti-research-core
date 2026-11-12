@@ -10,6 +10,7 @@ def simulate_long_flat(
     predictions: pd.Series,
     fee_bps: float = 6.0,
     slippage_bps: float = 2.0,
+    bars_per_year: float = 365.25 * 24,
 ) -> dict:
     """Apply close-time decisions on the next bar and charge turnover costs.
 
@@ -18,6 +19,8 @@ def simulate_long_flat(
     """
     if fee_bps < 0 or slippage_bps < 0:
         raise ValueError("Costs cannot be negative")
+    if bars_per_year <= 0:
+        raise ValueError("bars_per_year must be positive")
     aligned = pd.concat([close.rename("close"), predictions.rename("prediction")], axis=1).dropna()
     if len(aligned) < 2:
         raise ValueError("At least two aligned observations are required")
@@ -30,12 +33,15 @@ def simulate_long_flat(
     equity = (1.0 + strategy_returns).cumprod()
     drawdown = equity / equity.cummax() - 1.0
     total_return = float(equity.iloc[-1] - 1.0)
+    bar_std = strategy_returns.std()
+    sharpe = float(strategy_returns.mean() / bar_std * np.sqrt(bars_per_year)) if bar_std > 0 else 0.0
     return {
         "bars": int(len(aligned)),
         "total_return": total_return,
         "max_drawdown": float(drawdown.min()),
         "exposure": float(position.mean()),
-        "trades": int((turnover > 0).sum()),
-        "sharpe_bar_annualized": float(strategy_returns.mean() / strategy_returns.std() * np.sqrt(365.25*24)) if strategy_returns.std() > 0 else 0.0,
+        "position_changes": int((turnover > 0).sum()),
+        "bars_per_year": float(bars_per_year),
+        "sharpe_annualized": sharpe,
         "equity_curve": equity,
     }
