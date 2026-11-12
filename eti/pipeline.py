@@ -66,6 +66,47 @@ def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h")
     }
 
 
+
+def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
+                          min_train: int = 500, validation_size: int = 100,
+                          test_size: int = 100, step_size: int = 100) -> dict:
+    """Train-from-scratch candidate models inside purged nested walk-forward folds."""
+    from sklearn.dummy import DummyClassifier
+    from .evaluation import run_nested_walk_forward
+    frame = validate_ohlcv(frame)
+    features = build_features(frame)
+    labels = make_labels(frame, horizon=horizon)
+    dataset = features.join(labels.rename("label")).dropna()
+    if len(dataset) < min_train + validation_size + test_size + 2 * horizon:
+        raise ValueError("Insufficient completed data for nested walk-forward training")
+    def fit_baseline(train_x, train_y, eval_x):
+        return BaselineModel().fit(train_x, train_y).predict(eval_x)
+    def fit_majority(train_x, train_y, eval_x):
+        return DummyClassifier(strategy="most_frequent").fit(train_x, train_y).predict(eval_x)
+    report = run_nested_walk_forward(
+        dataset, FEATURE_COLUMNS, "label",
+        {"hist_gradient_boosting": fit_baseline, "majority_class": fit_majority},
+        min_train=min_train, validation_size=validation_size,
+        test_size=test_size, step_size=step_size, purge_bars=horizon)
+    report.update({"rows": len(dataset), "horizon": horizon, "training_performed": True,
+                   "model_note": "HistGradientBoostingClassifier is fitted from scratch within each fold; majority-class is a naive comparator."})
+    return report
+
+
+def run_multi_symbol_experiment(frames: dict[str, pd.DataFrame], horizon: int = 6,
+                                min_train: int = 500, validation_size: int = 100,
+                                test_size: int = 100, step_size: int = 100) -> dict:
+    """Run independent nested experiments per symbol; no cross-market leakage."""
+    if not frames:
+        raise ValueError("At least one symbol dataset is required")
+    reports = {}
+    for symbol, frame in sorted(frames.items()):
+        reports[symbol] = run_nested_experiment(
+            frame, horizon, min_train, validation_size, test_size, step_size)
+    return {"symbol_count": len(reports), "symbols": reports,
+            "warning": "Each market is evaluated independently. These results are not a portfolio backtest."}
+
+
 def _timeframe_seconds(timeframe: str) -> float:
     """Parse common fixed-duration CCXT timeframes for annualized metrics."""
     try:
