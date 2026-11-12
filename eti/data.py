@@ -94,9 +94,13 @@ def fetch_ohlcv(
         if next_cursor <= cursor:
             break
         cursor = next_cursor
-        if len(batch) < requested:
-            break
-        time.sleep(pause_seconds)
+        # Some exchanges silently cap page size below the requested limit.
+        # A short non-empty page is not necessarily the end of available history:
+        # continue from its final timestamp until the API returns an empty page
+        # or stops advancing. This is essential for collecting enough history
+        # for nested walk-forward folds.
+        if len(rows) < limit:
+            time.sleep(pause_seconds)
     if not rows:
         raise RuntimeError(f"No OHLCV data returned for {exchange_id} {symbol} {timeframe}")
     frame = pd.DataFrame(rows, columns=OHLCV_COLUMNS)
