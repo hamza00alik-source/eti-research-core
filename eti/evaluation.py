@@ -94,6 +94,7 @@ def run_walk_forward(
     return {"fold_count": len(results), "folds": results,
             "mean_test_accuracy": float(np.mean([r["test"]["accuracy"] for r in results])),
             "mean_test_balanced_accuracy": float(np.mean([r["test"]["balanced_accuracy"] for r in results])),
+            "test_balanced_accuracy_ci": bootstrap_fold_confidence_interval([r["test"]["balanced_accuracy"] for r in results]),
             "warning": "Research evaluation only. Test folds are reported, never used for candidate selection; results do not establish future profitability."}
 
 
@@ -148,6 +149,7 @@ def run_nested_walk_forward(dataset: pd.DataFrame, feature_columns: list[str],
     scores = [r["test_balanced_accuracy"] for r in results]
     return {"fold_count": len(results), "folds": results,
             "mean_test_balanced_accuracy": float(np.mean(scores)),
+            "test_balanced_accuracy_ci": bootstrap_fold_confidence_interval(scores),
             "warning": "Nested research evaluation; each outer test fold is excluded from candidate selection. Not evidence of future profitability."}
 
 
