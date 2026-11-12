@@ -23,6 +23,11 @@
 - [x] Nested candidate selection using validation-only scores and untouched outer test folds
 - [x] Multi-symbol nested research pipeline for supported crypto spot feeds
 - [x] Descriptive bootstrap confidence intervals across fold-level metrics
+- [x] Untouched outer-test predictions retained for trading diagnostics
+- [x] Per-class precision/recall/F1 and confusion-matrix reporting
+- [x] Cost-aware long-only spot simulation and separate hypothetical long/short results
+- [x] Net return, drawdown, Sharpe/Sortino, exposure, turnover, trade count, win rate and profit factor
+- [x] Same-window buy-and-hold and no-trade baselines
 - [ ] Market-regime stratification, experiment registry and stronger dependence-aware statistical inference
 
 ## v0.4 — specialist intelligence

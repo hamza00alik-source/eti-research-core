@@ -23,7 +23,7 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 | Risk | Independent trade risk gate, directional stops, leverage, drawdown and exposure checks |
 | Portfolio | Gross, single-asset, correlated-group and position-count limits; now mandatory in combined decision gate |
 | Backtesting | Bar-based simulator with strict index/input validation, fees, slippage, optional funding cost and equity accounting |
-| Evaluation | Purged walk-forward, nested candidate selection on validation windows, untouched outer test reporting, multi-market runner and descriptive fold bootstrap intervals |
+| Evaluation | Purged nested walk-forward, validation-only candidate selection, untouched test predictions, classification diagnostics, cost-aware spot and hypothetical long/short simulation, drawdown/Sharpe/Sortino/trade statistics, buy-and-hold and no-trade baselines |
 | Decision | Probability-to-action conversion followed by independent trade-risk AND portfolio approval |
 | API | Research FastAPI endpoints for risk, portfolio, combined decision and provider capability status; no order route |
 | UI | Responsive PWA dashboard with combined decision gate simulator and provider capability display |
@@ -53,14 +53,14 @@ The earlier single-symbol chronological holdout mode remains available:
 python -m eti.pipeline --exchange binance --symbol BTC/USDT --timeframe 1h --limit 3000
 ```
 
-There is no API endpoint to start training or place live orders.
+There is no API endpoint to start training or place live orders. Nested reports include out-of-sample trading-performance diagnostics; default illustrative costs are 6 bps fee and 2 bps slippage per unit turnover, with zero funding cost unless explicitly changed in code. These are not exchange fee quotes. Spot metrics are long-only; the separate long/short simulation is hypothetical and omits borrow, margin and liquidation mechanics.
 
 ## Provider and device scope
 
 - Binance/MEXC public connectivity is crypto spot only. Other labelled asset classes can currently be evaluated from validated local CSV OHLCV files; no live FX, equity, index or commodity feed is claimed.
 - `eti/device_benchmark.py` measures inference latency and Python-traced allocations for an already-fitted model. Run it on the actual Android target; it is not a full native Android RAM/battery benchmark.
 - `eti/model_benchmark.py` compares already-fitted models and does not train them.
-- Nested evaluation selects candidates on validation windows and reports untouched outer test folds. Fold bootstrap intervals are descriptive and do not establish statistical significance or future profitability.
+- Nested evaluation selects candidates on validation windows and reports untouched outer test folds. Each outer test fold now includes classification metrics (per-class precision/recall/F1 and confusion matrix) plus cost-aware strategy metrics (net return, drawdown, annualized Sharpe/Sortino, exposure, turnover, trade count, win rate and profit factor). The spot result is long-only; a separate hypothetical long/short result is shown for research only. Buy-and-hold and no-trade baselines use the same test window and cost assumptions. Fold bootstrap intervals are descriptive and do not establish statistical significance or future profitability.
 
 ## Important limitations
 

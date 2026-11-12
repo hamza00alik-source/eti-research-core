@@ -145,6 +145,8 @@ def run_nested_walk_forward(dataset: pd.DataFrame, feature_columns: list[str],
                         "validation_scores": candidate_scores,
                         "test_balanced_accuracy": float(balanced_accuracy_score(test_y, test_pred)),
                         "test_accuracy": float(accuracy_score(test_y, test_pred)),
+                        "test_predictions": test_pred.astype(int).tolist(),
+                        "test_actual": test_y.astype(int).tolist(),
                         "boundaries": asdict(fold)})
     scores = [r["test_balanced_accuracy"] for r in results]
     return {"fold_count": len(results), "folds": results,
