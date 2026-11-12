@@ -27,6 +27,9 @@ def build_features(frame: pd.DataFrame) -> pd.DataFrame:
     loss = (-delta.clip(upper=0)).rolling(14).mean()
     rs = gain / loss.replace(0, np.nan)
     rsi = 100 - 100 / (1 + rs)
+    rsi = rsi.mask((loss == 0) & (gain > 0), 100.0)
+    rsi = rsi.mask((gain == 0) & (loss > 0), 0.0)
+    rsi = rsi.mask((gain == 0) & (loss == 0), 50.0)
     prev_close = close.shift(1)
     true_range = pd.concat([(high-low), (high-prev_close).abs(), (low-prev_close).abs()], axis=1).max(axis=1)
     atr = true_range.rolling(14).mean()
@@ -56,7 +59,7 @@ def make_labels(frame: pd.DataFrame, horizon: int = 6, threshold: float = 0.5) -
     vol = np.log(close).diff().rolling(20).std()
     forward_return = close.shift(-horizon) / close - 1
     barrier = threshold * vol * np.sqrt(horizon)
-    labels = pd.Series(1, index=frame.index, dtype="int64")
+    labels = pd.Series(1, index=frame.index, dtype="float64")
     labels.loc[forward_return > barrier] = 2
     labels.loc[forward_return < -barrier] = 0
     labels.loc[forward_return.isna() | barrier.isna()] = np.nan
