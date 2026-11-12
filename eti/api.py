@@ -17,7 +17,7 @@ risk_engine = RiskEngine()
 
 class PortfolioPayload(BaseModel):
     equity: float = Field(gt=0)
-    current_positions: dict[str, float] = {}
+    current_positions: dict[str, float] = Field(default_factory=dict)
     proposed_symbol: str
     proposed_notional: float = Field(gt=0)
     correlated_group_exposure: float = Field(default=0, ge=0)
