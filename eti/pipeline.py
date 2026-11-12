@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, balanced_accuracy_score
 
-from .data import fetch_ohlcv, validate_ohlcv
+from .data import drop_incomplete_candles, fetch_ohlcv, validate_ohlcv
 from .features import FEATURE_COLUMNS, build_features, make_labels
 from .model import BaselineModel
 from .simulator import simulate_long_flat
@@ -92,7 +92,12 @@ def main():
     parser.add_argument("--csv", type=Path, help="Use a local OHLCV CSV instead of downloading")
     parser.add_argument("--output", type=Path, default=Path("artifacts/baseline_metrics.json"))
     args = parser.parse_args()
-    frame = pd.read_csv(args.csv) if args.csv else fetch_ohlcv(args.exchange, args.symbol, args.timeframe, args.limit)
+    if args.csv:
+        frame = pd.read_csv(args.csv)
+        now_ms = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
+        frame = drop_incomplete_candles(frame, int(_timeframe_seconds(args.timeframe) * 1000), now_ms)
+    else:
+        frame = fetch_ohlcv(args.exchange, args.symbol, args.timeframe, args.limit)
     metrics = run_experiment(frame, timeframe=args.timeframe)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
