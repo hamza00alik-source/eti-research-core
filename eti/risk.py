@@ -41,9 +41,7 @@ class RiskEngine:
         )
         if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
                for v in numeric):
-            reasons.append("non_finite_or_invalid_numeric_input")
-        if any(not math.isfinite(v) for v in numeric if isinstance(v, (int, float)) and not isinstance(v, bool)):
-            return RiskDecision(False, 0.0, 0.0, tuple(reasons))
+            return RiskDecision(False, 0.0, 0.0, ("non_finite_or_invalid_numeric_input",))
         if request.equity <= 0 or request.entry_price <= 0 or request.requested_notional <= 0:
             reasons.append("invalid_equity_price_or_notional")
         if request.gross_exposure < 0:
