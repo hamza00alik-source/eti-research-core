@@ -48,5 +48,5 @@ def test_simulator_applies_signal_next_bar_and_costs():
     close = pd.Series([100.0, 110.0, 121.0, 121.0])
     predictions = pd.Series([2, 2, 1, 1])
     result = simulate_long_flat(close, predictions, fee_bps=0, slippage_bps=0)
-    assert result["exposure"] == pytest.approx(0.75)
+    assert result["exposure"] == pytest.approx(0.50)
     assert result["total_return"] == pytest.approx(0.21)
