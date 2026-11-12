@@ -65,3 +65,10 @@ def test_decision_requires_risk_gate():
 def test_strategy_validates_parameters():
     with pytest.raises(ValueError):
         moving_average_signal(pd.Series([1,2,3]), fast=10, slow=5)
+
+
+def test_risk_gate_checks_stop_direction():
+    long_bad = RiskEngine().assess(RiskRequest(1000, 100, 101, 100))
+    short_bad = RiskEngine().assess(RiskRequest(1000, 100, 99, 100, side="short"))
+    assert not long_bad.approved and "long_stop_must_be_below_entry" in long_bad.reasons
+    assert not short_bad.approved and "short_stop_must_be_above_entry" in short_bad.reasons
