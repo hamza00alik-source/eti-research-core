@@ -55,7 +55,9 @@ python -m eti.pipeline --exchange binance --symbol BTC/USDT --timeframe 1h --lim
 
 There is no API endpoint to start training or place live orders.
 
-## Provider and device scope\n\n- Binance/MEXC public connectivity is crypto spot only. Other labelled asset classes can currently be evaluated from validated local CSV OHLCV files; no live FX, equity, index or commodity feed is claimed.\n- `eti/device_benchmark.py` measures inference latency and Python-traced allocations for an already-fitted model. Run it on the actual Android target; it is not a full native Android RAM/battery benchmark.\n- `eti/model_benchmark.py` compares already-fitted models and does not train them.\n- Nested evaluation selects candidates on validation windows and reports untouched outer test folds. Fold bootstrap intervals are descriptive and do not establish statistical significance or future profitability.\n\n## Important limitations
+## Provider and device scope
+
+- Binance/MEXC public connectivity is crypto spot only. Other labelled asset classes can currently be evaluated from validated local CSV OHLCV files; no live FX, equity, index or commodity feed is claimed.\n- `eti/device_benchmark.py` measures inference latency and Python-traced allocations for an already-fitted model. Run it on the actual Android target; it is not a full native Android RAM/battery benchmark.\n- `eti/model_benchmark.py` compares already-fitted models and does not train them.\n- Nested evaluation selects candidates on validation windows and reports untouched outer test folds. Fold bootstrap intervals are descriptive and do not establish statistical significance or future profitability.\n\n## Important limitations
 
 1. Venue discovery currently covers crypto spot on Binance and MEXC only. Forex, equities, commodities, derivatives and additional brokers require separately validated adapters and instrument-specific metadata.
 2. The baseline classifier is tabular ML, not a deep neural network or chart-vision model.
