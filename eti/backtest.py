@@ -16,15 +16,19 @@ def backtest_positions(
     initial_equity: float = 1.0,
 ) -> dict:
     costs_input = (fee_bps, slippage_bps, funding_bps_per_bar, initial_equity)
-    if any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in costs_input):
+    if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in costs_input):
         raise ValueError("Costs and initial equity must be finite numbers")
     if min(fee_bps, slippage_bps, funding_bps_per_bar) < 0 or initial_equity <= 0:
         raise ValueError("Costs must be non-negative and initial equity positive")
+    if not isinstance(allow_short, bool):
+        raise ValueError("allow_short must be a boolean")
     if not close.index.equals(signals.index):
         raise ValueError("Close and signal indexes must match exactly")
     data = pd.concat([close.rename("close"), signals.rename("signal")], axis=1)
     if data.isna().any().any() or len(data) < 2:
         raise ValueError("Need at least two aligned, non-missing close prices and signals")
+    if not data.index.is_unique or not data.index.is_monotonic_increasing:
+        raise ValueError("Backtest index must be unique and chronological")
     data = data.astype(float)
     if not np.isfinite(data.to_numpy()).all() or (data.close <= 0).any():
         raise ValueError("Prices and signals must be finite; prices must be positive")
