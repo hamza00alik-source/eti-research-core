@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
+from sklearn.metrics import balanced_accuracy_score, confusion_matrix, precision_recall_fscore_support
 
 from .backtest import backtest_positions
 
@@ -47,7 +47,7 @@ def _trade_statistics(position: pd.Series, bar_returns: pd.Series) -> dict[str, 
         "losing_trades": len(losses),
         "win_rate": float(len(wins) / len(trades)) if trades else 0.0,
         "average_trade_return": float(np.mean(trades)) if trades else 0.0,
-        "profit_factor": float(gross_profit / gross_loss) if gross_loss > 0 else (float("inf") if gross_profit > 0 else 0.0),
+        "profit_factor": float(gross_profit / gross_loss) if gross_loss > 0 else (None if gross_profit > 0 else 0.0),
     }
 
 
@@ -146,7 +146,7 @@ def evaluate_predictions(
     return {
         "classification": {
             "accuracy": float(np.mean(y_true == y_pred)),
-            "balanced_accuracy": float(np.mean(recall)),
+            "balanced_accuracy": float(balanced_accuracy_score(y_true.astype(int), y_pred.astype(int))),
             "macro_precision": float(np.mean(precision)),
             "macro_recall": float(np.mean(recall)),
             "macro_f1": float(np.mean(f1)),
