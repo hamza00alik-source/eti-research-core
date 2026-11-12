@@ -13,6 +13,7 @@ from .data import drop_incomplete_candles, fetch_ohlcv, validate_ohlcv
 from .features import FEATURE_COLUMNS, build_features, make_labels
 from .model import BaselineModel
 from .simulator import simulate_long_flat
+from .performance import evaluate_predictions
 
 
 def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h") -> dict:
@@ -69,7 +70,8 @@ def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h")
 
 def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
                           min_train: int = 500, validation_size: int = 100,
-                          test_size: int = 100, step_size: int = 100) -> dict:
+                          test_size: int = 100, step_size: int = 100,
+                          timeframe: str = "1h") -> dict:
     """Train-from-scratch candidate models inside purged nested walk-forward folds."""
     from sklearn.dummy import DummyClassifier
     from .evaluation import run_nested_walk_forward
@@ -77,6 +79,7 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
     features = build_features(frame)
     labels = make_labels(frame, horizon=horizon)
     dataset = features.join(labels.rename("label")).dropna()
+    dataset["close"] = frame.loc[dataset.index, "close"].astype(float)
     if len(dataset) < min_train + validation_size + test_size + 2 * horizon:
         raise ValueError("Insufficient completed data for nested walk-forward training")
     def fit_baseline(train_x, train_y, eval_x):
@@ -88,21 +91,63 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
         {"hist_gradient_boosting": fit_baseline, "majority_class": fit_majority},
         min_train=min_train, validation_size=validation_size,
         test_size=test_size, step_size=step_size, purge_bars=horizon)
-    report.update({"rows": len(dataset), "horizon": horizon, "training_performed": True,
+    bars_per_year = 365.25 * 24 * 60 * 60 / _timeframe_seconds(timeframe)
+    performance_folds = []
+    for fold in report["folds"]:
+        start, end = fold["boundaries"]["test_start"], fold["boundaries"]["test_end"]
+        close_test = dataset["close"].iloc[start:end].reset_index(drop=True)
+        actual_test = pd.Series(fold["test_actual"], dtype=int)
+        prediction_test = pd.Series(fold["test_predictions"], dtype=int)
+        performance_folds.append({
+            "fold": fold["fold"],
+            "selected_candidate": fold["selected_candidate"],
+            **evaluate_predictions(
+                close_test, actual_test, prediction_test,
+                fee_bps=6.0, slippage_bps=2.0, funding_bps_per_bar=0.0,
+                allow_short=True, bars_per_year=bars_per_year,
+            ),
+        })
+    def mean_metric(strategy_name: str, metric_name: str) -> float:
+        values = [item["trading"][strategy_name][metric_name] for item in performance_folds]
+        return float(np.mean(values))
+    model_returns = [item["trading"]["model"]["total_return"] for item in performance_folds]
+    buy_hold_returns = [item["trading"]["buy_and_hold"]["total_return"] for item in performance_folds]
+    no_trade_returns = [item["trading"]["no_trade"]["total_return"] for item in performance_folds]
+    report["trading_performance"] = {
+        "folds": performance_folds,
+        "summary": {
+            "mean_net_return": mean_metric("model", "total_return"),
+            "mean_max_drawdown": mean_metric("model", "max_drawdown"),
+            "mean_sharpe_annualized": mean_metric("model", "sharpe_annualized"),
+            "mean_sortino_annualized": mean_metric("model", "sortino_annualized"),
+            "mean_trade_count": mean_metric("model", "trade_count"),
+            "mean_win_rate": mean_metric("model", "win_rate"),
+            "mean_buy_and_hold_return": float(np.mean(buy_hold_returns)),
+            "mean_no_trade_return": float(np.mean(no_trade_returns)),
+            "folds_beating_buy_and_hold": int(sum(a > b for a, b in zip(model_returns, buy_hold_returns))),
+            "folds_beating_no_trade": int(sum(a > b for a, b in zip(model_returns, no_trade_returns))),
+            "fold_count": len(performance_folds),
+        },
+        "warning": "Fold metrics are averaged descriptively; overlapping test windows are dependent. Costs are illustrative assumptions, not exchange-specific quotes.",
+    }
+    report.update({"rows": len(dataset), "horizon": horizon, "timeframe": timeframe,
+                   "training_performed": True,
                    "model_note": "HistGradientBoostingClassifier is fitted from scratch within each fold; majority-class is a naive comparator."})
     return report
 
 
 def run_multi_symbol_experiment(frames: dict[str, pd.DataFrame], horizon: int = 6,
                                 min_train: int = 500, validation_size: int = 100,
-                                test_size: int = 100, step_size: int = 100) -> dict:
+                                test_size: int = 100, step_size: int = 100,
+                                timeframe: str = "1h") -> dict:
     """Run independent nested experiments per symbol; no cross-market leakage."""
     if not frames:
         raise ValueError("At least one symbol dataset is required")
     reports = {}
     for symbol, frame in sorted(frames.items()):
         reports[symbol] = run_nested_experiment(
-            frame, horizon, min_train, validation_size, test_size, step_size)
+            frame, horizon, min_train, validation_size, test_size, step_size,
+            timeframe=timeframe)
     return {"symbol_count": len(reports), "symbols": reports,
             "warning": "Each market is evaluated independently. These results are not a portfolio backtest."}
 
@@ -141,14 +186,14 @@ def main():
         frame = pd.read_csv(args.csv)
         now_ms = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
         frame = drop_incomplete_candles(frame, int(_timeframe_seconds(args.timeframe) * 1000), now_ms)
-        metrics = run_nested_experiment(frame) if args.evaluation == "nested" else run_experiment(frame, timeframe=args.timeframe)
+        metrics = run_nested_experiment(frame, timeframe=args.timeframe) if args.evaluation == "nested" else run_experiment(frame, timeframe=args.timeframe)
     elif args.symbols:
         symbols = [item.strip() for item in args.symbols.split(",") if item.strip()]
         if not symbols:
             parser.error("--symbols must contain at least one symbol")
         frames = {symbol: fetch_ohlcv(args.exchange, symbol, args.timeframe, args.limit)
                   for symbol in symbols}
-        metrics = run_multi_symbol_experiment(frames) if args.evaluation == "nested" else {
+        metrics = run_multi_symbol_experiment(frames, timeframe=args.timeframe) if args.evaluation == "nested" else {
             symbol: run_experiment(data, timeframe=args.timeframe)
             for symbol, data in frames.items()}
     else:
