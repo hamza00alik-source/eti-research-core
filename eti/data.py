@@ -70,6 +70,8 @@ def fetch_ohlcv(
     exchange = exchange_class({"enableRateLimit": True})
     if not exchange.has.get("fetchOHLCV"):
         raise ValueError(f"{exchange_id} does not support fetchOHLCV")
+    if timeframe.endswith("M"):
+        raise ValueError("Calendar-month candles are not yet supported by the fixed-duration completion filter")
     timeframe_seconds = exchange.parse_timeframe(timeframe)
     if timeframe_seconds <= 0:
         raise ValueError(f"Invalid timeframe: {timeframe}")
