@@ -14,7 +14,8 @@ def test_performance_report_scores_predictions_and_cost_aware_baselines():
     close = _series([100, 102, 104, 103, 101, 99, 100, 103])
     labels = pd.Series([2, 2, 2, 1, 0, 0, 2, 2])
     predictions = labels.copy()
-    report = evaluate_predictions(close, labels, predictions, fee_bps=6, slippage_bps=2)
+    report = evaluate_predictions(close, labels, predictions, fee_bps=6, slippage_bps=2,
+                                     allow_short=False)
 
     assert report["classification"]["accuracy"] == 1.0
     assert report["classification"]["balanced_accuracy"] == 1.0
@@ -26,6 +27,7 @@ def test_performance_report_scores_predictions_and_cost_aware_baselines():
     assert report["trading"]["model"]["trade_count"] >= 1
     assert report["trading"]["model"]["short_exposure"] == 0.0
     assert report["trading"]["model_long_short"]["bars"] == len(close)
+    assert report["trading"]["model_long_short"]["short_exposure"] > 0
     assert report["trading"]["model"]["trading_cost_total"] > 0
     assert report["trading"]["no_trade"]["total_return"] == 0.0
     assert report["trading"]["no_trade"]["max_drawdown"] == 0.0
