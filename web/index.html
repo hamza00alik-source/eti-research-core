@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101827"><link rel="manifest" href="/manifest.webmanifest">
+<title>ETI Research Intelligence</title><link rel="stylesheet" href="/style.css">
+</head>
+<body><main>
+<header><div class="eyebrow">ETI · RESEARCH CORE</div><h1>Evolutionary Trading Intelligence</h1><p>Research dashboard · No live trading</p></header>
+<section class="grid">
+<article><h2>System status</h2><div id="health" class="value">Checking…</div><p>Backend health and mode</p></article>
+<article><h2>Execution</h2><div id="execution" class="value">Disabled</div><p>Live order placement is intentionally unavailable</p></article>
+<article><h2>Supported universe</h2><div id="markets" class="value">Crypto spot</div><p>Binance · MEXC discovery adapters</p></article>
+</section>
+<section class="panel"><h2>Risk gate simulator</h2>
+<form id="risk-form">
+<label>Account equity (USD)<input name="equity" type="number" value="1000" min="1" step="1"></label>
+<label>Entry price<input name="entry_price" type="number" value="100" min="0.000001" step="any"></label>
+<label>Stop price<input name="stop_price" type="number" value="98" min="0.000001" step="any"></label>
+<label>Requested notional<input name="requested_notional" type="number" value="100" min="1" step="any"></label>
+<button>Assess risk</button></form><pre id="risk-result">Submit values to test the independent risk gate.</pre></section>
+<footer>ETI v0.2 · Research and paper simulation only · Not financial advice</footer>
+</main><script src="/app.js"></script></body></html>
