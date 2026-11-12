@@ -4,6 +4,7 @@ import pytest
 
 from eti.backtest import backtest_positions
 from eti.decision import build_research_decision
+from eti.portfolio import PortfolioLimits
 from eti.device_benchmark import benchmark_inference
 from eti.evaluation import run_walk_forward
 from eti.portfolio import PortfolioLimits
@@ -15,7 +16,8 @@ def test_decision_requires_portfolio_gate_after_trade_risk_gate():
     from eti.risk import RiskRequest
     result = build_research_decision(
         probabilities, RiskRequest(1000, 100, 98, 100),
-        current_positions={"ETH/USDT": 200}, proposed_symbol="BTC/USDT")
+        current_positions={"ETH/USDT": 200}, proposed_symbol="BTC/USDT",
+        portfolio_limits=PortfolioLimits(max_gross_exposure_fraction=0.20))
     assert result["action"] == "no_trade"
     assert result["reason"] == "portfolio_rejected"
     assert result["execution"] == "disabled"
