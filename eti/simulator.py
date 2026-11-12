@@ -29,7 +29,6 @@ def simulate_long_flat(
     strategy_returns = position * asset_returns - turnover * cost_rate
     equity = (1.0 + strategy_returns).cumprod()
     drawdown = equity / equity.cummax() - 1.0
-    years = max(len(strategy_returns) / (365.25 * 24), 1 / (365.25 * 24))
     total_return = float(equity.iloc[-1] - 1.0)
     return {
         "bars": int(len(aligned)),
