@@ -1,5 +1,7 @@
 # Run ETI in Kaggle
 
+> **Notebook sync warning:** `notebooks/ETI_v0_1_Training.ipynb` in this repository is the canonical runnable notebook. If you previously linked a default/starter Kaggle notebook to GitHub, do not push that stale notebook to this repository. Open the repository version in Kaggle or create a fresh notebook and follow the steps below. Use Kaggle-to-GitHub sync only after confirming the notebook contains the ETI cells.
+
 1. Create a new Kaggle Notebook (Python).
 2. Enable Internet in notebook settings if you want to fetch public exchange candles.
 3. In a notebook cell, run:
