@@ -16,7 +16,17 @@ def validate_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Missing OHLCV columns: {sorted(missing)}")
     out = frame[OHLCV_COLUMNS].copy()
-    out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
+    # CCXT returns Unix epoch timestamps in milliseconds. Passing those
+    # integers to pandas without a unit interprets them as nanoseconds,
+    # silently moving candles to 1970 and causing valid history to be dropped.
+    if pd.api.types.is_numeric_dtype(out["timestamp"]):
+        out["timestamp"] = pd.to_datetime(
+            out["timestamp"], unit="ms", utc=True, errors="coerce"
+        )
+    else:
+        out["timestamp"] = pd.to_datetime(
+            out["timestamp"], utc=True, errors="coerce"
+        )
     for col in OHLCV_COLUMNS[1:]:
         out[col] = pd.to_numeric(out[col], errors="coerce")
     out = out.replace([np.inf, -np.inf], np.nan).dropna()
