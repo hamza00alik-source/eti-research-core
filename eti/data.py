@@ -41,7 +41,10 @@ def drop_incomplete_candles(
     if timeframe_ms <= 0:
         raise ValueError("timeframe_ms must be positive")
     clean = validate_ohlcv(frame)
-    candle_open_ms = clean["timestamp"].astype("int64") // 1_000_000
+    # Pandas 3 may retain microsecond-resolution timestamps while older
+    # versions commonly use nanoseconds. Normalize explicitly before
+    # comparing with the millisecond timestamps used by CCXT.
+    candle_open_ms = clean["timestamp"].dt.as_unit("ms").astype("int64")
     completed = candle_open_ms + timeframe_ms <= int(now_ms)
     clean = clean.loc[completed].reset_index(drop=True)
     if clean.empty:

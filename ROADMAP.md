@@ -1,36 +1,52 @@
 # ETI roadmap
 
-## v0.1 — research baseline (current)
-- [x] Public OHLCV fetch for Binance and MEXC through CCXT
-- [x] OHLCV validation and causal technical features
-- [x] Volatility-scaled three-class forward-return labels
-- [x] Chronological train/validation/test workflow
-- [x] Small baseline classifier and long/flat cost-aware paper simulation
-- [x] Unit smoke tests and GitHub Actions workflow
-- [x] Kaggle run instructions
+## v0.2 — architecture foundation
+- [x] Modular configuration and public market-data provider interface
+- [x] Binance/MEXC public crypto spot discovery
+- [x] OHLCV ingestion, validation and closed-candle filtering
+- [x] Causal feature and label pipeline
+- [x] Baseline classifier (training remains opt-in)
+- [x] Transparent MA, momentum and buy-and-hold strategies
+- [x] Bar-based backtest with explicit costs and optional funding-cost input
+- [x] Independent deterministic trade risk gate
+- [x] Portfolio gross/single-asset/correlation/position-count checks
+- [x] Risk-gated research decision orchestration
+- [x] Candidate strategy search and purged walk-forward split utility
+- [x] Read-only FastAPI service and responsive PWA shell
+- [x] Expanded automated tests and CI workflow
+- [ ] Confirm latest CI run is green and merge the reviewed pull request
 
-## v0.2 — evaluation integrity
-- [ ] Purged/embargoed walk-forward validation
-- [ ] Multi-symbol and multiple market-regime evaluation
-- [ ] Funding, spread, fees, and liquidity-aware cost model
-- [ ] Better fill assumptions and explicit position sizing
-- [ ] Experiment configuration and reproducible artifact registry
+## v0.3 — evaluation integrity
+- [x] Executable purged expanding-window runner with caller-supplied fit/predict callback
+- [x] Test folds reported separately; test labels are never supplied to the validation prediction call
+- [x] Identical-sample strategy baselines and hardened cost-aware backtest
+- [x] Nested candidate selection using validation-only scores and untouched outer test folds
+- [x] Multi-symbol nested research pipeline for supported crypto spot feeds
+- [x] Descriptive bootstrap confidence intervals across fold-level metrics
+- [ ] Market-regime stratification, experiment registry and stronger dependence-aware statistical inference
 
-## v0.3 — specialist model research
-- [ ] Train-from-scratch MLP and 1D-CNN baselines
-- [ ] GRU/compact attention experiments only if they beat simpler baselines out of sample
-- [ ] Regime and volatility specialist models
-- [ ] Calibration, uncertainty, and no-trade thresholds
+## v0.4 — specialist intelligence
+- Train-from-scratch specialist numerical models after the evaluation harness is complete
+- Regime, trend, mean-reversion, volatility and risk specialists
+- Probability calibration and uncertainty estimation
+- Controlled evolutionary candidate generation with immutable risk constraints
 
-## v0.4 — evolutionary research
-- [ ] Feature subset and feature-generation search
-- [ ] Strategy parameter evolution and multi-objective selection
-- [ ] Diversity preservation, robust out-of-sample selection, and experiment lineage
+## v0.5 — portfolio and venue expansion
+- [x] Extensible asset-class provider protocol, registry and CSV history adapter for crypto/forex/equities/commodities/indices
+- [ ] Live forex, equities, commodities and derivatives provider adapters
+- Venue-specific contract metadata, funding, margin and liquidation simulation
+- Portfolio correlation estimation, concentration and dynamic exposure controls
+- Broker/exchange eligibility and capability matrix
 
-## Later — mobile and visual intelligence
-- [ ] Benchmark quantized local inference on target Android hardware
-- [ ] Export eligible models to ONNX or LiteRT
-- [ ] Separate chart-image dataset, labeling, and vision model
-- [ ] Dashboard/PWA and mobile research interface
+## v0.6 — mobile and visual intelligence
+- [x] Inference-only latency and Python-allocation benchmark utilities for execution on target devices
+- [ ] Native Android client and device inference benchmark on target hardware
+- Export only supported models to mobile runtime after latency/RAM/battery tests
+- Separate chart-image model research; numerical validation remains authoritative
+- Complete PWA install/offline behavior and accessibility
 
-Live execution is intentionally not part of these milestones. Any future execution layer must be separate from model training and protected by independent, non-learned risk controls.
+## v1.0 — guarded autonomous paper research
+- Autonomous market/instrument/strategy selection in paper mode
+- Monitoring, audit log, kill switch and reproducible decision trace
+- Independent risk approval for every simulated decision
+- Live execution remains a separate explicitly reviewed milestone and disabled by default

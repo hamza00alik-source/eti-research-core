@@ -66,6 +66,47 @@ def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h")
     }
 
 
+
+def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
+                          min_train: int = 500, validation_size: int = 100,
+                          test_size: int = 100, step_size: int = 100) -> dict:
+    """Train-from-scratch candidate models inside purged nested walk-forward folds."""
+    from sklearn.dummy import DummyClassifier
+    from .evaluation import run_nested_walk_forward
+    frame = validate_ohlcv(frame)
+    features = build_features(frame)
+    labels = make_labels(frame, horizon=horizon)
+    dataset = features.join(labels.rename("label")).dropna()
+    if len(dataset) < min_train + validation_size + test_size + 2 * horizon:
+        raise ValueError("Insufficient completed data for nested walk-forward training")
+    def fit_baseline(train_x, train_y, eval_x):
+        return BaselineModel().fit(train_x, train_y).predict(eval_x)
+    def fit_majority(train_x, train_y, eval_x):
+        return DummyClassifier(strategy="most_frequent").fit(train_x, train_y).predict(eval_x)
+    report = run_nested_walk_forward(
+        dataset, FEATURE_COLUMNS, "label",
+        {"hist_gradient_boosting": fit_baseline, "majority_class": fit_majority},
+        min_train=min_train, validation_size=validation_size,
+        test_size=test_size, step_size=step_size, purge_bars=horizon)
+    report.update({"rows": len(dataset), "horizon": horizon, "training_performed": True,
+                   "model_note": "HistGradientBoostingClassifier is fitted from scratch within each fold; majority-class is a naive comparator."})
+    return report
+
+
+def run_multi_symbol_experiment(frames: dict[str, pd.DataFrame], horizon: int = 6,
+                                min_train: int = 500, validation_size: int = 100,
+                                test_size: int = 100, step_size: int = 100) -> dict:
+    """Run independent nested experiments per symbol; no cross-market leakage."""
+    if not frames:
+        raise ValueError("At least one symbol dataset is required")
+    reports = {}
+    for symbol, frame in sorted(frames.items()):
+        reports[symbol] = run_nested_experiment(
+            frame, horizon, min_train, validation_size, test_size, step_size)
+    return {"symbol_count": len(reports), "symbols": reports,
+            "warning": "Each market is evaluated independently. These results are not a portfolio backtest."}
+
+
 def _timeframe_seconds(timeframe: str) -> float:
     """Parse common fixed-duration CCXT timeframes for annualized metrics."""
     try:
@@ -86,19 +127,33 @@ def _timeframe_seconds(timeframe: str) -> float:
 def main():
     parser = argparse.ArgumentParser(description="Run ETI research-only baseline")
     parser.add_argument("--exchange", default="binance", choices=["binance", "mexc"])
-    parser.add_argument("--symbol", default="BTC/USDT")
+    parser.add_argument("--symbol", default="BTC/USDT", help="Single symbol")
+    parser.add_argument("--symbols", help="Comma-separated symbols for independent nested evaluation")
+    parser.add_argument("--evaluation", choices=["holdout", "nested"], default="holdout", help="nested performs repeated from-scratch candidate fitting")
     parser.add_argument("--timeframe", default="1h")
     parser.add_argument("--limit", type=int, default=3000)
     parser.add_argument("--csv", type=Path, help="Use a local OHLCV CSV instead of downloading")
     parser.add_argument("--output", type=Path, default=Path("artifacts/baseline_metrics.json"))
     args = parser.parse_args()
+    if args.csv and args.symbols:
+        parser.error("--csv cannot be combined with --symbols")
     if args.csv:
         frame = pd.read_csv(args.csv)
         now_ms = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
         frame = drop_incomplete_candles(frame, int(_timeframe_seconds(args.timeframe) * 1000), now_ms)
+        metrics = run_nested_experiment(frame) if args.evaluation == "nested" else run_experiment(frame, timeframe=args.timeframe)
+    elif args.symbols:
+        symbols = [item.strip() for item in args.symbols.split(",") if item.strip()]
+        if not symbols:
+            parser.error("--symbols must contain at least one symbol")
+        frames = {symbol: fetch_ohlcv(args.exchange, symbol, args.timeframe, args.limit)
+                  for symbol in symbols}
+        metrics = run_multi_symbol_experiment(frames) if args.evaluation == "nested" else {
+            symbol: run_experiment(data, timeframe=args.timeframe)
+            for symbol, data in frames.items()}
     else:
         frame = fetch_ohlcv(args.exchange, args.symbol, args.timeframe, args.limit)
-    metrics = run_experiment(frame, timeframe=args.timeframe)
+        metrics = run_nested_experiment(frame) if args.evaluation == "nested" else run_experiment(frame, timeframe=args.timeframe)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2))
