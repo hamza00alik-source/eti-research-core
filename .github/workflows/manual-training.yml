@@ -1,0 +1,77 @@
+name: ETI manual research training
+
+on:
+  workflow_dispatch:
+    inputs:
+      exchange:
+        description: Public crypto spot data venue
+        required: true
+        type: choice
+        options:
+          - binance
+          - mexc
+        default: binance
+      symbols:
+        description: Comma-separated spot symbols
+        required: true
+        type: string
+        default: BTC/USDT,ETH/USDT
+      timeframe:
+        description: Candle timeframe
+        required: true
+        type: choice
+        options:
+          - 15m
+          - 1h
+          - 4h
+          - 1d
+        default: 1h
+      limit:
+        description: Number of candles per symbol
+        required: true
+        type: number
+        default: 3000
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eti-manual-training-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  train-and-evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout ETI
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run nested from-scratch evaluation
+        env:
+          EXCHANGE: ${{ inputs.exchange }}
+          SYMBOLS: ${{ inputs.symbols }}
+          TIMEFRAME: ${{ inputs.timeframe }}
+          CANDLE_LIMIT: ${{ inputs.limit }}
+        run: |
+          python -m eti.pipeline \
+            --exchange "$EXCHANGE" \
+            --symbols "$SYMBOLS" \
+            --timeframe "$TIMEFRAME" \
+            --limit "$CANDLE_LIMIT" \
+            --evaluation nested \
+            --output artifacts/eti_nested_walk_forward.json
+      - name: Upload research report
+        uses: actions/upload-artifact@v4
+        with:
+          name: eti-nested-research-report
+          path: artifacts/eti_nested_walk_forward.json
+          if-no-files-found: error
+          retention-days: 30
