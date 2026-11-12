@@ -18,12 +18,12 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 | Market data | Public OHLCV for Binance/MEXC, completed-candle filtering, CSV input |
 | Market catalog | Public crypto spot market discovery and normalized instrument descriptors |
 | Quantitative | Causal technical features, MA and momentum baselines |
-| AI | From-scratch HistGradientBoosting baseline; no model trained by default |
+| AI | From-scratch HistGradientBoosting baseline; nested CLI evaluation compares it with a majority-class baseline; no model trained on startup or in CI |
 | Evolution | Constrained candidate search on caller-supplied validation data |
 | Risk | Independent trade risk gate, directional stops, leverage, drawdown and exposure checks |
 | Portfolio | Gross, single-asset, correlated-group and position-count limits; now mandatory in combined decision gate |
 | Backtesting | Bar-based simulator with strict index/input validation, fees, slippage, optional funding cost and equity accounting |
-| Evaluation | Executable purged expanding-window runner with validation/test reporting and caller-supplied fit/predict callback |
+| Evaluation | Purged walk-forward, nested candidate selection on validation windows, untouched outer test reporting, multi-market runner and descriptive fold bootstrap intervals |
 | Decision | Probability-to-action conversion followed by independent trade-risk AND portfolio approval |
 | API | Research FastAPI endpoints for risk, portfolio, combined decision and provider capability status; no order route |
 | UI | Responsive PWA dashboard with combined decision gate simulator and provider capability display |
@@ -41,7 +41,13 @@ uvicorn eti.api:app --host 0.0.0.0 --port 8000
 
 Open `http://localhost:8000`; health check is `/health`.
 
-Start baseline training only when the development/evaluation phase is complete and training is explicitly approved:
+Start nested from-scratch research evaluation only when you intentionally run the command (this fits models inside each fold):
+
+```bash
+python -m eti.pipeline --exchange binance --symbols BTC/USDT,ETH/USDT --timeframe 1h --limit 3000 --evaluation nested --output artifacts/eti_nested_walk_forward.json
+```
+
+The earlier single-symbol chronological holdout mode remains available:
 
 ```bash
 python -m eti.pipeline --exchange binance --symbol BTC/USDT --timeframe 1h --limit 3000
