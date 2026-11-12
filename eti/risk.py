@@ -53,6 +53,10 @@ class RiskEngine:
         stop_distance = abs(request.entry_price - request.stop_price) / request.entry_price if request.entry_price > 0 else 1
         if stop_distance <= 0 or stop_distance >= 1:
             reasons.append("invalid_stop_distance")
+        elif request.side == "long" and request.stop_price >= request.entry_price:
+            reasons.append("long_stop_must_be_below_entry")
+        elif request.side == "short" and request.stop_price <= request.entry_price:
+            reasons.append("short_stop_must_be_above_entry")
         if reasons:
             return RiskDecision(False, 0.0, 0.0, tuple(reasons))
         risk_budget = request.equity * c.max_risk_per_trade
