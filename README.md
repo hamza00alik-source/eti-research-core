@@ -1,46 +1,64 @@
-# ETI Research Core
+# ETI — Evolutionary Trading Intelligence
 
-**ETI (Evolutionary Trading Intelligence)** is an experimental, research-first trading intelligence project.
+ETI is a research-first quantitative and AI trading intelligence project. The current v0.2 architecture is designed for reproducible experiments, deterministic risk checks, transparent strategy comparisons, and a mobile-friendly research dashboard.
 
-## Current status
+## Safety status
 
-The repository is being built in stages. The first milestone is a reproducible, runnable research baseline for public crypto market data, causal features, chronological model evaluation, and conservative paper simulation.
+- **Research-only:** no live order placement routes or authenticated exchange actions exist.
+- **Training is not started automatically:** data download, feature generation, model fitting and evaluation are explicit commands.
+- **No profitability claim:** backtests and model metrics are experimental and do not establish future performance.
+- **Risk is independent:** model decisions must pass the deterministic risk gate; risk defaults disable shorts and leverage above 1x.
+- **No API secrets:** public market discovery uses CCXT public endpoints only.
 
-- Research and paper trading only.
-- No exchange order execution or withdrawal functionality.
-- No claim of profitability. Backtests and model scores are not evidence of future returns.
-- Risk controls must remain independent of learned models.
+## Architecture
 
-## Planned first milestone
-
-1. Fetch public OHLCV candles from supported exchanges through CCXT.
-2. Validate and normalize timestamps and candle data.
-3. Generate causal technical and market features.
-4. Create volatility-scaled forward-return labels.
-5. Train a small baseline classifier using chronological splits.
-6. Evaluate out-of-sample predictions with fees and slippage in a deliberately simple paper simulator.
-7. Add smoke tests and a Kaggle-friendly run path.
-
-## Development principles
-
-- Avoid look-ahead leakage: features at time *t* may use only information available at or before *t*.
-- Split data chronologically; never randomly shuffle time series for evaluation.
-- Include trading costs in every simulation.
-- Keep model training, decision logic, risk controls, and execution boundaries separate.
-- Prefer reproducible experiments, saved configurations, and explicit limitations.
-
-## Intended architecture
-
-`eti/data.py` — public market data collection and validation  
-`eti/features.py` — causal feature generation and labels  
-`eti/model.py` — baseline model training and prediction  
-`eti/simulator.py` — conservative research-only paper simulation  
-`eti/pipeline.py` — end-to-end experiment orchestration
+| Layer | Current implementation |
+|---|---|
+| Market data | CCXT OHLCV for Binance/MEXC, closed-candle filtering, CSV input |
+| Market catalog | Public spot-market normalization for Binance/MEXC |
+| Quantitative features | Causal technical feature set |
+| Baseline ML | HistGradientBoostingClassifier, trained from scratch when explicitly run |
+| Strategy library | Buy-and-hold, moving average and momentum baselines |
+| Backtesting | Next-bar execution, fees, slippage, optional funding and explicit short opt-in |
+| Evolution | Small transparent parameter search on a caller-supplied validation slice |
+| Risk | Independent deterministic position, exposure, drawdown and leverage checks |
+| Decision | Probability-to-action mapping followed by mandatory risk approval |
+| API | Read-only research endpoints and risk-assessment endpoint |
+| Interface | Responsive PWA shell with service-worker caching |
+| Mobile | PWA works in mobile browsers; native Android/local inference is a later milestone |
 
 ## Quick start
 
-Python 3.10+ is the target. Install dependencies with `pip install -r requirements.txt`, then run `python -m eti.pipeline --exchange binance --symbol BTC/USDT --timeframe 1h --limit 3000`. See `KAGGLE.md` for a notebook workflow. You can also pass `--csv path/to/ohlcv.csv` to run on a local CSV.
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m pytest -q
+```
 
-## Safety
+Run the research API and PWA:
 
-Do not connect live trading keys to this research baseline. When execution is eventually considered, it must be a separate, disabled-by-default component with strict independent risk limits, explicit user authorization, and keys that cannot withdraw or transfer funds.
+```bash
+uvicorn eti.api:app --host 0.0.0.0 --port 8000
+```
+
+Open `http://localhost:8000`. API health: `/health`.
+
+Run the baseline training pipeline only when intentionally starting the training phase:
+
+```bash
+python -m eti.pipeline --exchange binance --symbol BTC/USDT --timeframe 1h --limit 3000
+```
+
+The API does not expose a training or live execution endpoint.
+
+## Current limitations
+
+1. Market discovery currently covers crypto spot on Binance and MEXC only. Forex, equities, commodities, derivatives and additional brokers need separate vetted adapters and instrument-specific contract metadata.
+2. The ML baseline is a conventional tabular classifier, not a deep neural network or chart-vision model.
+3. The evolutionary search is a small transparent validation-slice selector, not an unconstrained self-modifying agent.
+4. The backtester is bar-based and not exchange-grade. It does not model queue position, partial fills, liquidation engine details, borrow availability or all venue-specific funding rules.
+5. The risk gate is a deterministic pre-trade calculator; portfolio-wide streaming controls and broker-side enforcement are future work.
+6. The PWA is an initial dashboard shell, not a finished native Android application. Local inference requires model format, latency, memory and battery benchmarks on target devices.
+
+See [ROADMAP.md](ROADMAP.md) and [KAGGLE.md](KAGGLE.md).
