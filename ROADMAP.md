@@ -1,36 +1,46 @@
 # ETI roadmap
 
-## v0.1 — research baseline (current)
-- [x] Public OHLCV fetch for Binance and MEXC through CCXT
-- [x] OHLCV validation and causal technical features
-- [x] Volatility-scaled three-class forward-return labels
-- [x] Chronological train/validation/test workflow
-- [x] Small baseline classifier and long/flat cost-aware paper simulation
-- [x] Unit smoke tests and GitHub Actions workflow
-- [x] Kaggle run instructions
+## v0.2 — architecture foundation (in progress)
+- [x] Public OHLCV data ingestion and closed-candle filtering
+- [x] Causal feature and label pipeline
+- [x] Baseline classifier and chronological holdout
+- [x] Transparent strategy baselines and backtest costs
+- [x] Independent deterministic risk gate
+- [x] Research decision orchestration
+- [x] Initial strategy candidate search
+- [x] Read-only FastAPI service and PWA shell
+- [x] Mobile-browser dashboard foundation
+- [ ] CI green on the complete architecture branch
+- [ ] Integrate walk-forward folds, realistic funding/contract models and robust benchmark reporting
 
-## v0.2 — evaluation integrity
-- [ ] Purged/embargoed walk-forward validation
-- [ ] Multi-symbol and multiple market-regime evaluation
-- [ ] Funding, spread, fees, and liquidity-aware cost model
-- [ ] Better fill assumptions and explicit position sizing
-- [ ] Experiment configuration and reproducible artifact registry
+## v0.3 — evaluation integrity
+- Nested walk-forward validation and embargo/purge controls
+- Multiple symbols and market regimes
+- Benchmark against buy-and-hold and naive baselines
+- Stress fees, slippage, funding, gaps and missing data
+- Robustness tests, bootstrap confidence intervals and experiment registry
+- No model or strategy promotion based on a single holdout
 
-## v0.3 — specialist model research
-- [ ] Train-from-scratch MLP and 1D-CNN baselines
-- [ ] GRU/compact attention experiments only if they beat simpler baselines out of sample
-- [ ] Regime and volatility specialist models
-- [ ] Calibration, uncertainty, and no-trade thresholds
+## v0.4 — specialist intelligence
+- Train-from-scratch specialist numerical models only after evaluation harness is complete
+- Regime detection, trend, mean-reversion, volatility and risk specialists
+- Probability calibration and uncertainty estimation
+- Controlled evolutionary candidate generation with immutable risk constraints
 
-## v0.4 — evolutionary research
-- [ ] Feature subset and feature-generation search
-- [ ] Strategy parameter evolution and multi-objective selection
-- [ ] Diversity preservation, robust out-of-sample selection, and experiment lineage
+## v0.5 — portfolio and venue expansion
+- Provider interfaces for forex, equities, commodities and derivatives
+- Venue-specific contract metadata, funding, margin and liquidation simulation
+- Portfolio-level correlation, concentration and exposure controls
+- Broker/exchange eligibility and capability matrix
 
-## Later — mobile and visual intelligence
-- [ ] Benchmark quantized local inference on target Android hardware
-- [ ] Export eligible models to ONNX or LiteRT
-- [ ] Separate chart-image dataset, labeling, and vision model
-- [ ] Dashboard/PWA and mobile research interface
+## v0.6 — mobile and visual intelligence
+- Benchmark model size, latency, RAM and battery on target Android devices
+- Export only supported models to a mobile runtime after benchmark
+- Separate chart-image model research; never replace numerical validation with screenshot interpretation
+- Complete PWA install/offline behavior and accessibility
 
-Live execution is intentionally not part of these milestones. Any future execution layer must be separate from model training and protected by independent, non-learned risk controls.
+## v1.0 — guarded autonomous paper research
+- Autonomous market/instrument/strategy selection in paper mode
+- Monitoring, audit log, kill switch and reproducible decision trace
+- Independent risk approval for every simulated decision
+- Live execution remains a separate explicitly reviewed project milestone and is disabled by default
