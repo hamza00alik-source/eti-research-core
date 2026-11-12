@@ -14,13 +14,16 @@
 - [x] Candidate strategy search and purged walk-forward split utility
 - [x] Read-only FastAPI service and responsive PWA shell
 - [x] Expanded automated tests and CI workflow
-- [ ] Confirm latest CI run is green and merge reviewed pull request
+- [x] Confirm latest CI run is green (at prior tested commit); final branch verification pending
 
 ## v0.3 — evaluation integrity
 - [x] Executable purged expanding-window runner with caller-supplied fit/predict callback
 - [x] Test folds reported separately; test labels are never supplied to the validation prediction call
 - [x] Identical-sample strategy baselines and hardened cost-aware backtest
-- [ ] Nested hyperparameter selection, multi-symbol/regime orchestration, bootstrap confidence intervals and experiment registry
+- [x] Nested candidate selection using validation-only scores and untouched outer test folds
+- [x] Multi-symbol nested research pipeline for supported crypto spot feeds
+- [x] Descriptive bootstrap confidence intervals across fold-level metrics
+- [ ] Market-regime stratification, experiment registry and stronger dependence-aware statistical inference
 
 ## v0.4 — specialist intelligence
 - Train-from-scratch specialist numerical models after the evaluation harness is complete
