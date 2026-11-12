@@ -54,7 +54,11 @@ def fetch_ohlcv(
     if not exchange.has.get("fetchOHLCV"):
         raise ValueError(f"{exchange_id} does not support fetchOHLCV")
     rows: list[list[float]] = []
+    # Start far enough back to request the intended history, rather than
+    # silently returning only the exchange's latest single page.
     cursor = since_ms
+    if cursor is None:
+        cursor = exchange.milliseconds() - exchange.parse_timeframe(timeframe) * 1000 * limit
     page_size = min(1000, limit)
     while len(rows) < limit:
         batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=cursor, limit=min(page_size, limit-len(rows)))
