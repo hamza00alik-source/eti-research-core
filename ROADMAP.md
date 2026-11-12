@@ -17,12 +17,10 @@
 - [ ] Confirm latest CI run is green and merge reviewed pull request
 
 ## v0.3 — evaluation integrity
-- Full walk-forward experiment runner with nested selection and untouched test folds
-- Multi-symbol and multi-regime evaluation
-- Benchmark against buy-and-hold and naive baselines on identical samples
-- Stress fees, slippage, funding, gaps and missing data
-- Bootstrap confidence intervals, calibration and experiment registry
-- No model or strategy promotion from a single holdout
+- [x] Executable purged expanding-window runner with caller-supplied fit/predict callback
+- [x] Test folds reported separately; test labels are never supplied to the validation prediction call
+- [x] Identical-sample strategy baselines and hardened cost-aware backtest
+- [ ] Nested hyperparameter selection, multi-symbol/regime orchestration, bootstrap confidence intervals and experiment registry
 
 ## v0.4 — specialist intelligence
 - Train-from-scratch specialist numerical models after the evaluation harness is complete
@@ -31,13 +29,15 @@
 - Controlled evolutionary candidate generation with immutable risk constraints
 
 ## v0.5 — portfolio and venue expansion
-- Forex, equities, commodities and derivatives provider adapters
+- [x] Extensible asset-class provider protocol, registry and CSV history adapter for crypto/forex/equities/commodities/indices
+- [ ] Live forex, equities, commodities and derivatives provider adapters
 - Venue-specific contract metadata, funding, margin and liquidation simulation
 - Portfolio correlation estimation, concentration and dynamic exposure controls
 - Broker/exchange eligibility and capability matrix
 
 ## v0.6 — mobile and visual intelligence
-- Native Android client and device inference benchmark on target hardware
+- [x] Inference-only latency and Python-allocation benchmark utilities for execution on target devices
+- [ ] Native Android client and device inference benchmark on target hardware
 - Export only supported models to mobile runtime after latency/RAM/battery tests
 - Separate chart-image model research; numerical validation remains authoritative
 - Complete PWA install/offline behavior and accessibility
