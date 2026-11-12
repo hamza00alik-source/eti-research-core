@@ -21,12 +21,12 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 | AI | From-scratch HistGradientBoosting baseline; no model trained by default |
 | Evolution | Constrained candidate search on caller-supplied validation data |
 | Risk | Independent trade risk gate, directional stops, leverage, drawdown and exposure checks |
-| Portfolio | Gross, single-asset, correlated-group and position-count limits |
-| Backtesting | Next-bar bar-based simulator, fees, slippage, optional funding-cost input, short opt-in |
-| Evaluation | Purged expanding-window walk-forward split utility and baseline comparison |
-| Decision | Probability-to-action conversion followed by risk approval |
-| API | Read-only FastAPI service and risk-assessment endpoint |
-| UI | Responsive PWA shell with service-worker caching |
+| Portfolio | Gross, single-asset, correlated-group and position-count limits; now mandatory in combined decision gate |
+| Backtesting | Bar-based simulator with strict index/input validation, fees, slippage, optional funding cost and equity accounting |
+| Evaluation | Executable purged expanding-window runner with validation/test reporting and caller-supplied fit/predict callback |
+| Decision | Probability-to-action conversion followed by independent trade-risk AND portfolio approval |
+| API | Research FastAPI endpoints for risk, portfolio, combined decision and provider capability status; no order route |
+| UI | Responsive PWA dashboard with combined decision gate simulator and provider capability display |
 | Mobile | Browser-installable PWA foundation; native Android and on-device inference remain later milestones |
 
 ## Quick start
@@ -49,7 +49,7 @@ python -m eti.pipeline --exchange binance --symbol BTC/USDT --timeframe 1h --lim
 
 There is no API endpoint to start training or place live orders.
 
-## Important limitations
+## Provider and device scope\n\n- Binance/MEXC public connectivity is crypto spot only. Other labelled asset classes can currently be evaluated from validated local CSV OHLCV files; no live FX, equity, index or commodity feed is claimed.\n- `eti/device_benchmark.py` measures inference latency and Python-traced allocations for an already-fitted model. Run it on the actual Android target; it is not a full native Android RAM/battery benchmark.\n- `eti/model_benchmark.py` compares already-fitted models and does not train them.\n- The walk-forward runner is an execution harness, not nested model selection or proof of statistical significance.\n\n## Important limitations
 
 1. Venue discovery currently covers crypto spot on Binance and MEXC only. Forex, equities, commodities, derivatives and additional brokers require separately validated adapters and instrument-specific metadata.
 2. The baseline classifier is tabular ML, not a deep neural network or chart-vision model.
