@@ -72,3 +72,14 @@ def test_risk_gate_checks_stop_direction():
     short_bad = RiskEngine().assess(RiskRequest(1000, 100, 99, 100, side="short"))
     assert not long_bad.approved and "long_stop_must_be_below_entry" in long_bad.reasons
     assert not short_bad.approved and "short_stop_must_be_above_entry" in short_bad.reasons
+
+
+def test_risk_engine_rejects_non_finite_and_malformed_inputs():
+    import math
+    engine = RiskEngine()
+    assert not engine.assess(RiskRequest(1000, 100, 98, math.nan)).approved
+    malformed = RiskRequest(1000, 100, 98, 100)
+    from dataclasses import replace
+    result = engine.assess(replace(malformed, gross_exposure="unknown"))
+    assert not result.approved
+    assert "non_finite_or_invalid_numeric_input" in result.reasons
