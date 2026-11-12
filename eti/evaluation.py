@@ -105,7 +105,7 @@ def run_nested_walk_forward(dataset: pd.DataFrame, feature_columns: list[str],
                             purge_bars: int = 6) -> dict:
     """Select a candidate on each outer validation window, then score untouched test.
 
-    Each candidate callback must create/f fit its own estimator per invocation.
+    Each candidate callback must create and fit its own estimator per invocation.
     Outer test labels are never used for candidate choice.
     """
     if not candidates:
