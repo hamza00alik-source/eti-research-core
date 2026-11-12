@@ -14,7 +14,7 @@
 - [x] Candidate strategy search and purged walk-forward split utility
 - [x] Read-only FastAPI service and responsive PWA shell
 - [x] Expanded automated tests and CI workflow
-- [x] Confirm latest CI run is green (at prior tested commit); final branch verification pending
+- [ ] Confirm latest CI run is green and merge the reviewed pull request
 
 ## v0.3 — evaluation integrity
 - [x] Executable purged expanding-window runner with caller-supplied fit/predict callback
