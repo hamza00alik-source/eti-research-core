@@ -131,6 +131,11 @@ def evaluate_predictions(
         close_series, predicted_positions, fee_bps, slippage_bps,
         funding_bps_per_bar, allow_short, float(bars_per_year),
     )
+    long_short_strategy = _strategy_metrics(
+        close_series, prediction_series.astype(float) - 1.0,
+        fee_bps, slippage_bps, funding_bps_per_bar, True,
+        float(bars_per_year),
+    )
     buy_hold = _strategy_metrics(
         close_series, pd.Series(1.0, index=close_series.index), fee_bps,
         slippage_bps, funding_bps_per_bar, False, float(bars_per_year),
@@ -160,6 +165,7 @@ def evaluate_predictions(
         },
         "trading": {
             "model": strategy,
+            "model_long_short": long_short_strategy,
             "buy_and_hold": buy_hold,
             "no_trade": no_trade,
             "label_oracle_upper_bound": actual_oracle,
