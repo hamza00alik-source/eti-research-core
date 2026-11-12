@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 OHLCV_COLUMNS = ["timestamp", "open", "high", "low", "close", "volume"]
@@ -18,7 +19,8 @@ def validate_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
     out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
     for col in OHLCV_COLUMNS[1:]:
         out[col] = pd.to_numeric(out[col], errors="coerce")
-    out = out.dropna().sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
+    out = out.replace([np.inf, -np.inf], np.nan).dropna()
+    out = out.sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
     if out.empty:
         raise ValueError("No valid OHLCV candles")
     if (out[["open", "high", "low", "close"]] <= 0).any().any():
@@ -32,6 +34,21 @@ def validate_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def drop_incomplete_candles(
+    frame: pd.DataFrame, timeframe_ms: int, now_ms: int
+) -> pd.DataFrame:
+    """Keep only candles whose full timeframe has elapsed."""
+    if timeframe_ms <= 0:
+        raise ValueError("timeframe_ms must be positive")
+    clean = validate_ohlcv(frame)
+    candle_open_ms = clean["timestamp"].astype("int64") // 1_000_000
+    completed = candle_open_ms + timeframe_ms <= int(now_ms)
+    clean = clean.loc[completed].reset_index(drop=True)
+    if clean.empty:
+        raise ValueError("No completed OHLCV candles returned")
+    return clean
+
+
 def fetch_ohlcv(
     exchange_id: str = "binance",
     symbol: str = "BTC/USDT",
@@ -40,7 +57,7 @@ def fetch_ohlcv(
     since_ms: int | None = None,
     pause_seconds: float = 0.15,
 ) -> pd.DataFrame:
-    """Fetch public OHLCV candles via CCXT with pagination where supported."""
+    """Fetch public OHLCV candles via CCXT; paginate and exclude the live candle."""
     try:
         import ccxt
     except ImportError as exc:
@@ -53,26 +70,29 @@ def fetch_ohlcv(
     exchange = exchange_class({"enableRateLimit": True})
     if not exchange.has.get("fetchOHLCV"):
         raise ValueError(f"{exchange_id} does not support fetchOHLCV")
+    timeframe_seconds = exchange.parse_timeframe(timeframe)
+    if timeframe_seconds <= 0:
+        raise ValueError(f"Invalid timeframe: {timeframe}")
+    timeframe_ms = int(timeframe_seconds * 1000)
     rows: list[list[float]] = []
-    # Start far enough back to request the intended history, rather than
-    # silently returning only the exchange's latest single page.
     cursor = since_ms
     if cursor is None:
-        cursor = exchange.milliseconds() - exchange.parse_timeframe(timeframe) * 1000 * limit
+        cursor = exchange.milliseconds() - timeframe_ms * limit
     page_size = min(1000, limit)
     while len(rows) < limit:
-        batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=cursor, limit=min(page_size, limit-len(rows)))
+        requested = min(page_size, limit - len(rows))
+        batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=cursor, limit=requested)
         if not batch:
             break
         rows.extend(batch)
         next_cursor = int(batch[-1][0]) + 1
-        if cursor is not None and next_cursor <= cursor:
+        if next_cursor <= cursor:
             break
         cursor = next_cursor
-        if len(batch) < min(page_size, limit-len(rows)+len(batch)):
+        if len(batch) < requested:
             break
         time.sleep(pause_seconds)
     if not rows:
         raise RuntimeError(f"No OHLCV data returned for {exchange_id} {symbol} {timeframe}")
     frame = pd.DataFrame(rows, columns=OHLCV_COLUMNS)
-    return validate_ohlcv(frame).tail(limit).reset_index(drop=True)
+    return drop_incomplete_candles(frame, timeframe_ms, exchange.milliseconds()).tail(limit).reset_index(drop=True)
