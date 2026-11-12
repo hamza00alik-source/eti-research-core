@@ -88,3 +88,41 @@ def test_end_to_end_research_pipeline_runs():
     assert metrics["rows"] > 200
     assert metrics["timeframe"] == "1h"
     assert metrics["paper_simulation"]["bars_per_year"] == pytest.approx(365.25 * 24)
+
+
+def test_fetch_ohlcv_continues_after_exchange_returns_short_page(monkeypatch):
+    import sys
+    import types
+    import eti.data as data_module
+
+    now_ms = int(pd.Timestamp("2025-01-10", tz="UTC").timestamp() * 1000)
+    start_ms = now_ms - 2000 * 60 * 60 * 1000
+    all_rows = []
+    for i in range(1200):
+        ts = start_ms + i * 60 * 60 * 1000
+        price = 100.0 + i * 0.01
+        all_rows.append([ts, price, price + 1, price - 1, price, 10.0])
+
+    class FakeExchange:
+        has = {"fetchOHLCV": True}
+        def __init__(self, config):
+            self.calls = []
+        def parse_timeframe(self, timeframe):
+            return 3600
+        def milliseconds(self):
+            return now_ms
+        def fetch_ohlcv(self, symbol, timeframe, since, limit):
+            self.calls.append((since, limit))
+            eligible = [row for row in all_rows if row[0] >= since]
+            # Simulate an exchange that caps each response at 500 rows,
+            # even when the client requests 1000.
+            return eligible[:min(limit, 500)]
+
+    fake = FakeExchange({})
+    monkeypatch.setattr(data_module, "time", types.SimpleNamespace(sleep=lambda _: None))
+    monkeypatch.setitem(sys.modules, "ccxt", types.SimpleNamespace(fakevenue=lambda config: fake))
+    result = data_module.fetch_ohlcv("fakevenue", "BTC/USDT", "1h", limit=1200)
+
+    assert len(result) == 1200
+    assert len(fake.calls) == 3
+    assert result.timestamp.is_monotonic_increasing
