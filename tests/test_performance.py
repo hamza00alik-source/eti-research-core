@@ -24,6 +24,8 @@ def test_performance_report_scores_predictions_and_cost_aware_baselines():
     ]
     assert report["trading"]["model"]["bars"] == len(close)
     assert report["trading"]["model"]["trade_count"] >= 1
+    assert report["trading"]["model"]["short_exposure"] == 0.0
+    assert report["trading"]["model_long_short"]["bars"] == len(close)
     assert report["trading"]["model"]["trading_cost_total"] > 0
     assert report["trading"]["no_trade"]["total_return"] == 0.0
     assert report["trading"]["no_trade"]["max_drawdown"] == 0.0
