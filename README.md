@@ -39,7 +39,7 @@ The repository is being built in stages. The first milestone is a reproducible, 
 
 ## Quick start
 
-The runnable commands and dependency list will be added with the initial pipeline implementation. Python 3.10+ is the target.
+Python 3.10+ is the target. Install dependencies with `pip install -r requirements.txt`, then run `python -m eti.pipeline --exchange binance --symbol BTC/USDT --timeframe 1h --limit 3000`. See `KAGGLE.md` for a notebook workflow. You can also pass `--csv path/to/ohlcv.csv` to run on a local CSV.
 
 ## Safety
 
