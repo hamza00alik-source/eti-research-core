@@ -33,3 +33,16 @@ For a single symbol, use `--symbol BTC/USDT`. For a CSV, supply the required col
 - Other labelled asset classes can be evaluated from local CSV data, but live FX/equity/commodity feeds are not connected.
 - Kaggle sessions are temporary and compute limits apply. The notebook uses CPU by default; GPU is not required by the current scikit-learn model.
 - Do not put exchange API keys in notebooks. Only public market data is used.
+
+
+## One-click GitHub Actions run
+
+You can also start the same CPU research job without opening Kaggle:
+
+1. Open the repository's **Actions** tab.
+2. Select **ETI manual research training**.
+3. Choose Binance or MEXC, symbols, timeframe and candle limit.
+4. Tap **Run workflow**.
+5. When it completes, open the run's Artifacts section and download `eti-nested-research-report`.
+
+This is a manual action only. CI never starts model fitting automatically. The workflow uses public spot candles, trains candidate models from scratch inside nested folds, and uploads evaluation metrics; it does not place orders.
