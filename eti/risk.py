@@ -1,6 +1,7 @@
 """Independent deterministic risk gate. It cannot be overridden by model output."""
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 
 from .config import RiskConfig
@@ -33,13 +34,22 @@ class RiskEngine:
 
     def assess(self, request: RiskRequest) -> RiskDecision:
         c, reasons = self.config, []
-        numeric = (request.equity, request.entry_price, request.stop_price,
-                   request.requested_notional, request.gross_exposure,
-                   request.daily_pnl_fraction, request.current_drawdown, request.leverage)
-        if any(not isinstance(v, (int, float)) or not __import__("math").isfinite(v) for v in numeric):
-            reasons.append("non_finite_input")
+        numeric = (
+            request.equity, request.entry_price, request.stop_price,
+            request.requested_notional, request.gross_exposure,
+            request.daily_pnl_fraction, request.current_drawdown, request.leverage,
+        )
+        if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+               for v in numeric):
+            reasons.append("non_finite_or_invalid_numeric_input")
+        if any(not math.isfinite(v) for v in numeric if isinstance(v, (int, float)) and not isinstance(v, bool)):
+            return RiskDecision(False, 0.0, 0.0, tuple(reasons))
         if request.equity <= 0 or request.entry_price <= 0 or request.requested_notional <= 0:
             reasons.append("invalid_equity_price_or_notional")
+        if request.gross_exposure < 0:
+            reasons.append("negative_gross_exposure")
+        if request.leverage < 1:
+            reasons.append("invalid_leverage")
         if request.side not in ("long", "short"):
             reasons.append("invalid_side")
         if request.side == "short" and not c.allow_short:
