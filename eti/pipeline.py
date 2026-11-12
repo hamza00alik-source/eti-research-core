@@ -127,19 +127,33 @@ def _timeframe_seconds(timeframe: str) -> float:
 def main():
     parser = argparse.ArgumentParser(description="Run ETI research-only baseline")
     parser.add_argument("--exchange", default="binance", choices=["binance", "mexc"])
-    parser.add_argument("--symbol", default="BTC/USDT")
+    parser.add_argument("--symbol", default="BTC/USDT", help="Single symbol")
+    parser.add_argument("--symbols", help="Comma-separated symbols for independent nested evaluation")
+    parser.add_argument("--evaluation", choices=["holdout", "nested"], default="holdout", help="nested performs repeated from-scratch candidate fitting")
     parser.add_argument("--timeframe", default="1h")
     parser.add_argument("--limit", type=int, default=3000)
     parser.add_argument("--csv", type=Path, help="Use a local OHLCV CSV instead of downloading")
     parser.add_argument("--output", type=Path, default=Path("artifacts/baseline_metrics.json"))
     args = parser.parse_args()
+    if args.csv and args.symbols:
+        parser.error("--csv cannot be combined with --symbols")
     if args.csv:
         frame = pd.read_csv(args.csv)
         now_ms = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
         frame = drop_incomplete_candles(frame, int(_timeframe_seconds(args.timeframe) * 1000), now_ms)
+        metrics = run_nested_experiment(frame) if args.evaluation == "nested" else run_experiment(frame, timeframe=args.timeframe)
+    elif args.symbols:
+        symbols = [item.strip() for item in args.symbols.split(",") if item.strip()]
+        if not symbols:
+            parser.error("--symbols must contain at least one symbol")
+        frames = {symbol: fetch_ohlcv(args.exchange, symbol, args.timeframe, args.limit)
+                  for symbol in symbols}
+        metrics = run_multi_symbol_experiment(frames) if args.evaluation == "nested" else {
+            symbol: run_experiment(data, timeframe=args.timeframe)
+            for symbol, data in frames.items()}
     else:
         frame = fetch_ohlcv(args.exchange, args.symbol, args.timeframe, args.limit)
-    metrics = run_experiment(frame, timeframe=args.timeframe)
+        metrics = run_nested_experiment(frame) if args.evaluation == "nested" else run_experiment(frame, timeframe=args.timeframe)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2))
