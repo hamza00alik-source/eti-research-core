@@ -104,7 +104,7 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
             **evaluate_predictions(
                 close_test, actual_test, prediction_test,
                 fee_bps=6.0, slippage_bps=2.0, funding_bps_per_bar=0.0,
-                allow_short=True, bars_per_year=bars_per_year,
+                allow_short=False, bars_per_year=bars_per_year,
             ),
         })
     def mean_metric(strategy_name: str, metric_name: str) -> float:
@@ -117,6 +117,9 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
         "folds": performance_folds,
         "summary": {
             "mean_net_return": mean_metric("model", "total_return"),
+            "mean_hypothetical_long_short_return": float(np.mean([
+                item["trading"]["model_long_short"]["total_return"] for item in performance_folds
+            ])),
             "mean_max_drawdown": mean_metric("model", "max_drawdown"),
             "mean_sharpe_annualized": mean_metric("model", "sharpe_annualized"),
             "mean_sortino_annualized": mean_metric("model", "sortino_annualized"),
