@@ -25,33 +25,42 @@ def run_experiment(frame: pd.DataFrame, horizon: int = 6) -> dict:
     x, y = dataset[FEATURE_COLUMNS], dataset["label"].astype(int)
     n = len(dataset)
     train_end, valid_end = int(n * 0.70), int(n * 0.85)
-    if len(np.unique(y.iloc[:train_end])) < 2:
+    # Purge horizon rows at each boundary because labels look forward.
+    train_stop = max(0, train_end - horizon)
+    valid_start = min(n, train_end + horizon)
+    valid_stop = max(valid_start, valid_end - horizon)
+    test_start = min(n, valid_end + horizon)
+    if train_stop < 100 or valid_stop - valid_start < 20 or n - test_start < 20:
+        raise ValueError("Not enough rows after purging label-overlap at split boundaries")
+    if len(np.unique(y.iloc[:train_stop])) < 2:
         raise ValueError("Training period has fewer than two classes; collect more data or adjust threshold")
-    model = BaselineModel().fit(x.iloc[:train_end], y.iloc[:train_end])
-    valid_pred = model.predict(x.iloc[train_end:valid_end])
+    model = BaselineModel().fit(x.iloc[:train_stop], y.iloc[:train_stop])
+    y_valid = y.iloc[valid_start:valid_stop]
+    valid_pred = model.predict(x.iloc[valid_start:valid_stop])
     valid_metrics = {
-        "accuracy": float(accuracy_score(y.iloc[train_end:valid_end], valid_pred)),
-        "balanced_accuracy": float(balanced_accuracy_score(y.iloc[train_end:valid_end], valid_pred)),
+        "accuracy": float(accuracy_score(y_valid, valid_pred)),
+        "balanced_accuracy": float(balanced_accuracy_score(y_valid, valid_pred)),
     }
-    # Refit on train+validation only after validation settings are fixed.
-    final_model = BaselineModel().fit(x.iloc[:valid_end], y.iloc[:valid_end])
-    test_pred = final_model.predict(x.iloc[valid_end:])
+    # Refit on train+validation, excluding the validation-to-test label overlap.
+    final_model = BaselineModel().fit(x.iloc[:valid_end-horizon], y.iloc[:valid_end-horizon])
+    y_test = y.iloc[test_start:]
+    test_pred = final_model.predict(x.iloc[test_start:])
     test_metrics = {
-        "accuracy": float(accuracy_score(y.iloc[valid_end:], test_pred)),
-        "balanced_accuracy": float(balanced_accuracy_score(y.iloc[valid_end:], test_pred)),
+        "accuracy": float(accuracy_score(y_test, test_pred)),
+        "balanced_accuracy": float(balanced_accuracy_score(y_test, test_pred)),
     }
-    test_index = dataset.index[valid_end:]
+    test_index = dataset.index[test_start:]
     sim = simulate_long_flat(
         frame.loc[test_index, "close"].reset_index(drop=True),
         pd.Series(test_pred),
     )
     return {
         "rows": n,
-        "split": {"train": train_end, "validation": valid_end-train_end, "test": n-valid_end},
+        "split": {"train": train_stop, "validation": valid_stop-valid_start, "test": n-test_start, "purge_bars_each_boundary": horizon},
         "validation": valid_metrics,
         "test": test_metrics,
         "paper_simulation": {k: v for k, v in sim.items() if k != "equity_curve"},
-        "warning": "Single chronological holdout baseline only. Not evidence of profitability or future performance.",
+        "warning": "Single chronological holdout baseline with horizon purging. Not evidence of profitability or future performance.",
     }
 
 
