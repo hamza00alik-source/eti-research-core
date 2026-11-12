@@ -32,9 +32,9 @@ def test_validation_sorts_deduplicates_and_drops_non_finite():
 
 def test_incomplete_latest_candle_is_removed():
     raw = sample_ohlcv(3)
-    now_ms = int(pd.Timestamp("2024-01-01 03:30", tz="UTC").timestamp() * 1000)
+    now_ms = int(pd.Timestamp("2024-01-01 02:30", tz="UTC").timestamp() * 1000)
     clean = drop_incomplete_candles(raw, timeframe_ms=60 * 60 * 1000, now_ms=now_ms)
-    assert clean.timestamp.tolist() == [raw.loc[0, "timestamp"]]
+    assert clean.timestamp.tolist() == raw.loc[:1, "timestamp"].tolist()
 
 
 def test_features_are_causal_at_current_row():
