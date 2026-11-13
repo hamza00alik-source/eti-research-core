@@ -9,13 +9,13 @@ def test_pwa_account_controls_are_connected_to_authenticated_api():
     script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
     for selector in (
         "login-form", "register-form", "account-view", "workspace-form",
-        "workspace-select", "capability-select", "memory-form", "task-form", "audit-list",
+        "workspace-select", "capability-select", "memory-form", "task-form", "audit-list", "worker-status",
     ):
         assert selector in html
         assert selector in script
     for endpoint in (
         "/v1/auth/token", "/v1/auth/register", "/v1/profile",
-        "/v1/workspaces", "/v1/agents/capabilities", "/v1/audit/events",
+        "/v1/workspaces", "/v1/agents/capabilities", "/v1/agents/status", "/v1/audit/events",
     ):
         assert endpoint in script
 
