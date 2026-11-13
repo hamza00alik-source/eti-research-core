@@ -109,6 +109,34 @@ $('#register-form').addEventListener('submit',async event=>{
 $('#signout').addEventListener('click',()=>{
  clearSession();showAuth('You have signed out. Sign in to access private research data.');
 });
+$('#export-account').addEventListener('click',async()=>{
+ const button=$('#export-account');button.disabled=true;
+ try{
+  const data=await api('/v1/account/export');
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement('a');
+  link.href=url;
+  link.download='eti-account-export-'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.appendChild(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  $('#account-message').textContent='Your account data export was prepared. Keep the downloaded JSON file private.';
+ }catch(error){$('#account-message').textContent='Export failed: '+error.message}
+ finally{button.disabled=false}
+});
+$('#delete-workspace').addEventListener('click',async()=>{
+ if(!activeWorkspace)return;
+ const select=$('#workspace-select');
+ const name=select.options[select.selectedIndex]?.textContent||'this workspace';
+ if(!window.confirm('Permanently delete "'+name+'" and its memory, tasks and messages? The deletion is audited and cannot be undone.'))return;
+ const button=$('#delete-workspace');button.disabled=true;
+ try{
+  await api('/v1/workspaces/'+encodeURIComponent(activeWorkspace),{method:'DELETE'});
+  activeWorkspace='';await loadWorkspaces();
+  $('#account-message').textContent='Workspace deleted. Its deletion event remains in your audit history.';
+ }catch(error){$('#account-message').textContent='Workspace deletion failed: '+error.message}
+ finally{button.disabled=false}
+});
 $('#workspace-form').addEventListener('submit',async event=>{
  event.preventDefault();const form=new FormData(event.currentTarget);
  try{
