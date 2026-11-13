@@ -80,3 +80,16 @@ A tokenized gold spot pair, an XAU/USD CFD and a COMEX gold future are distinct 
 7. The PWA is an initial dashboard, not a finished native Android application. On-device inference requires target-device memory, latency and battery benchmarks.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md), [PLATFORM_ARCHITECTURE.md](PLATFORM_ARCHITECTURE.md), [ROADMAP.md](ROADMAP.md) and [KAGGLE.md](KAGGLE.md).
+
+
+## Shared platform foundation
+
+The shared-platform target contracts are documented in [PLATFORM_ARCHITECTURE.md](PLATFORM_ARCHITECTURE.md). A first persistent storage primitive is now available in `eti.storage.MemoryStore`:
+
+- File-backed SQLite workspaces and JSON memory items, scoped by an owner identifier.
+- Owner checks are applied in workspace and memory queries; cross-owner workspace writes fail closed.
+- Append-only audit event insertion and owner-scoped audit reads.
+- JSON payload validation, finite-number enforcement and a 64 KiB item limit.
+- The store is not exposed through HTTP yet. The owner identifier must come from a verified authentication principal; clients must never be allowed to choose it.
+- SQLite is a local/single-instance foundation. Multi-instance production deployment requires a PostgreSQL-backed implementation/migration before shared concurrent writes.
+- Authentication, authenticated API routes, agent orchestration and model registry are not yet implemented.
