@@ -256,6 +256,10 @@ def test_model_training_research_rejects_unsafe_limits_before_network():
         model_training_research({"symbol": "BTC/USDT", "limit": 500})
     with pytest.raises(ValueError, match="timeframe"):
         model_training_research({"symbol": "BTC/USDT", "timeframe": "5m"})
+    with pytest.raises(ValueError, match="venue"):
+        model_training_research({"symbol": "BTC/USDT", "venue": []})
+    with pytest.raises(ValueError, match="timeframe"):
+        model_training_research({"symbol": "BTC/USDT", "timeframe": []})
 
 
 def test_default_registry_exposes_model_training_as_research_only():
@@ -302,6 +306,7 @@ def test_model_training_research_runs_real_pipeline_and_writes_candidate(tmp_pat
     assert result["model_family"] == "HistGradientBoostingClassifier via ETI BaselineModel"
     assert result["evaluation"]["fold_count"] >= 1
     assert result["evaluation"]["folds"][0]["test_balanced_accuracy"] is not None
+    assert result["evaluation"]["folds"][0]["market_regimes"]["bar_count"] == 100
     assert result["candidate_artifact"]["artifact_uri"].startswith("artifact://sha256/")
     assert result["lifecycle"] == "unregistered_candidate"
     assert result["approval_status"] == "not_approved"
