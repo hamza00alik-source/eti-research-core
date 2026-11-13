@@ -46,13 +46,17 @@ let modelTrainingIntervalSeconds=86400;
 async function saveAutonomyConfig(patch={}){
  const current=autonomyProfile||{};
  const next={...current,...patch};
+ const marketTypeSelect=$('#autonomy-market-types');
+ const selectedMarketTypes=marketTypeSelect
+  ?Array.from(marketTypeSelect.selectedOptions).map(option=>option.value)
+  :null;
  const data=await api('/v1/autonomy',{method:'PUT',body:JSON.stringify({
   enabled:next.enabled??autonomyEnabled,
   workspace_id:activeWorkspace||null,
   venues:next.venues||['mexc'],
   symbols:next.symbols||['BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT'],
   timeframes:next.timeframes||['1h'],
-  market_types:next.market_types||['spot','swap'],
+  market_types:patch.market_types||selectedMarketTypes||next.market_types||['spot'],
   interval_seconds:next.interval_seconds||900,
   model_training_enabled:next.model_training_enabled??modelTrainingEnabled,
   model_training_interval_seconds:next.model_training_interval_seconds||modelTrainingIntervalSeconds
@@ -71,6 +75,9 @@ async function loadAutonomy(){
   autonomyEnabled=Boolean(autonomyProfile.enabled);
   modelTrainingEnabled=Boolean(autonomyProfile.model_training_enabled);
   modelTrainingIntervalSeconds=Number(autonomyProfile.model_training_interval_seconds||86400);
+  const marketTypeSelect=$('#autonomy-market-types');
+  if(marketTypeSelect){const selected=autonomyProfile.market_types||['spot'];
+   Array.from(marketTypeSelect.options).forEach(option=>option.selected=selected.includes(option.value));}
   status.textContent=!autonomyEnabled?'Autonomous operation is OFF':modelTrainingEnabled?'Autonomous operation is ON · market scans + daily model training · research only':'Market scans are ON · daily model training is OFF';
   button.textContent=autonomyEnabled&&modelTrainingEnabled?'Pause autonomous operation':autonomyEnabled?'Complete autonomous setup':'Start autonomous operation';
   const trainingButton=$('#model-training-toggle');
