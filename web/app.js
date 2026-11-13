@@ -70,8 +70,8 @@ async function loadAutonomy(){
   autonomyEnabled=Boolean(autonomyProfile.enabled);
   modelTrainingEnabled=Boolean(autonomyProfile.model_training_enabled);
   modelTrainingIntervalSeconds=Number(autonomyProfile.model_training_interval_seconds||86400);
-  status.textContent=autonomyEnabled?'Autonomous research is ON · research only':'Autonomous research is OFF';
-  button.textContent=autonomyEnabled?'Pause autonomous research':'Enable autonomous research';
+  status.textContent=!autonomyEnabled?'Autonomous operation is OFF':modelTrainingEnabled?'Autonomous operation is ON · market scans + daily model training · research only':'Market scans are ON · daily model training is OFF';
+  button.textContent=autonomyEnabled&&modelTrainingEnabled?'Pause autonomous operation':autonomyEnabled?'Complete autonomous setup':'Start autonomous operation';
   const trainingButton=$('#model-training-toggle');
   const trainingStatus=$('#model-training-status');
   const cadence=$('#model-training-interval');
@@ -87,12 +87,15 @@ async function loadAutonomy(){
 }
 $('#autonomy-toggle')?.addEventListener('click',async()=>{
  const button=$('#autonomy-toggle'),status=$('#autonomy-status');
- button.disabled=true;status.textContent='Updating…';
+ // A single owner action starts/stops the complete research + daily training loop.
+ // This never enables paper or live order execution.
+ const nextEnabled=!(autonomyEnabled&&modelTrainingEnabled);
+ button.disabled=true;status.textContent='Updating autonomous operation…';
  try{
-  await saveAutonomyConfig({enabled:!autonomyEnabled});
+  await saveAutonomyConfig({enabled:nextEnabled,model_training_enabled:nextEnabled});
   await loadAutonomy();
   await loadWorkspaceData();
- }catch(error){status.textContent='Could not update autonomy: '+error.message}
+ }catch(error){status.textContent='Could not update autonomous operation: '+error.message}
  finally{button.disabled=false}
 });
 $('#model-training-toggle')?.addEventListener('click',async()=>{
