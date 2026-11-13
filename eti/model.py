@@ -14,8 +14,6 @@ class BaselineModel:
             l2_regularization=1.0, random_state=random_state,
         )
         self.classes_: np.ndarray | None = None
-        self.calibration_status = "uncalibrated"
-        self.calibration_report: dict | None = None
 
     def fit(self, x, y):
         y = np.asarray(y, dtype=int)
@@ -23,9 +21,32 @@ class BaselineModel:
             raise ValueError("Training data contains fewer than two label classes")
         self.estimator.fit(x, y)
         self.classes_ = self.estimator.classes_
-        self.calibration_status = "uncalibrated"
-        self.calibration_report = None
         return self
+
+    def calibration_temperature(self) -> float | None:
+        if self.calibration_status != "calibrated":
+            return None
+        report = self.calibration_report
+        if not isinstance(report, dict):
+            raise RuntimeError("Calibrated model is missing its calibration report")
+        temperature = report.get("temperature")
+        sample_count = report.get("sample_count")
+        if (
+            report.get("passed") is not True
+            or report.get("method") != "temperature_scaling"
+            or isinstance(sample_count, bool) or not isinstance(sample_count, int)
+            or sample_count < 30
+            or isinstance(temperature, bool) or not isinstance(temperature, (int, float))
+            or not np.isfinite(temperature) or temperature <= 0
+        ):
+            raise RuntimeError("Model calibration report is invalid")
+        return float(temperature)
+
+    def has_valid_calibration(self) -> bool:
+        try:
+            return self.calibration_temperature() is not None
+        except RuntimeError:
+            return False
 
     def predict_proba(self, x) -> np.ndarray:
         if self.classes_ is None:
@@ -34,6 +55,12 @@ class BaselineModel:
         aligned = np.zeros((len(raw), len(CLASSES)), dtype=float)
         for i, cls in enumerate(self.classes_):
             aligned[:, int(cls)] = raw[:, i]
+        temperature = self.calibration_temperature()
+        if temperature is not None:
+            logits = np.log(np.clip(aligned, 1e-12, 1.0)) / temperature
+            logits -= logits.max(axis=1, keepdims=True)
+            scaled = np.exp(logits)
+            aligned = scaled / scaled.sum(axis=1, keepdims=True)
         return aligned
 
     def predict(self, x) -> np.ndarray:
