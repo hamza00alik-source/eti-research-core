@@ -217,14 +217,15 @@ def test_live_supervisor_schedules_only_owner_authorized_profile_tasks(tmp_path)
     from datetime import datetime, timezone
     store = _live_store(tmp_path)
     scheduled = store.enqueue_due_live_execution_tasks(datetime.now(timezone.utc))
-    assert scheduled == 1
+    assert scheduled == 2
     workspace = store.list_workspaces("owner")[0]
     tasks = store.list_agent_tasks("owner", workspace["id"], status="queued")
     live_tasks = [task for task in tasks if task["target_capability"] == "live.tick"]
-    assert len(live_tasks) == 1
+    assert len(live_tasks) == 2
     assert live_tasks[0]["requester"] == "eti.live.supervisor"
     assert live_tasks[0]["input"]["scheduled_by"] == "eti.live.supervisor"
-    assert live_tasks[0]["input"]["task_id"] == live_tasks[0]["id"]
+    assert all(task["input"]["task_id"] == task["id"] for task in live_tasks)
+    assert {task["input"]["symbol"] for task in live_tasks} == {"BTC/USDT", "ETH/USDT"}
     assert store.enqueue_due_live_execution_tasks(datetime.now(timezone.utc)) == 0
 
 
