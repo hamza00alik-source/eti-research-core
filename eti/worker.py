@@ -87,7 +87,9 @@ class AgentWorker:
                 or task_input.get("scheduled_by") != "eti.autonomy.supervisor"):
             return
         payload = {
-            "venue": task_input.get("venue", "mexc"), "symbol": task_input.get("symbol"),
+            "venue": task_input.get("venue", "mexc"),
+            "market_type": task_input.get("market_type", "spot"),
+            "symbol": task_input.get("symbol"),
             "timeframe": task_input.get("timeframe", "1h"), "limit": 500,
             "min_history": 120, "validation_size": 80, "test_size": 80,
             "step_size": 80, "purge_bars": 2, "fee_bps": 6.0, "slippage_bps": 2.0,
