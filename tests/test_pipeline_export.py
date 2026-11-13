@@ -29,21 +29,40 @@ def test_deployable_fit_uses_exact_feature_schema_and_only_completed_rows(monkey
         self.classes_ = np.array(seen["classes"])
         return self
 
+    def fake_calibration(self, x, y):
+        seen["calibration_rows"] = len(x)
+        seen["calibration_columns"] = list(x.columns)
+        report = {"passed": True, "method": "temperature_scaling",
+                  "sample_count": len(y), "temperature": 1.2}
+        self.calibration_status = "calibrated"
+        self.calibration_report = report
+        return report
+
     monkeypatch.setattr(BaselineModel, "fit", fake_fit)
+    monkeypatch.setattr(BaselineModel, "fit_temperature_calibration", fake_calibration)
     model, schema = fit_deployable_model(frame, horizon=6)
     assert model.classes_.tolist() == [0, 1]
-    assert seen["rows"] == 254
+    assert seen["rows"] == 203
     assert seen["columns"] == FEATURE_COLUMNS
+    assert seen["calibration_rows"] == 51
+    assert seen["calibration_columns"] == FEATURE_COLUMNS
     assert schema["features"] == FEATURE_COLUMNS
-    assert schema["training_rows"] == 254
+    assert schema["training_rows"] == 203
+    assert schema["calibration_rows"] == 51
+    assert schema["calibration_status"] == "calibrated"
+    assert schema["training_end"] < schema["calibration_start"]
     assert schema["label_horizon_bars"] == 6
 
 
 def test_exported_model_is_explicitly_marked_uncalibrated(monkeypatch):
     schema = {"features": list(FEATURE_COLUMNS)}
+    class UncalibratedStub:
+        calibration_status = "uncalibrated"
+        calibration_report = None
+
     monkeypatch.setattr(
         "eti.pipeline.fit_deployable_model",
-        lambda frame, horizon: (object(), schema),
+        lambda frame, horizon: (UncalibratedStub(), schema),
     )
     monkeypatch.setattr(
         "eti.pipeline.ModelArtifactStore.save_model",
@@ -57,7 +76,6 @@ def test_exported_model_is_explicitly_marked_uncalibrated(monkeypatch):
     )
     assert exported["calibration_status"] == "uncalibrated"
     assert exported["supported_classes"] == ["crypto_spot"]
-
 
 def test_training_cli_does_not_export_models_by_default(tmp_path, monkeypatch):
     import json
