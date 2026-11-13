@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 import logging
 import os
 import threading
-import time
 
 from .worker import AgentWorker
 from .backup import backup_once
@@ -15,23 +14,21 @@ from .storage import MemoryStore
 logger = logging.getLogger("eti.runtime")
 
 
-def _worker_loop(stop: threading.Event) -> None:
+def _worker_loop(stop: threading.Event, poll_seconds: float) -> None:
     worker = AgentWorker()
-    poll_seconds = float(os.environ.get("ETI_WORKER_POLL_SECONDS", "2"))
-    if not 0.1 <= poll_seconds <= 60:
-        raise ValueError("ETI_WORKER_POLL_SECONDS must be between 0.1 and 60")
     while not stop.is_set():
-        result = worker.run_once()
-        if result is None:
+        try:
+            result = worker.run_once()
+            if result is None:
+                stop.wait(poll_seconds)
+            else:
+                logger.info("agent task processed: id=%s status=%s", result["id"], result["status"])
+        except Exception:
+            logger.exception("agent worker iteration failed; polling will resume")
             stop.wait(poll_seconds)
-        else:
-            logger.info("agent task processed: id=%s status=%s", result["id"], result["status"])
 
 
-def _backup_loop(stop: threading.Event) -> None:
-    interval = int(os.environ.get("ETI_BACKUP_INTERVAL_SECONDS", "86400"))
-    if interval < 3600:
-        raise ValueError("ETI_BACKUP_INTERVAL_SECONDS must be at least 3600")
+def _backup_loop(stop: threading.Event, interval: int) -> None:
     while not stop.is_set():
         try:
             object_key = backup_once()
@@ -50,17 +47,27 @@ async def runtime_lifespan(_app):
     if worker_enabled or backup_enabled:
         MemoryStore()  # initialize the shared database before either background loop starts
 
-    if os.environ.get("ETI_EMBEDDED_WORKER", "0").lower() in {"1", "true", "yes"}:
+    if worker_enabled:
+        poll_seconds = float(os.environ.get("ETI_WORKER_POLL_SECONDS", "2"))
+        if not 0.1 <= poll_seconds <= 60:
+            raise ValueError("ETI_WORKER_POLL_SECONDS must be between 0.1 and 60")
         stop = threading.Event()
-        thread = threading.Thread(target=_worker_loop, args=(stop,), name="eti-worker", daemon=True)
+        thread = threading.Thread(
+            target=_worker_loop, args=(stop, poll_seconds), name="eti-worker", daemon=True
+        )
         stops.append(stop)
         threads.append(thread)
         thread.start()
         logger.info("embedded ETI worker started")
 
-    if os.environ.get("ETI_BACKUP_ENABLED", "0").lower() in {"1", "true", "yes"}:
+    if backup_enabled:
+        interval = int(os.environ.get("ETI_BACKUP_INTERVAL_SECONDS", "86400"))
+        if interval < 3600:
+            raise ValueError("ETI_BACKUP_INTERVAL_SECONDS must be at least 3600")
         stop = threading.Event()
-        thread = threading.Thread(target=_backup_loop, args=(stop,), name="eti-backup", daemon=True)
+        thread = threading.Thread(
+            target=_backup_loop, args=(stop, interval), name="eti-backup", daemon=True
+        )
         stops.append(stop)
         threads.append(thread)
         thread.start()
