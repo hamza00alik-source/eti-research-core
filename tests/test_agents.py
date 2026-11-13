@@ -128,3 +128,5 @@ def test_market_snapshot_defaults_to_mexc_public_feed(monkeypatch):
     assert captured["request"] == ("BTC/USDT", "1h", 200)
     assert result["venue"] == "mexc"
     assert result["market_type"] == "spot"
+    assert result["research_ranking"]["method"] == "transparent_heuristic_v1"
+    assert result["research_ranking"]["is_predictive_model"] is False
