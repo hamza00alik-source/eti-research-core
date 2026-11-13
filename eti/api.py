@@ -221,6 +221,86 @@ def set_autonomy_config(payload: AutonomyConfigPayload,
             "note": "The worker schedules public research scans and, when explicitly enabled, bounded daily model training. Training artifacts remain unapproved candidates. No exchange credentials or orders are used."}
 
 
+
+@app.get("/v1/paper/sessions")
+def list_paper_sessions(workspace_id: str | None = None,
+                        account: dict[str, str] = Depends(current_account)):
+    workspaces = _memory_store().list_workspaces(account["id"])
+    selected = workspace_id or (workspaces[0]["id"] if workspaces else None)
+    if selected is None:
+        return {"items": []}
+    return {"items": _memory_store().list_paper_sessions(account["id"], selected),
+            "mode": "paper_only", "live_execution_enabled": False}
+
+
+@app.post("/v1/paper/sessions", status_code=201)
+def create_paper_session(payload: PaperSessionPayload,
+                         account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    workspaces = store.list_workspaces(account["id"])
+    workspace_id = payload.workspace_id or (workspaces[0]["id"] if workspaces else None)
+    if workspace_id is None:
+        workspace_id = store.create_workspace(account["id"], "ETI Paper Trading")["id"]
+    risk_config = {
+        "max_risk_per_trade": payload.max_risk_per_trade,
+        "max_position_fraction": payload.max_position_fraction,
+        "max_gross_exposure": payload.max_gross_exposure,
+        "max_daily_loss": payload.max_daily_loss,
+        "max_drawdown": payload.max_drawdown,
+        "fee_bps": payload.fee_bps,
+        "slippage_bps": payload.slippage_bps,
+        "confidence_threshold": payload.confidence_threshold,
+        "allow_short": False,
+        "allow_live_orders": False,
+    }
+    try:
+        session = store.create_paper_session(
+            account["id"], workspace_id, payload.model_id, payload.model_version,
+            payload.venue, payload.symbol, payload.timeframe, payload.initial_cash,
+            risk_config,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"session": session, "mode": "paper_only", "live_execution_enabled": False,
+            "note": "This uses simulated funds and public market data only. It cannot place exchange orders."}
+
+
+@app.post("/v1/paper/sessions/{session_id}/start")
+def start_paper_session(session_id: str,
+                        account: dict[str, str] = Depends(current_account)):
+    try:
+        session = _memory_store().set_paper_session_status(account["id"], session_id, "running")
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="paper session not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"session": session, "mode": "paper_only", "live_execution_enabled": False}
+
+
+@app.post("/v1/paper/sessions/{session_id}/pause")
+def pause_paper_session(session_id: str,
+                        account: dict[str, str] = Depends(current_account)):
+    try:
+        session = _memory_store().set_paper_session_status(account["id"], session_id, "paused")
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="paper session not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"session": session, "mode": "paper_only", "live_execution_enabled": False}
+
+
+@app.get("/v1/paper/sessions/{session_id}/trades")
+def list_paper_trades(session_id: str, limit: int = Query(default=200, ge=1, le=1000),
+                      account: dict[str, str] = Depends(current_account)):
+    session = _memory_store().get_paper_session(account["id"], session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="paper session not found")
+    return {"items": _memory_store().list_paper_trades(account["id"], session_id, limit),
+            "mode": "paper_only", "live_execution_enabled": False}
+
+
 @app.get("/v1/workspaces")
 def list_workspaces(account: dict[str, str] = Depends(current_account)):
     return {"items": _memory_store().list_workspaces(account["id"])}
@@ -390,6 +470,27 @@ class ModelVersionPayload(BaseModel):
     training_data_ref: str = Field(min_length=1, max_length=300)
     evaluation_report: dict[str, Any]
     calibration_status: str = Field(min_length=1, max_length=20)
+
+class PaperSessionPayload(BaseModel):
+    model_id: str = Field(min_length=1, max_length=120)
+    model_version: str = Field(min_length=1, max_length=80)
+    venue: str = Field(default="mexc", pattern="^(binance|mexc)$")
+    symbol: str = Field(min_length=3, max_length=40)
+    timeframe: str = Field(default="1h", pattern="^(1h|4h|1d)$")
+    initial_cash: float = Field(gt=0, le=1000000000)
+    workspace_id: str | None = Field(default=None, min_length=1, max_length=128)
+    max_risk_per_trade: float = Field(default=0.005, gt=0, le=0.005)
+    max_position_fraction: float = Field(default=0.10, gt=0, le=0.10)
+    max_gross_exposure: float = Field(default=0.25, gt=0, le=0.25)
+    max_daily_loss: float = Field(default=0.02, gt=0, le=0.02)
+    max_drawdown: float = Field(default=0.08, gt=0, le=0.08)
+    fee_bps: float = Field(default=6.0, ge=0, le=100)
+    slippage_bps: float = Field(default=8.0, ge=0, le=100)
+    confidence_threshold: float = Field(default=0.55, ge=0.50, le=0.95)
+
+
+class PaperSessionStatusPayload(BaseModel):
+    status: str = Field(pattern="^(running|paused)$")
 
 
 def _model_admin_usernames() -> set[str]:
