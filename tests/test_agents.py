@@ -190,6 +190,7 @@ def test_autonomous_snapshot_automatically_queues_strategy_followup(tmp_path):
     assert queued[0]["target_capability"] == "strategy.walk_forward"
     assert queued[0]["input"]["source_snapshot_task_id"] == task["id"]
     assert queued[0]["input"]["limit"] == 500
+    assert queued[0]["input"]["market_type"] == "spot"
 
 
 def test_model_training_research_creates_unapproved_candidate(monkeypatch):
