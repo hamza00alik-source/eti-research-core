@@ -11,6 +11,8 @@ def test_container_runs_as_non_root_and_has_healthcheck():
     assert "chown -R eti:eti /app/data" in entrypoint
     assert "exec gosu eti" in entrypoint
     assert "HEALTHCHECK" in dockerfile
+    assert "PORT" in dockerfile
+    assert "${PORT:-8000}" in dockerfile
     assert 'CMD ["uvicorn", "eti.api:app"' in dockerfile
 
 
