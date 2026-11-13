@@ -70,3 +70,51 @@ class ProviderRegistry:
     def capabilities(self) -> dict[str, str]:
         return {key: getattr(provider, "provider_name", type(provider).__name__)
                 for key, provider in sorted(self._providers.items())}
+
+
+class YahooFinanceProvider:
+    """Public Yahoo Finance OHLCV adapter for forex, equities, commodities and indices.
+
+    Symbols use Yahoo Finance notation (for example EURUSD=X, AAPL, GC=F, ^GSPC).
+    This is a public-data adapter, not an execution connection; availability and
+    history depth depend on Yahoo's instrument and interval coverage.
+    """
+    provider_name = "yfinance-public"
+    supported_asset_classes = ("forex", "equity", "commodity", "index")
+
+    def __init__(self, asset_class: str):
+        if asset_class not in self.supported_asset_classes:
+            raise ValueError(f"Unsupported Yahoo Finance asset class: {asset_class}")
+        self.asset_class = asset_class
+
+    def fetch_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 1500) -> pd.DataFrame:
+        if not isinstance(symbol, str) or not symbol.strip() or len(symbol) > 40:
+            raise ValueError("A valid Yahoo Finance symbol is required")
+        if timeframe not in {"1m", "5m", "15m", "30m", "1h", "1d"}:
+            raise ValueError("Yahoo Finance timeframe must be 1m, 5m, 15m, 30m, 1h or 1d")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 50 <= limit <= 10000:
+            raise ValueError("limit must be an integer from 50 to 10000")
+        try:
+            import yfinance as yf
+        except ImportError as exc:
+            raise RuntimeError("Install yfinance to use the Yahoo Finance public-data adapter") from exc
+        data = yf.download(
+            symbol.strip(), period="max", interval=timeframe, auto_adjust=False,
+            actions=False, progress=False, threads=False,
+        )
+        if data is None or data.empty:
+            raise RuntimeError(f"No Yahoo Finance OHLCV history returned for {symbol}")
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+        data = data.rename(columns={str(column).lower(): str(column).lower() for column in data.columns})
+        required = {"open", "high", "low", "close"}
+        if not required.issubset(set(data.columns)):
+            raise ValueError("Yahoo Finance response is missing OHLC price columns")
+        volume = data["volume"] if "volume" in data.columns else pd.Series(0.0, index=data.index)
+        frame = pd.DataFrame({
+            "timestamp": pd.to_datetime(data.index, utc=True),
+            "open": data["open"].to_numpy(), "high": data["high"].to_numpy(),
+            "low": data["low"].to_numpy(), "close": data["close"].to_numpy(),
+            "volume": volume.to_numpy(),
+        })
+        return validate_ohlcv(frame).tail(limit).reset_index(drop=True)
