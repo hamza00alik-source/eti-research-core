@@ -620,7 +620,7 @@ class MemoryStore:
         now = _utc_now()
         with self._connection() as conn:
             cursor = conn.execute(
-                "UPDATE agent_tasks SET status = 'cancelled', lease_expires_at = NULL, updated_at = ? "
+                "UPDATE agent_tasks SET status = 'cancelled', lease_expires_at = NULL, lease_token = NULL, updated_at = ? "
                 "WHERE id = ? AND owner_id = ? AND workspace_id = ? AND status = 'queued'",
                 (now, task_id, owner_id, workspace_id),
             )
