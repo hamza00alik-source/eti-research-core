@@ -1,9 +1,10 @@
 """Research API and PWA host. No exchange order routes exist."""
 from __future__ import annotations
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from .auth import AuthManager, AuthenticationError, RegistrationDisabled
 from .config import AppConfig
 from .decision import build_research_decision
 from .risk import RiskEngine, RiskRequest
@@ -12,12 +13,76 @@ from .portfolio import assess_portfolio
 app = FastAPI(title=AppConfig().app_name, version=AppConfig().version)
 risk_engine = RiskEngine()
 
+
+class RegisterPayload(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    password: str = Field(min_length=12, max_length=1024)
+    invite_code: str = Field(min_length=1, max_length=256)
+
+
+class LoginPayload(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    password: str = Field(min_length=12, max_length=1024)
+
+
+def _auth_manager() -> AuthManager:
+    try:
+        return AuthManager()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="Authentication is not configured") from exc
+
+
+def current_account(authorization: str | None = Header(default=None)) -> dict[str, str]:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Bearer token required",
+                            headers={"WWW-Authenticate": "Bearer"})
+    token = authorization[7:].strip()
+    try:
+        return _auth_manager().verify_token(token)
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=401, detail=str(exc),
+                            headers={"WWW-Authenticate": "Bearer"}) from exc
+
+
+@app.post("/v1/auth/register", status_code=201)
+def register(payload: RegisterPayload):
+    manager = _auth_manager()
+    try:
+        account = manager.register(payload.username, payload.password, payload.invite_code)
+    except RegistrationDisabled as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"account": account, "access_token": manager.issue_token(account),
+            "token_type": "bearer", "expires_in": manager.token_ttl_seconds}
+
+
+@app.post("/v1/auth/token")
+def login(payload: LoginPayload):
+    manager = _auth_manager()
+    try:
+        account = manager.authenticate(payload.username, payload.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="invalid username or password",
+                            headers={"WWW-Authenticate": "Bearer"}) from exc
+    return {"account": account, "access_token": manager.issue_token(account),
+            "token_type": "bearer", "expires_in": manager.token_ttl_seconds}
+
+
+@app.get("/v1/profile")
+def profile(account: dict[str, str] = Depends(current_account)):
+    return {"account": account}
+
+
 class PortfolioPayload(BaseModel):
     equity: float = Field(gt=0)
     current_positions: dict[str, float] = Field(default_factory=dict)
     proposed_symbol: str = Field(min_length=1)
     proposed_notional: float = Field(gt=0)
     correlated_group_exposure: float = Field(default=0, ge=0)
+
 
 class RiskPayload(BaseModel):
     equity: float = Field(gt=0)
@@ -29,6 +94,7 @@ class RiskPayload(BaseModel):
     current_drawdown: float = Field(default=0, ge=0)
     leverage: float = Field(default=1, ge=1)
     side: str = "long"
+
 
 class DecisionPayload(BaseModel):
     probabilities: dict[str, float]
@@ -45,14 +111,17 @@ class DecisionPayload(BaseModel):
     correlated_group_exposure: float = Field(default=0, ge=0)
     confidence_threshold: float = Field(default=0.55, ge=0.5, le=1)
 
+
 @app.get("/health")
 def health():
     return {"status": "ok", "version": AppConfig().version, "mode": "research_only"}
+
 
 @app.get("/markets/supported")
 def supported_markets():
     return {"venues": ["binance", "mexc"], "asset_classes": ["crypto"],
             "market_types": ["spot"], "other_asset_classes": "CSV historical data only"}
+
 
 @app.get("/providers/capabilities")
 def provider_capabilities():
@@ -60,15 +129,18 @@ def provider_capabilities():
             "historical_csv_adapter": ["crypto", "forex", "equity", "commodity", "index"],
             "not_connected": ["forex broker feeds", "equity broker feeds", "commodity feeds"]}
 
+
 @app.get("/risk/config")
 def risk_config():
     return risk_engine.snapshot()
+
 
 @app.post("/risk/assess")
 def assess_risk(payload: RiskPayload):
     result = risk_engine.assess(RiskRequest(**payload.model_dump()))
     return {"approved": result.approved, "approved_notional": result.approved_notional,
             "quantity": result.quantity, "reasons": result.reasons}
+
 
 @app.post("/portfolio/assess")
 def portfolio_assess(payload: PortfolioPayload):
@@ -77,6 +149,7 @@ def portfolio_assess(payload: PortfolioPayload):
                               payload.correlated_group_exposure)
     return {"approved": result.approved, "reasons": result.reasons,
             "resulting_gross_fraction": result.resulting_gross_fraction}
+
 
 @app.post("/decision/assess")
 def decision_assess(payload: DecisionPayload):
@@ -89,16 +162,17 @@ def decision_assess(payload: DecisionPayload):
     correlation, threshold = data.pop("correlated_group_exposure"), data.pop("confidence_threshold")
     result = build_research_decision(
         probabilities, RiskRequest(equity, entry, stop, notional, gross,
-                                   daily, drawdown, leverage),
-        risk_engine=risk_engine, confidence_threshold=threshold,
-        current_positions=positions, proposed_symbol=symbol,
-        correlated_group_exposure=correlation)
+                                   daily, drawdown, leverage), risk_engine=risk_engine,
+        confidence_threshold=threshold, current_positions=positions,
+        proposed_symbol=symbol, correlated_group_exposure=correlation)
     return result
+
 
 @app.get("/execution/status")
 def execution_status():
     return {"enabled": False, "live_orders_implemented": False,
             "message": "ETI is research-only. No order execution endpoints are available."}
+
 
 web_dir = Path(__file__).resolve().parent.parent / "web"
 if web_dir.exists():
