@@ -402,8 +402,9 @@ class MemoryStore:
              "requester": row["requester"], "target_capability": row["target_capability"],
              "status": row["status"], "input": json.loads(row["input_json"]),
              "result": json.loads(row["result_json"]) if row["result_json"] is not None else None,
-             "deadline_at": row["deadline_at"], "created_at": row["created_at"],
-             "updated_at": row["updated_at"]}
+             "deadline_at": row["deadline_at"], "attempt_count": row["attempt_count"],
+             "max_attempts": row["max_attempts"], "lease_expires_at": row["lease_expires_at"],
+             "created_at": row["created_at"], "updated_at": row["updated_at"]}
             for row in rows
         ]
 
@@ -497,8 +498,9 @@ class MemoryStore:
                 "requester": row["requester"], "target_capability": row["target_capability"],
                 "status": row["status"], "input": json.loads(row["input_json"]),
                 "result": json.loads(row["result_json"]) if row["result_json"] is not None else None,
-                "deadline_at": row["deadline_at"], "created_at": row["created_at"],
-                "updated_at": row["updated_at"]}
+                "deadline_at": row["deadline_at"], "attempt_count": row["attempt_count"],
+                "max_attempts": row["max_attempts"], "lease_expires_at": row["lease_expires_at"],
+                "created_at": row["created_at"], "updated_at": row["updated_at"]}
 
     def update_agent_task(
         self, owner_id: str, workspace_id: str, task_id: str,
@@ -530,7 +532,8 @@ class MemoryStore:
             if status == "completed" and encoded_result is None:
                 raise ValueError("completed tasks require a result")
             conn.execute(
-                "UPDATE agent_tasks SET status = ?, result_json = COALESCE(?, result_json), updated_at = ? "
+                "UPDATE agent_tasks SET status = ?, result_json = COALESCE(?, result_json), "
+                "lease_expires_at = NULL, updated_at = ? "
                 "WHERE id = ? AND owner_id = ? AND workspace_id = ?",
                 (status, encoded_result, now, task_id, owner_id, workspace_id),
             )
