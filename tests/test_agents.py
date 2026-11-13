@@ -468,3 +468,48 @@ def test_default_registry_exposes_dynamic_market_and_derivative_research():
     capabilities = default_capabilities().capabilities()
     assert "market.discover" in capabilities
     assert "derivatives.context" in capabilities
+
+
+def test_market_discovery_ranks_active_quote_markets(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from eti.providers import CcxtPublicProvider
+
+    class FakeExchange:
+        has = {"fetchTickers": True}
+        def load_markets(self):
+            return {
+                "BTC/USDT": {"active": True, "spot": True, "quote": "USDT", "base": "BTC"},
+                "ETH/USDT": {"active": True, "spot": True, "quote": "USDT", "base": "ETH"},
+                "OLD/USDT": {"active": False, "spot": True, "quote": "USDT", "base": "OLD"},
+                "BTC/USDT:USDT": {"active": True, "swap": True, "quote": "USDT", "base": "BTC", "linear": True},
+            }
+        def fetch_tickers(self, symbols):
+            return {"BTC/USDT": {"quoteVolume": 10}, "ETH/USDT": {"quoteVolume": 50}}
+
+    monkeypatch.setitem(sys.modules, "ccxt", SimpleNamespace(binance=lambda _config: FakeExchange()))
+    result = CcxtPublicProvider("binance", "spot").discover_markets(limit=10)
+    assert [item["symbol"] for item in result] == ["ETH/USDT", "BTC/USDT"]
+    assert all(item["market_type"] == "spot" for item in result)
+
+
+def test_derivative_context_reports_unavailable_history_without_fabricating(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from eti.providers import CcxtPublicProvider
+
+    class FakeExchange:
+        has = {"fetchFundingRateHistory": False, "fetchFundingRate": False,
+               "fetchOpenInterestHistory": False, "fetchOpenInterest": False}
+        def load_markets(self):
+            return {"BTC/USDT:USDT": {"swap": True}}
+        def milliseconds(self): return 1760000000000
+        def parse_timeframe(self, _timeframe): return 3600
+
+    monkeypatch.setitem(sys.modules, "ccxt", SimpleNamespace(binance=lambda _config: FakeExchange()))
+    result = CcxtPublicProvider("binance", "swap").fetch_derivatives_context("BTC/USDT:USDT")
+    assert result["funding_history"] == []
+    assert result["open_interest_history"] == []
+    assert result["current_funding"] is None
+    assert result["current_open_interest"] is None
+    assert result["history_coverage"]["has_historical_funding"] is False
