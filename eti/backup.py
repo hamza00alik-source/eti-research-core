@@ -96,6 +96,8 @@ def restore_snapshot(encrypted: bytes, destination: str | os.PathLike[str],
                 raise RuntimeError("restored SQLite database failed integrity_check")
         Path(str(target) + "-wal").unlink(missing_ok=True)
         Path(str(target) + "-shm").unlink(missing_ok=True)
+        if os.name == "posix":
+            temporary.chmod(0o600)
         os.replace(temporary, target)
     finally:
         temporary.unlink(missing_ok=True)
