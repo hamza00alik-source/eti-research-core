@@ -37,4 +37,4 @@ def test_deployable_fit_uses_exact_feature_schema_and_only_completed_rows(monkey
     assert schema["features"] == FEATURE_COLUMNS
     assert schema["training_rows"] == 254
     assert schema["label_horizon_bars"] == 6
-    assert schema["training_rows"] == 260
+    assert schema["training_rows"] == 254
