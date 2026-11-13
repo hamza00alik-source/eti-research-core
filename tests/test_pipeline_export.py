@@ -47,6 +47,7 @@ def test_deployable_fit_uses_exact_feature_schema_and_only_completed_rows(monkey
     assert seen["calibration_rows"] == 51
     assert seen["calibration_columns"] == FEATURE_COLUMNS
     assert schema["features"] == FEATURE_COLUMNS
+    assert len(schema["dataset_sha256"]) == 64
     assert schema["training_rows"] == 203
     assert schema["calibration_rows"] == 51
     assert schema["calibration_status"] == "calibrated"
