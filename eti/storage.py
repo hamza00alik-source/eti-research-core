@@ -458,7 +458,7 @@ class MemoryStore:
                                 for timeframe in timeframes:
                                     task_id = str(uuid4())
                                     payload = {
-                                        "venue": venue, "market_type": market_type,
+                                        "venue": venue, "asset_class": "crypto", "market_type": market_type,
                                         "symbol": market_symbol, "timeframe": timeframe,
                                         "limit": 200, "scheduled_by": "eti.autonomy.supervisor",
                                     }
@@ -477,7 +477,7 @@ class MemoryStore:
                                         VALUES(?,?,?,?,?,?)""",
                                         (str(uuid4()), row["owner_id"], row["workspace_id"],
                                          "autonomy.scan.queued",
-                                         _encode_json({"task_id": task_id, "venue": venue,
+                                         _encode_json({"task_id": task_id, "venue": venue, "asset_class": "crypto",
                                                        "market_type": market_type, "symbol": market_symbol,
                                                        "timeframe": timeframe}), now_text),
                                     )
