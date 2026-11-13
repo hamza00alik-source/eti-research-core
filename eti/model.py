@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.optimize import minimize_scalar
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 CLASSES = np.array([0, 1, 2])
@@ -26,6 +27,93 @@ class BaselineModel:
         self.calibration_status = "uncalibrated"
         self.calibration_report = None
         return self
+
+    def fit_temperature_calibration(self, x, y, min_samples: int = 30) -> dict:
+        """Fit one scalar temperature on a separate chronological calibration set."""
+        if self.classes_ is None:
+            raise RuntimeError("Model must be fitted before calibration")
+        labels = np.asarray(y)
+        if labels.ndim != 1 or len(labels) != len(x):
+            raise ValueError("Calibration features and labels must have matching row counts")
+        if not np.issubdtype(labels.dtype, np.number) or not np.isfinite(labels).all():
+            raise ValueError("Calibration labels must be finite numeric class IDs")
+        labels = labels.astype(int)
+        if not np.isin(labels, CLASSES).all():
+            raise ValueError("Calibration labels must be in the short/flat/long class set")
+
+        sample_count = int(len(labels))
+        counts = {str(int(cls)): int(np.sum(labels == cls)) for cls in CLASSES}
+        report = {
+            "passed": False,
+            "method": "temperature_scaling",
+            "sample_count": sample_count,
+            "class_counts": counts,
+            "temperature": 1.0,
+        }
+        self.calibration_status = "uncalibrated"
+        self.calibration_report = report
+
+        if sample_count < min_samples:
+            report["reason"] = "insufficient_calibration_samples"
+            return report
+        if any(counts[str(int(cls))] < 5 for cls in CLASSES):
+            report["reason"] = "each_class_requires_at_least_five_calibration_samples"
+            return report
+
+        raw = self.estimator.predict_proba(x)
+        aligned = np.zeros((len(raw), len(CLASSES)), dtype=float)
+        for index, cls in enumerate(self.classes_):
+            aligned[:, int(cls)] = raw[:, index]
+        if (
+            aligned.shape != (sample_count, len(CLASSES))
+            or not np.isfinite(aligned).all()
+            or (aligned < 0).any()
+            or (aligned.sum(axis=1) <= 0).any()
+        ):
+            report["reason"] = "invalid_raw_probabilities"
+            return report
+        aligned = aligned / aligned.sum(axis=1, keepdims=True)
+        one_hot = np.eye(len(CLASSES), dtype=float)[labels]
+
+        def probabilities(log_temperature: float) -> np.ndarray:
+            logits = np.log(np.clip(aligned, 1e-12, 1.0)) / np.exp(log_temperature)
+            logits -= logits.max(axis=1, keepdims=True)
+            scaled = np.exp(logits)
+            return scaled / scaled.sum(axis=1, keepdims=True)
+
+        def nll(log_temperature: float) -> float:
+            calibrated = probabilities(log_temperature)
+            return float(-np.log(np.clip(
+                calibrated[np.arange(sample_count), labels], 1e-12, 1.0
+            )).mean())
+
+        before = nll(0.0)
+        result = minimize_scalar(
+            nll, bounds=(float(np.log(0.05)), float(np.log(20.0))),
+            method="bounded",
+        )
+        temperature = float(np.exp(result.x))
+        after = nll(float(result.x))
+        brier_before = float(np.mean(np.sum((aligned - one_hot) ** 2, axis=1)))
+        calibrated = probabilities(float(result.x))
+        brier_after = float(np.mean(np.sum((calibrated - one_hot) ** 2, axis=1)))
+        passed = bool(
+            result.success and np.isfinite(temperature) and temperature > 0
+            and np.isfinite(after) and after <= before + 1e-9
+        )
+        report.update({
+            "passed": passed,
+            "temperature": temperature if passed else 1.0,
+            "nll_before": before,
+            "nll_after": after,
+            "brier_before": brier_before,
+            "brier_after": brier_after,
+        })
+        if passed:
+            self.calibration_status = "calibrated"
+        else:
+            report["reason"] = "temperature_scaling_did_not_improve_validation_nll"
+        return report
 
     def calibration_temperature(self) -> float | None:
         if self.calibration_status != "calibrated":
