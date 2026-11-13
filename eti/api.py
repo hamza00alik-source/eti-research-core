@@ -330,6 +330,15 @@ class DecisionPayload(BaseModel):
     confidence_threshold: float = Field(default=0.55, ge=0.5, le=1)
 
 
+@app.get("/v1/audit/events")
+def list_audit_events(limit: int = Query(default=100, ge=1, le=500),
+                      account: dict[str, str] = Depends(current_account)):
+    try:
+        return {"items": _memory_store().list_audit_events(account["id"], limit)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "version": AppConfig().version, "mode": "research_only"}
