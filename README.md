@@ -160,7 +160,7 @@ The PWA also displays the authenticated account's audit trail alongside its work
 
 ## Explicit model artifact export from the training CLI
 
-The normal research command does not export a deployable model. The opt-in `--save-model` flag runs only after the requested evaluation completes, fits one final model on all completed labelled rows, and writes it to the private `ETI_ARTIFACT_DIR` content-addressed store. The metrics report includes the artifact URI, SHA-256, feature schema, supported class and dataset reference.
+The normal research command does not export a deployable model. The opt-in `--save-model` flag runs only after the requested evaluation completes and writes a candidate to the private `ETI_ARTIFACT_DIR` content-addressed store. The candidate classifier is fit on the earlier 80% of completed labelled rows; the label horizon is purged between the fit and calibration windows to prevent future-price leakage. Temperature scaling is fit only on the later chronological 20% calibration segment. The metrics report includes the artifact URI, SHA-256, feature schema, training/calibration windows and calibration evidence.
 
 Example command shape (do not run until the project is ready for the planned training phase):
 
@@ -171,4 +171,4 @@ python -m eti.pipeline --exchange mexc --symbol BTC/USDT \
   --model-id eti-crypto-core --model-version 0.1.0
 ```
 
-This does not register or approve the model. Export metadata is explicitly marked `uncalibrated`; do not change that status manually. A calibration pipeline, passing evaluation report and independent approval are still required before inference. The export flag is explicit; API startup, CI and worker startup never train or export models.
+If the calibration window has fewer than 30 rows, fewer than five examples of any class, or temperature scaling does not improve calibration-window log loss, the artifact remains `uncalibrated` and cannot be approved. A passing calibration report is not evidence of profitability and must be reviewed alongside out-of-sample trading metrics. The export does not register or approve the model; an independent evaluation report and reviewer approval are still required before inference. The export flag is explicit; API startup, CI and worker startup never train or export models.
