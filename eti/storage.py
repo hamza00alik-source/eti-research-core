@@ -191,6 +191,17 @@ class MemoryStore:
                 CREATE INDEX IF NOT EXISTS idx_model_versions_lifecycle
                     ON model_versions(model_id, lifecycle);
 
+                CREATE TABLE IF NOT EXISTS exchange_credentials (
+                    owner_id TEXT NOT NULL,
+                    venue TEXT NOT NULL CHECK(venue IN ('binance','mexc')),
+                    api_key_ciphertext TEXT NOT NULL,
+                    api_secret_ciphertext TEXT NOT NULL,
+                    key_suffix TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(owner_id, venue)
+                );
+
                 CREATE TABLE IF NOT EXISTS paper_sessions (
                     id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
@@ -1518,3 +1529,75 @@ class MemoryStore:
                      _encode_json(event["risk_decision"]), candle_at, now),
                 )
         return self.get_paper_session(owner_id, session_id)
+
+
+    def upsert_exchange_credential(
+        self, owner_id: str, venue: str, api_key_ciphertext: str,
+        api_secret_ciphertext: str, key_suffix: str,
+    ) -> dict[str, Any]:
+        """Store already-encrypted exchange secrets; never accept plaintext here."""
+        owner_id = _required_text(owner_id, "owner_id")
+        if venue not in {"binance", "mexc"}:
+            raise ValueError("unsupported exchange venue")
+        api_key_ciphertext = _required_text(api_key_ciphertext, "api_key_ciphertext", 2048)
+        api_secret_ciphertext = _required_text(api_secret_ciphertext, "api_secret_ciphertext", 2048)
+        key_suffix = _required_text(key_suffix, "key_suffix", 8)
+        now = _utc_now()
+        with self._connection() as conn:
+            conn.execute(
+                """INSERT INTO exchange_credentials
+                (owner_id,venue,api_key_ciphertext,api_secret_ciphertext,key_suffix,created_at,updated_at)
+                VALUES(?,?,?,?,?,?,?)
+                ON CONFLICT(owner_id,venue) DO UPDATE SET
+                api_key_ciphertext=excluded.api_key_ciphertext,
+                api_secret_ciphertext=excluded.api_secret_ciphertext,
+                key_suffix=excluded.key_suffix,updated_at=excluded.updated_at""",
+                (owner_id, venue, api_key_ciphertext, api_secret_ciphertext, key_suffix, now, now),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) VALUES(?,?,NULL,?,?,?)",
+                (str(uuid4()), owner_id, "exchange.credentials.saved",
+                 _encode_json({"venue": venue, "key_suffix": key_suffix}), now),
+            )
+        return {"venue": venue, "key_suffix": key_suffix, "created_at": now, "updated_at": now}
+
+    def list_exchange_credentials(self, owner_id: str) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT venue,key_suffix,created_at,updated_at FROM exchange_credentials WHERE owner_id=? ORDER BY venue",
+                (owner_id,),
+            ).fetchall()
+        return [{"venue": row["venue"], "masked_api_key": "••••" + row["key_suffix"],
+                 "created_at": row["created_at"], "updated_at": row["updated_at"]}
+                for row in rows]
+
+    def get_exchange_credential(self, owner_id: str, venue: str) -> dict[str, Any] | None:
+        owner_id = _required_text(owner_id, "owner_id")
+        if venue not in {"binance", "mexc"}:
+            raise ValueError("unsupported exchange venue")
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT owner_id,venue,api_key_ciphertext,api_secret_ciphertext,key_suffix,created_at,updated_at "
+                "FROM exchange_credentials WHERE owner_id=? AND venue=?",
+                (owner_id, venue),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def delete_exchange_credential(self, owner_id: str, venue: str) -> bool:
+        owner_id = _required_text(owner_id, "owner_id")
+        if venue not in {"binance", "mexc"}:
+            raise ValueError("unsupported exchange venue")
+        now = _utc_now()
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM exchange_credentials WHERE owner_id=? AND venue=?",
+                (owner_id, venue),
+            )
+            if cursor.rowcount:
+                conn.execute(
+                    "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) VALUES(?,?,NULL,?,?,?)",
+                    (str(uuid4()), owner_id, "exchange.credentials.deleted",
+                     _encode_json({"venue": venue}), now),
+                )
+        return cursor.rowcount == 1
