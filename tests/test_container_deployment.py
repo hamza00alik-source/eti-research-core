@@ -34,3 +34,15 @@ def test_example_environment_contains_placeholders_not_live_secrets():
     assert "REPLACE_WITH_PRIVATE_INVITE_KEY" in env
     assert "127.0.0.1" in env
     assert "-----BEGIN" not in env
+
+
+def test_compose_passes_persistent_artifact_and_optional_backup_configuration():
+    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+    env = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "ETI_ARTIFACT_DIR: /app/data/artifacts" in compose
+    assert 'ETI_EMBEDDED_WORKER: "0"' in compose
+    assert "ETI_BACKUP_ENABLED: ${ETI_BACKUP_ENABLED:-0}" in compose
+    assert "ETI_BACKUP_ENCRYPTION_KEY: ${ETI_BACKUP_ENCRYPTION_KEY:-}" in compose
+    assert "ETI_BACKUP_ENABLED=0" in env
+    assert "ETI_BACKUP_ENCRYPTION_KEY=" in env
+    assert "ETI_BACKUP_S3_BUCKET=" in env
