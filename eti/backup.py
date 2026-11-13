@@ -75,6 +75,8 @@ def restore_snapshot(encrypted: bytes, destination: str | os.PathLike[str],
             result = connection.execute("PRAGMA integrity_check").fetchone()
             if not result or result[0] != "ok":
                 raise RuntimeError("restored SQLite database failed integrity_check")
+        Path(str(target) + "-wal").unlink(missing_ok=True)
+        Path(str(target) + "-shm").unlink(missing_ok=True)
         os.replace(temporary, target)
     finally:
         temporary.unlink(missing_ok=True)
@@ -89,8 +91,10 @@ def _s3_client():
     secret_key = os.environ["ETI_BACKUP_S3_SECRET_ACCESS_KEY"]
     region = os.environ.get("ETI_BACKUP_S3_REGION", "us-east-1")
     style = os.environ.get("ETI_BACKUP_S3_ADDRESSING_STYLE", "path")
+    if style == "virtual-host":
+        style = "virtual"
     if style not in {"path", "virtual"}:
-        raise ValueError("ETI_BACKUP_S3_ADDRESSING_STYLE must be path or virtual")
+        raise ValueError("ETI_BACKUP_S3_ADDRESSING_STYLE must be path or virtual-host")
     return boto3.client(
         "s3", endpoint_url=endpoint, region_name=region,
         aws_access_key_id=access_key, aws_secret_access_key=secret_key,
