@@ -918,14 +918,15 @@ def supported_markets():
 @app.get("/providers/capabilities")
 def provider_capabilities():
     return {
-        "live_public_provider": [
+        "public_market_data_provider": [
             "crypto spot via Binance/MEXC where listed",
             "crypto perpetual swaps via Binance/MEXC where listed",
             "crypto dated futures via Binance/MEXC where listed",
+            "forex, equities, commodities and indices via Yahoo Finance public OHLCV",
         ],
         "historical_csv_adapter": ["crypto", "forex", "equity", "commodity", "index"],
-        "not_connected": ["live forex feeds", "live equity feeds", "live commodity feeds", "live index feeds"],
-        "derivatives_data_gaps": ["funding history", "open interest history", "liquidation data", "exchange-specific margin tiers"],
+        "not_connected": ["authenticated forex broker feeds", "authenticated equity broker feeds", "authenticated commodity broker feeds", "authenticated index broker feeds"],
+        "data_quality_notes": ["Yahoo Finance coverage and history vary by instrument and interval", "derivatives funding history", "open interest history", "liquidation data", "exchange-specific margin tiers"],
         "live_execution": "spot only; derivatives execution is not implemented",
     }
 
