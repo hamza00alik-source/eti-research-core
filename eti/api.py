@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .agents import default_capabilities
 from .auth import AuthManager, AuthenticationError, RateLimitExceeded, RegistrationDisabled
 from .config import AppConfig
 from .decision import build_research_decision
@@ -65,6 +66,7 @@ class AgentTaskPayload(BaseModel):
     target_capability: str = Field(min_length=1, max_length=120)
     input: Any
     deadline_at: str | None = Field(default=None, max_length=40)
+    max_attempts: int = Field(default=3, ge=1, le=10)
 
 
 class AgentTaskUpdatePayload(BaseModel):
@@ -224,6 +226,11 @@ def delete_memory(workspace_id: str, namespace: str, key: str,
     return Response(status_code=204)
 
 
+@app.get("/v1/agents/capabilities")
+def list_agent_capabilities(account: dict[str, str] = Depends(current_account)):
+    return {"items": default_capabilities().capabilities()}
+
+
 @app.get("/v1/workspaces/{workspace_id}/agents/tasks")
 def list_agent_tasks(workspace_id: str, status: str | None = None,
                      limit: int = Query(default=100, ge=1, le=500),
@@ -242,7 +249,7 @@ def create_agent_task(workspace_id: str, payload: AgentTaskPayload,
     try:
         return _memory_store().create_agent_task(
             account["id"], workspace_id, account["username"],
-            payload.target_capability, payload.input, payload.deadline_at)
+            payload.target_capability, payload.input, payload.deadline_at, payload.max_attempts)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
     except ValueError as exc:
@@ -261,9 +268,11 @@ def get_agent_task(workspace_id: str, task_id: str,
 @app.patch("/v1/workspaces/{workspace_id}/agents/tasks/{task_id}")
 def update_agent_task(workspace_id: str, task_id: str, payload: AgentTaskUpdatePayload,
                       account: dict[str, str] = Depends(current_account)):
+    if payload.status != "cancelled" or payload.result is not None:
+        raise HTTPException(status_code=403,
+                            detail="Accounts may cancel queued tasks; only the worker may complete or fail tasks")
     try:
-        return _memory_store().update_agent_task(
-            account["id"], workspace_id, task_id, payload.status, payload.result)
+        return _memory_store().cancel_agent_task(account["id"], workspace_id, task_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="task not found") from exc
     except ValueError as exc:
@@ -419,15 +428,6 @@ class DecisionPayload(BaseModel):
     symbol: str = Field(min_length=1)
     correlated_group_exposure: float = Field(default=0, ge=0)
     confidence_threshold: float = Field(default=0.55, ge=0.5, le=1)
-
-
-@app.get("/v1/audit/events")
-def list_audit_events(limit: int = Query(default=100, ge=1, le=500),
-                      account: dict[str, str] = Depends(current_account)):
-    try:
-        return {"items": _memory_store().list_audit_events(account["id"], limit)}
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/health")
