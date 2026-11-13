@@ -926,6 +926,12 @@ def provider_capabilities():
             "forex, equities, commodities and indices via Yahoo Finance public OHLCV",
         ],
         "historical_csv_adapter": ["crypto", "forex", "equity", "commodity", "index"],
+        "autonomous_reference_universe": {
+            "forex": ["EURUSD=X"], "equity": ["AAPL"],
+            "commodity": ["GC=F"], "index": ["^GSPC"],
+            "crypto": "Owner-configured Binance/MEXC spot and perpetual-swap watchlist",
+        },
+        "daily_model_training_budget": 8,
         "not_connected": ["authenticated forex broker feeds", "authenticated equity broker feeds", "authenticated commodity broker feeds", "authenticated index broker feeds"],
         "data_quality_notes": ["Yahoo Finance coverage and history vary by instrument and interval", "derivatives funding history", "open interest history", "liquidation data", "exchange-specific margin tiers"],
         "live_execution": "spot only; derivatives execution is not implemented",
