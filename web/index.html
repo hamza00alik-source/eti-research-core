@@ -35,6 +35,12 @@
 </form>
 </div>
 <div id="account-view" hidden>
+<form id="password-form" class="inline-form">
+<h3>Change password</h3>
+<label>Current password<input name="current_password" type="password" minlength="12" maxlength="1024" autocomplete="current-password" required></label>
+<label>New password (12+ characters)<input name="new_password" type="password" minlength="12" maxlength="1024" autocomplete="new-password" required></label>
+<button type="submit">Update password</button>
+</form>
 <div class="account-row"><div><strong id="account-name">Signed in</strong><p class="muted">Your private ETI workspace</p></div><button id="export-account" type="button" class="secondary-button">Export my data (JSON)</button><button id="signout" type="button" class="secondary-button">Sign out</button></div>
 <form id="workspace-form" class="inline-form">
 <label>New workspace name<input name="name" maxlength="80" placeholder="My research" required></label>
