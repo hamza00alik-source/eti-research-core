@@ -16,6 +16,7 @@ from .model import BaselineModel
 from .artifacts import ModelArtifactStore
 from .simulator import simulate_long_flat
 from .performance import evaluate_predictions
+from .regimes import classify_market_regime
 
 
 def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h") -> dict:
@@ -166,15 +167,27 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
         min_train=min_train, validation_size=validation_size,
         test_size=test_size, step_size=step_size, purge_bars=horizon)
     bars_per_year = 365.25 * 24 * 60 * 60 / _timeframe_seconds(timeframe)
+    # Causal regimes are aligned to the exact cleaned dataset rows.
+    regime_frame = classify_market_regime(frame)
+    regime_by_row = regime_frame.loc[dataset.index, "regime"].reset_index(drop=True)
     performance_folds = []
     for fold in report["folds"]:
         start, end = fold["boundaries"]["test_start"], fold["boundaries"]["test_end"]
+        fold_regimes = regime_by_row.iloc[start:end]
+        regime_counts = fold_regimes.value_counts().to_dict()
+        regime_total = int(len(fold_regimes))
+        regime_diagnostics = {
+            "bar_count": regime_total,
+            "counts": {str(name): int(count) for name, count in regime_counts.items()},
+            "fractions": {str(name): float(count / regime_total) for name, count in regime_counts.items()},
+        }
         close_test = dataset["close"].iloc[start:end].reset_index(drop=True)
         actual_test = pd.Series(fold["test_actual"], dtype=int)
         prediction_test = pd.Series(fold["test_predictions"], dtype=int)
         performance_folds.append({
             "fold": fold["fold"],
             "selected_candidate": fold["selected_candidate"],
+            "market_regimes": regime_diagnostics,
             **evaluate_predictions(
                 close_test, actual_test, prediction_test,
                 fee_bps=6.0, slippage_bps=2.0, funding_bps_per_bar=0.0,
