@@ -429,8 +429,8 @@ class MemoryStore:
 
             expired = conn.execute(
                 "SELECT id, owner_id, workspace_id, attempt_count, max_attempts "
-                "FROM agent_tasks WHERE status = 'running' AND lease_expires_at IS NOT NULL "
-                "AND lease_expires_at <= ?",
+                "FROM agent_tasks WHERE status = 'running' "
+                "AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
                 (now_text,),
             ).fetchall()
             for row in expired:
