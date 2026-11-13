@@ -13,7 +13,7 @@ def test_container_runs_as_non_root_and_has_healthcheck():
     assert "HEALTHCHECK" in dockerfile
     assert "PORT" in dockerfile
     assert "${PORT:-8000}" in dockerfile
-    assert 'CMD ["uvicorn", "eti.api:app"' in dockerfile
+    assert "exec uvicorn eti.api:app" in dockerfile
 
 
 def test_compose_separates_api_and_worker_with_shared_persistent_data():
