@@ -8,7 +8,7 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 - Live execution remains Binance/MEXC spot only and disabled by default. Research data now distinguishes crypto spot, perpetual swaps and dated futures where each exchange lists the requested contract. Derivative execution is not implemented.
 - Public Yahoo Finance OHLCV research adapter is available for forex, equities, indices and commodities (Yahoo ticker notation such as EURUSD=X, AAPL, ^GSPC and GC=F). This is public market-data access, not an authenticated broker feed; history and interval coverage vary. Validated CSV remains available as a fallback.
 - Derivative candidate training is exploratory: long/short price-only evaluation is available, but funding history, open interest, liquidation data and contract-specific margin/fee schedules are missing. A quality gate prevents derivative candidates from passing approval until funding history is supported.
-- Training is not automatic: model fitting is an explicit CLI action and is not part of startup or CI.
+- Training does not run on application startup or in CI. It can be launched manually through the research capability/CLI or scheduled by the owner in the autonomous research settings; scheduled candidates remain subject to the same quality gates.
 - No profitability claim: backtests do not establish future performance.
 - Independent risk: model decisions must pass deterministic risk and portfolio checks; defaults disable shorts and leverage above 1x.
 - Exchange credentials: owner-only Binance/MEXC keys are encrypted with AES-256-GCM using a server-side key; the API never returns plaintext credentials. Connection verification checks private read access only.
