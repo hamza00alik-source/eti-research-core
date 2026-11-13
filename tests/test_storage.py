@@ -294,9 +294,6 @@ def test_autonomy_profile_schedules_owner_scoped_research_tasks_and_respects_int
     first_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
     assert store.enqueue_due_autonomy_tasks(first_time) == 2
     assert store.enqueue_due_autonomy_tasks(first_time) == 0
-    assert store.list_agent_tasks("owner-a", workspace["id"], status="queued") == [
-        task for task in store.list_agent_tasks("owner-a", workspace["id"], status="queued")
-    ]
     assert len(store.list_agent_tasks("owner-a", workspace["id"], status="queued")) == 2
     assert store.list_agent_tasks("owner-b", workspace["id"]) == []
     assert store.enqueue_due_autonomy_tasks(
