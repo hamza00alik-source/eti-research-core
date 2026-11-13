@@ -32,11 +32,15 @@ class BaselineModel:
         """Fit one scalar temperature on a separate chronological calibration set."""
         if self.classes_ is None:
             raise RuntimeError("Model must be fitted before calibration")
+        if isinstance(min_samples, bool) or not isinstance(min_samples, int) or min_samples < 30:
+            raise ValueError("min_samples must be an integer of at least 30")
         labels = np.asarray(y)
         if labels.ndim != 1 or len(labels) != len(x):
             raise ValueError("Calibration features and labels must have matching row counts")
         if not np.issubdtype(labels.dtype, np.number) or not np.isfinite(labels).all():
             raise ValueError("Calibration labels must be finite numeric class IDs")
+        if not np.equal(labels, np.floor(labels)).all():
+            raise ValueError("Calibration labels must be integer class IDs")
         labels = labels.astype(int)
         if not np.isin(labels, CLASSES).all():
             raise ValueError("Calibration labels must be in the short/flat/long class set")
@@ -68,6 +72,7 @@ class BaselineModel:
             aligned.shape != (sample_count, len(CLASSES))
             or not np.isfinite(aligned).all()
             or (aligned < 0).any()
+            or (aligned > 1).any()
             or (aligned.sum(axis=1) <= 0).any()
         ):
             report["reason"] = "invalid_raw_probabilities"
@@ -123,6 +128,7 @@ class BaselineModel:
             raise RuntimeError("Calibrated model is missing its calibration report")
         temperature = report.get("temperature")
         sample_count = report.get("sample_count")
+        class_counts = report.get("class_counts")
         nll_before = report.get("nll_before")
         nll_after = report.get("nll_after")
         if (
@@ -130,6 +136,13 @@ class BaselineModel:
             or report.get("method") != "temperature_scaling"
             or isinstance(sample_count, bool) or not isinstance(sample_count, int)
             or sample_count < 30
+            or not isinstance(class_counts, dict)
+            or any(
+                isinstance(class_counts.get(str(int(cls))), bool)
+                or not isinstance(class_counts.get(str(int(cls))), int)
+                or class_counts.get(str(int(cls))) < 5
+                for cls in CLASSES
+            )
             or isinstance(temperature, bool) or not isinstance(temperature, (int, float))
             or not np.isfinite(temperature) or temperature <= 0
             or isinstance(nll_before, bool) or not isinstance(nll_before, (int, float))
