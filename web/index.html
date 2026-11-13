@@ -48,12 +48,13 @@
 <label class="workspace-picker">Active workspace<select id="workspace-select"><option value="">Select workspace</option></select></label>
 <div class="autonomy-card" aria-labelledby="autonomy-heading">
  <div><div class="eyebrow">AUTONOMOUS OPERATION</div><h3 id="autonomy-heading">Let ETI run its research and training loop</h3>
- <p class="muted">One action starts 15-minute public-market scans and daily model training. ETI evaluates results and registers unapproved candidates automatically. Research only: no private exchange keys, no orders and no live trading.</p></div>
+ <p class="muted">One action starts public crypto spot and perpetual-swap scans plus scheduled model research. Dated futures can be queued with their exact contract symbols. Research only: no orders and no live trading.</p></div>
+ <label>Research market types<select id="autonomy-market-types" multiple size="2" aria-label="Research market types"><option value="spot" selected>Spot</option><option value="swap" selected>Perpetual swaps</option></select></label>
  <div class="workspace-actions"><button id="autonomy-toggle" type="button">Start autonomous operation</button><span id="autonomy-status" class="muted" role="status" aria-live="polite">Checking status…</span></div>
 </div>
 <div class="autonomy-card" aria-labelledby="training-heading">
  <div><div class="eyebrow">AUTONOMOUS MODEL TRAINING</div><h3 id="training-heading">Automatic model training</h3>
- <p class="muted">Daily training on public spot candles is included when autonomous operation is started. ETI evaluates models and saves candidates for review. Training is bounded to eight market combinations. Candidates remain unapproved; ETI never places live orders.</p></div>
+ <p class="muted">Scheduled training covers selected spot and perpetual-swap crypto markets. Derivative candidates are price-only research until funding history and contract costs are integrated; a quality gate blocks their approval. Training is bounded to eight market combinations.</p></div>
  <div class="workspace-actions">
   <button id="model-training-toggle" type="button" class="secondary-button">Enable daily model training</button>
   <label>Training cadence<select id="model-training-interval"><option value="86400">Daily</option><option value="172800">Every 2 days</option><option value="604800">Weekly</option></select></label>
