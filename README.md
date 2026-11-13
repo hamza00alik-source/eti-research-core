@@ -77,6 +77,7 @@ All routes in this section require `Authorization: Bearer <access_token>`. The a
 - `GET/POST /v1/workspaces/{workspace_id}/agents/tasks`: list or queue durable task records.
 - `GET/PATCH /v1/workspaces/{workspace_id}/agents/tasks/{task_id}`: read a task or apply a guarded status transition.
 - `GET/POST /v1/workspaces/{workspace_id}/agents/messages`: list or append typed JSON messages.
+- `GET /v1/audit/events`: list the authenticated account's audit history.
 
 Every workspace route checks account ownership and returns not-found for another account's workspace. Task and message payloads are stored as typed JSON data, never executed as code or instructions. Task records can be processed by the separately started allowlisted worker described below.
 
@@ -117,3 +118,6 @@ python -m eti.worker --poll-seconds 2
 - The worker is not started automatically by FastAPI. Deploy it as a separate process only after configuring the shared persistent database and monitoring.
 - SQLite remains a local/single-instance foundation. Multi-instance worker fleets require a PostgreSQL-backed queue and operational monitoring before production use.
 - This is deterministic tool execution, not yet an LLM-driven agent planner, multi-agent reasoning system or autonomous trading system.
+
+
+The PWA also displays the authenticated account's audit trail alongside its workspace memory and task ledger.
