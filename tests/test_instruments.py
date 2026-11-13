@@ -52,7 +52,9 @@ def test_inactive_instruments_are_hidden_by_default():
     {"asset_class": "unknown"},
     {"market_type": "perpetual"},
     {"contract_multiplier": 0},
+    {"contract_multiplier": float("nan")},
     {"tick_size": 0},
+    {"tick_size": float("inf")},
     {"max_leverage": 2},
     {"supports_funding": True},
 ])
