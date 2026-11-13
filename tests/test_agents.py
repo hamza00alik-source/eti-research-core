@@ -260,7 +260,7 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
     assert result["approval_status"] == "not_approved"
     assert result["candidate_artifact"]["artifact_sha256"] == "a" * 64
     assert result["evaluation"]["fold_count"] == 2
-    assert any("no credentials" in item for item in result["limitations"])
+    assert any("funding" in item.lower() for item in result["limitations"])
 
 
 def test_model_training_research_rejects_unsafe_limits_before_network():
