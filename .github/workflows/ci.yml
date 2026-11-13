@@ -16,4 +16,7 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
+      - run: python -m compileall -q eti tests
+      - run: node --check web/app.js
+      - run: node --check web/sw.js
       - run: python -m pytest -q
