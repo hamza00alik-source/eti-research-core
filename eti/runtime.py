@@ -7,7 +7,7 @@ import os
 import threading
 
 from .worker import AgentWorker
-from .backup import backup_once
+from .backup import backup_once, validate_backup_configuration
 from .storage import MemoryStore
 
 
@@ -46,6 +46,8 @@ async def runtime_lifespan(_app):
     backup_enabled = os.environ.get("ETI_BACKUP_ENABLED", "0").lower() in {"1", "true", "yes"}
     if worker_enabled or backup_enabled:
         MemoryStore()  # initialize the shared database before either background loop starts
+    if backup_enabled:
+        validate_backup_configuration()
 
     if worker_enabled:
         poll_seconds = float(os.environ.get("ETI_WORKER_POLL_SECONDS", "2"))
