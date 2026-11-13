@@ -610,6 +610,36 @@ class MemoryStore:
                 "max_attempts": row["max_attempts"], "lease_expires_at": row["lease_expires_at"],
                 "created_at": row["created_at"], "updated_at": row["updated_at"]}
 
+    def cancel_agent_task(
+        self, owner_id: str, workspace_id: str, task_id: str
+    ) -> dict[str, Any]:
+        """Atomically cancel only a queued task; running work belongs to the worker."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        task_id = _required_text(task_id, "task_id")
+        now = _utc_now()
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE agent_tasks SET status = 'cancelled', lease_expires_at = NULL, updated_at = ? "
+                "WHERE id = ? AND owner_id = ? AND workspace_id = ? AND status = 'queued'",
+                (now, task_id, owner_id, workspace_id),
+            )
+            if cursor.rowcount != 1:
+                exists = conn.execute(
+                    "SELECT status FROM agent_tasks WHERE id = ? AND owner_id = ? AND workspace_id = ?",
+                    (task_id, owner_id, workspace_id),
+                ).fetchone()
+                if exists is None:
+                    raise LookupError("task not found")
+                raise ValueError("only queued tasks can be cancelled")
+            conn.execute(
+                "INSERT INTO audit_events(id, owner_id, workspace_id, event_type, payload_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (str(uuid4()), owner_id, workspace_id, "agent.task.cancelled",
+                 _encode_json({"task_id": task_id}), now),
+            )
+        return self.get_agent_task(owner_id, workspace_id, task_id)  # type: ignore[return-value]
+
     def update_agent_task(
         self, owner_id: str, workspace_id: str, task_id: str,
         status: str, result: Any = None
