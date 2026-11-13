@@ -79,4 +79,4 @@ A tokenized gold spot pair, an XAU/USD CFD and a COMEX gold future are distinct 
 6. Multi-symbol nested evaluation is available for supported public crypto spot symbols; independent CSV datasets support other asset classes. Live non-crypto feeds and pooled portfolio simulation remain future work.
 7. The PWA is an initial dashboard, not a finished native Android application. On-device inference requires target-device memory, latency and battery benchmarks.
 
-See [ROADMAP.md](ROADMAP.md) and [KAGGLE.md](KAGGLE.md).
+See [ARCHITECTURE.md](ARCHITECTURE.md), [PLATFORM_ARCHITECTURE.md](PLATFORM_ARCHITECTURE.md), [ROADMAP.md](ROADMAP.md) and [KAGGLE.md](KAGGLE.md).
