@@ -506,6 +506,10 @@ class MemoryStore:
         normalized_classes = sorted({_required_text(item, "supported_class", 80) for item in supported_classes})
         if calibration_status not in {"unknown", "calibrated", "failed"}:
             raise ValueError("invalid calibration_status")
+        if not isinstance(input_schema, dict):
+            raise ValueError("input_schema must be a JSON object")
+        if not isinstance(evaluation_report, dict):
+            raise ValueError("evaluation_report must be a JSON object")
         schema_json, classes_json = _encode_json(input_schema), _encode_json(normalized_classes)
         evaluation_json = _encode_json(evaluation_report)
         model_version_id, now = str(uuid4()), _utc_now()
