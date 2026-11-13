@@ -48,6 +48,7 @@ Open `http://localhost:8000`; health check is `/health`.
 - Passwords are hashed with scrypt; sessions are HMAC-SHA256 signed bearer tokens with a 15-minute default expiry.
 - The server must set `ETI_AUTH_SECRET` (at least 32 bytes) and `ETI_REGISTRATION_KEY` (at least 16 characters). Never place either value in frontend code, Git, notebooks, or client settings.
 - Registration remains closed when the invite key is absent. This is deliberately not open self-service signup.
+- Login attempts are throttled per client peer address and normalized username; registration attempts are throttled per peer address. Counters are persisted in SQLite and identifiers are HMACed before storage. The ASGI peer address is used; arbitrary forwarded-IP headers are not trusted.
 - Example server environment:
   ```bash
   export ETI_AUTH_SECRET='replace-with-a-long-random-secret-of-at-least-32-bytes'
@@ -56,7 +57,7 @@ Open `http://localhost:8000`; health check is `/health`.
   uvicorn eti.api:app --host 0.0.0.0 --port 8000
   ```
 - The account identity in protected routes comes from a verified bearer token, never a client-supplied owner id.
-- This is a foundation, not public-production identity management. Before public signup/deployment, add email verification, login/register rate limiting at the edge, HTTPS, secure secret management, backups, monitoring, and PostgreSQL for multi-instance use.
+- This is a foundation, not public-production identity management. Before public signup/deployment, add email verification, edge-level rate limiting (in addition to the application throttle), trusted-proxy configuration, HTTPS, secure secret management, backups, monitoring, and PostgreSQL for multi-instance use.
 - Workspace memory, agent task/message and model registry HTTP routes are intentionally not exposed until their authorization policies are implemented and tested.
 
 ## Existing research workflow
