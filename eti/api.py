@@ -271,10 +271,9 @@ def update_agent_task(workspace_id: str, task_id: str, payload: AgentTaskUpdateP
                       account: dict[str, str] = Depends(current_account)):
     if payload.status != "cancelled" or payload.result is not None:
         raise HTTPException(status_code=403,
-                            detail="Accounts may cancel tasks; only the worker may complete or fail them")
+                            detail="Accounts may cancel queued tasks; only the worker may complete or fail tasks")
     try:
-        return _memory_store().update_agent_task(
-            account["id"], workspace_id, task_id, payload.status)
+        return _memory_store().cancel_agent_task(account["id"], workspace_id, task_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="task not found") from exc
     except ValueError as exc:
