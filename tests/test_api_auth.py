@@ -86,14 +86,19 @@ def test_authenticated_agent_task_and_message_ledger_api(tmp_path, monkeypatch):
             f"/v1/workspaces/{workspace_id}/agents/tasks/{task['id']}",
             headers=headers, json={"status": "running"},
         )
-        assert running.status_code == 200
+        assert running.status_code == 403
         completed = client.patch(
             f"/v1/workspaces/{workspace_id}/agents/tasks/{task['id']}",
             headers=headers,
             json={"status": "completed", "result": {"summary": "research complete"}},
         )
-        assert completed.status_code == 200
-        assert completed.json()["status"] == "completed"
+        assert completed.status_code == 403
+        cancelled = client.patch(
+            f"/v1/workspaces/{workspace_id}/agents/tasks/{task['id']}",
+            headers=headers, json={"status": "cancelled"},
+        )
+        assert cancelled.status_code == 200
+        assert cancelled.json()["status"] == "cancelled"
 
         message = client.post(
             f"/v1/workspaces/{workspace_id}/agents/messages",
