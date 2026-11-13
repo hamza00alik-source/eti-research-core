@@ -15,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from .agents import AgentCapabilityRegistry, default_capabilities
+from .artifacts import ModelArtifactStore
 from .paper import run_paper_tick
 from .execution import run_live_tick
 from .storage import MemoryStore
