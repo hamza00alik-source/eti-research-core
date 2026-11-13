@@ -110,11 +110,13 @@ class AgentWorker:
         schema = result.get("input_schema") or {}
         digest = artifact.get("artifact_sha256")
         uri = artifact.get("artifact_uri")
-        required = ("venue", "symbol", "timeframe", "training_data_ref")
+        required = ("venue", "asset_class", "market_type", "symbol", "timeframe", "training_data_ref")
         if not digest or not uri or not isinstance(schema, dict) or any(not result.get(k) for k in required):
             raise ValueError("trained candidate is missing registry metadata")
-        safe_symbol = result["symbol"].replace("/", "-").replace(":", "-")
-        model_id = f"eti-{result['venue']}-{safe_symbol}-{result['timeframe']}".lower()
+        safe_symbol = result["symbol"].replace("/", "-").replace(":", "-").replace("=", "-").replace("^", "")
+        asset_class = result["asset_class"]
+        market_type = result["market_type"]
+        model_id = f"eti-{result['venue']}-{asset_class}-{market_type}-{safe_symbol}-{result['timeframe']}".lower()
         version = "research-" + digest[:16]
         evaluation = dict(result.get("evaluation") or {})
         evaluation["passed"] = bool(result.get("evaluation_passed", False))
@@ -125,7 +127,7 @@ class AgentWorker:
         )
         try:
             registered = self.store.register_model_version(
-                model_id, version, uri, digest, schema, ["crypto_spot"],
+                model_id, version, uri, digest, schema, [f"{asset_class}_{market_type}"],
                 result["training_data_ref"], evaluation, calibration_status, "eti.worker",
             )
         except sqlite3.IntegrityError:
