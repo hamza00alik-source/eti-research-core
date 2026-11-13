@@ -70,6 +70,10 @@ def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
     fee_bps = float(risk_values.get("fee_bps", 6.0))
     slippage_bps = float(risk_values.get("slippage_bps", 8.0))
     confidence_threshold = float(risk_values.get("confidence_threshold", 0.55))
+    if (not np.isfinite([fee_bps, slippage_bps, confidence_threshold]).all()
+            or not 0 <= fee_bps <= 100 or not 0 <= slippage_bps <= 100
+            or not 0.50 <= confidence_threshold <= 0.95):
+        raise ValueError("paper fee, slippage, or confidence settings are outside safe bounds")
     fee_rate, slippage_rate = fee_bps / 10000.0, slippage_bps / 10000.0
 
     cash = float(session["cash"])
