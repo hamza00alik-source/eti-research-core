@@ -64,3 +64,17 @@ Open `http://localhost:8000`; health check is `/health`.
 Training remains an explicit CLI action and is not started by API startup or CI. No live order placement endpoints exist. Current live public market discovery is crypto spot on Binance/MEXC only; other labelled asset classes are available only through validated local CSV OHLCV data.
 
 The model registry currently stores immutable version metadata and checksums, not model binaries. Agent tasks/messages are durable ledgers, not an autonomous running agent network. The PWA remains an undeployed frontend shell until a backend and HTTPS host are configured.
+
+
+## Authenticated workspace and agent APIs (new)
+
+All routes in this section require `Authorization: Bearer <access_token>`. The account ID is derived from the verified token; clients cannot submit an owner ID.
+
+- `GET/POST /v1/workspaces`: list or create private workspaces.
+- `GET /v1/workspaces/{workspace_id}/memory`: list memory items (optional `namespace` filter).
+- `GET/PUT/DELETE /v1/workspaces/{workspace_id}/memory/{namespace}/{key}`: read, write or delete a JSON memory item.
+- `GET/POST /v1/workspaces/{workspace_id}/agents/tasks`: list or queue durable task records.
+- `GET/PATCH /v1/workspaces/{workspace_id}/agents/tasks/{task_id}`: read a task or apply a guarded status transition.
+- `GET/POST /v1/workspaces/{workspace_id}/agents/messages`: list or append typed JSON messages.
+
+Every workspace route checks account ownership and returns not-found for another account's workspace. Agent tasks/messages remain a durable ledger only: creating a task does not run an agent, and message payloads are stored as data, never executed as code or instructions. Model registry APIs, worker dispatch, permissioned agent capabilities and production deployment remain future work.
