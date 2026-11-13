@@ -7,7 +7,7 @@ No unauthenticated HTTP routes expose this store.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -124,6 +124,9 @@ class MemoryStore:
                     input_json TEXT NOT NULL,
                     result_json TEXT,
                     deadline_at TEXT,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    max_attempts INTEGER NOT NULL DEFAULT 3,
+                    lease_expires_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -166,6 +169,16 @@ class MemoryStore:
                     ON model_versions(model_id, lifecycle);
                 """
             )
+            task_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(agent_tasks)").fetchall()
+            }
+            for column, definition in (
+                ("attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+                ("max_attempts", "INTEGER NOT NULL DEFAULT 3"),
+                ("lease_expires_at", "TEXT"),
+            ):
+                if column not in task_columns:
+                    conn.execute(f"ALTER TABLE agent_tasks ADD COLUMN {column} {definition}")
 
     def create_workspace(self, owner_id: str, name: str) -> dict[str, str]:
         owner_id = _required_text(owner_id, "owner_id")
