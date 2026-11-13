@@ -215,9 +215,14 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
             return frame
         def fetch_derivatives_context(self, symbol, timeframe, limit):
             captured["derivatives_request"] = (symbol, timeframe, limit)
-            return {"funding_history": [], "open_interest_history": [],
-                    "history_coverage": {"has_historical_funding": False,
-                                         "has_historical_open_interest": False},
+            funding = [{"timestamp": int(pd.Timestamp(frame.iloc[i]["timestamp"]).timestamp() * 1000),
+                        "funding_rate": 0.0001} for i in range(0, len(frame), 8)]
+            oi = [{"timestamp": int(pd.Timestamp(row["timestamp"]).timestamp() * 1000),
+                   "open_interest": 1000.0 + index}
+                  for index, row in frame.iterrows()]
+            return {"funding_history": funding, "open_interest_history": oi,
+                    "history_coverage": {"has_historical_funding": True,
+                                         "has_historical_open_interest": True},
                     "availability": {}}
 
     class FakeModel:
@@ -258,6 +263,10 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
     assert captured["market_type"] == "swap"
     assert captured["request"] == ("BTC/USDT:USDT", "1h", 1600)
     assert captured["allow_short"] is True
+    assert captured["derivatives_request"] == ("BTC/USDT:USDT", "1h", 1000)
+    assert result["derivative_feature_coverage"]["funding_feature_rows"] >= 1500
+    assert result["derivative_feature_coverage"]["open_interest_feature_rows"] >= 1500
+    assert result["derivative_feature_coverage"]["funding_bps_per_bar_conservative"] == pytest.approx(0.125)
     assert result["market_type"] == "swap"
     assert result["evaluation_passed"] is False
     assert result["kind"] == "trained_model_candidate"
