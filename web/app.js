@@ -600,7 +600,7 @@ if('serviceWorker'in navigator){
    status.textContent=data.instrument_count+' instruments discovered · '+data.discovery_source;
    data.instruments.forEach(item=>{
     const card=make('article','task-item');
-    const title=make('strong','',item.symbol+' · '+(item.base||'')+'/'+(item.quote||''));
+    const title=make('strong','',item.symbol+(item.base?' · '+item.base+(item.quote?'/'+item.quote:''):''));
     const meta=make('p','muted',[item.market_type,item.linear?'linear':'',item.expiry?'expiry '+new Date(item.expiry).toLocaleDateString():'',item.quote_volume===null?'volume unavailable':'quote volume '+Number(item.quote_volume).toLocaleString()].filter(Boolean).join(' · '));
     const actions=make('div','chart-toolbar');
     const queue=make('button','secondary-button','Queue research snapshot');
