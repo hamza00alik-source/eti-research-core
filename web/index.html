@@ -42,13 +42,13 @@
 </form>
 <label class="workspace-picker">Active workspace<select id="workspace-select"><option value="">Select workspace</option></select></label>
 <div class="autonomy-card" aria-labelledby="autonomy-heading">
- <div><div class="eyebrow">AUTONOMOUS RESEARCH</div><h3 id="autonomy-heading">Let ETI run market research</h3>
- <p class="muted">ETI will automatically scan BTC, ETH, SOL and XRP spot markets on MEXC every 15 minutes. Research only: no private exchange keys, no orders and no live trading.</p></div>
- <div class="workspace-actions"><button id="autonomy-toggle" type="button">Enable autonomous research</button><span id="autonomy-status" class="muted" role="status" aria-live="polite">Checking status…</span></div>
+ <div><div class="eyebrow">AUTONOMOUS OPERATION</div><h3 id="autonomy-heading">Let ETI run its research and training loop</h3>
+ <p class="muted">One action starts 15-minute public-market scans and daily model training. ETI evaluates results and registers unapproved candidates automatically. Research only: no private exchange keys, no orders and no live trading.</p></div>
+ <div class="workspace-actions"><button id="autonomy-toggle" type="button">Start autonomous operation</button><span id="autonomy-status" class="muted" role="status" aria-live="polite">Checking status…</span></div>
 </div>
 <div class="autonomy-card" aria-labelledby="training-heading">
- <div><div class="eyebrow">AUTONOMOUS MODEL TRAINING</div><h3 id="training-heading">Train research candidates automatically</h3>
- <p class="muted">Optional daily training on public spot candles. ETI evaluates models and saves candidates for review. Training is bounded to eight market combinations and never approves a model or places orders.</p></div>
+ <div><div class="eyebrow">AUTONOMOUS MODEL TRAINING</div><h3 id="training-heading">Automatic model training</h3>
+ <p class="muted">Daily training on public spot candles is included when autonomous operation is started. ETI evaluates models and saves candidates for review. Training is bounded to eight market combinations. Candidates remain unapproved; ETI never places live orders.</p></div>
  <div class="workspace-actions">
   <button id="model-training-toggle" type="button" class="secondary-button">Enable daily model training</button>
   <label>Training cadence<select id="model-training-interval"><option value="86400">Daily</option><option value="172800">Every 2 days</option><option value="604800">Weekly</option></select></label>
