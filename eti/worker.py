@@ -102,7 +102,7 @@ class AgentWorker:
                          separators=(",", ":")), flush=True)
 
     def _register_model_candidate(self, result: dict[str, Any]) -> dict[str, Any]:
-        """Register a trained artifact as a candidate; never approve or promote it."""
+        """Register candidates and promote only after independent quality and artifact verification."""
         artifact = result.get("candidate_artifact") or {}
         schema = result.get("input_schema") or {}
         digest = artifact.get("artifact_sha256")
@@ -153,8 +153,8 @@ class AgentWorker:
         return result
 
     def run_once(self) -> dict[str, Any] | None:
-        # The supervisor autonomously seeds owner-enabled research schedules.
-        # This only creates public-data research tasks; order execution is not registered.
+        # Seed public research, simulated paper and owner-authorized live spot tasks.
+        # Live orders are reachable only through the supervisor-gated live.tick capability.
         scheduled = self.store.enqueue_due_autonomy_tasks()
         paper_scheduled = self.store.enqueue_due_paper_tasks()
         live_scheduled = self.store.enqueue_due_live_execution_tasks()
