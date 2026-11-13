@@ -110,8 +110,9 @@ def test_market_snapshot_defaults_to_mexc_public_feed(monkeypatch):
     )
 
     class FakeProvider:
-        def __init__(self, venue):
+        def __init__(self, venue, market_type="spot"):
             captured["venue"] = venue
+            captured["market_type"] = market_type
 
         def fetch_ohlcv(self, symbol, timeframe, limit):
             captured["request"] = (symbol, timeframe, limit)
@@ -125,6 +126,7 @@ def test_market_snapshot_defaults_to_mexc_public_feed(monkeypatch):
     result = agents.market_snapshot({"symbol": "BTC/USDT"})
 
     assert captured["venue"] == "mexc"
+    assert captured["market_type"] == "spot"
     assert captured["request"] == ("BTC/USDT", "1h", 200)
     assert result["venue"] == "mexc"
     assert result["market_type"] == "spot"
@@ -147,8 +149,9 @@ def test_strategy_walk_forward_capability_uses_public_data_and_returns_report(mo
     })
     captured = {}
     class FakeProvider:
-        def __init__(self, venue):
+        def __init__(self, venue, market_type="spot"):
             captured["venue"] = venue
+            captured["market_type"] = market_type
         def fetch_ohlcv(self, symbol, timeframe, limit):
             captured["request"] = (symbol, timeframe, limit)
             return frame
@@ -203,8 +206,9 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
     captured = {}
 
     class FakeProvider:
-        def __init__(self, venue):
+        def __init__(self, venue, market_type="spot"):
             captured["venue"] = venue
+            captured["market_type"] = market_type
         def fetch_ohlcv(self, symbol, timeframe, limit):
             captured["request"] = (symbol, timeframe, limit)
             return frame
@@ -240,6 +244,7 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
     })
 
     assert captured["venue"] == "mexc"
+    assert captured["market_type"] == "spot"
     assert captured["request"] == ("BTC/USDT", "1h", 1600)
     assert result["kind"] == "trained_model_candidate"
     assert result["training_performed"] is True
@@ -311,3 +316,39 @@ def test_model_training_research_runs_real_pipeline_and_writes_candidate(tmp_pat
     assert result["lifecycle"] == "unregistered_candidate"
     assert result["approval_status"] == "not_approved"
     assert result["calibration_status"] in {"calibrated", "uncalibrated"}
+
+
+def test_market_snapshot_accepts_explicit_crypto_perpetual_market(monkeypatch):
+    import pandas as pd
+    import eti.agents as agents
+
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=50, freq="h", tz="UTC"),
+        "open": [100.0] * 50, "high": [102.0] * 50,
+        "low": [99.0] * 50, "close": [101.0] * 50,
+        "volume": [10.0] * 50,
+    })
+    captured = {}
+    names = ("ret_1", "ret_3", "ret_6", "volatility_20", "sma_gap_10",
+             "sma_gap_30", "rsi_14", "range_pct", "atr_pct")
+
+    class FakeProvider:
+        def __init__(self, venue, market_type="spot"):
+            captured["venue"] = venue
+            captured["market_type"] = market_type
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            captured["symbol"] = symbol
+            return frame
+
+    monkeypatch.setattr(agents, "CcxtPublicProvider", FakeProvider)
+    monkeypatch.setattr(agents, "build_features",
+                        lambda _frame: pd.DataFrame([{name: 0.1 for name in names}]))
+    result = agents.market_snapshot({
+        "venue": "binance", "market_type": "swap",
+        "symbol": "BTC/USDT:USDT", "timeframe": "1h", "limit": 100,
+    })
+    assert captured == {"venue": "binance", "market_type": "swap", "symbol": "BTC/USDT:USDT"}
+    assert result["market_type"] == "swap"
+    assert result["research_ranking"] is None
+    assert any("funding" in item.lower() for item in result["limitations"])
+
