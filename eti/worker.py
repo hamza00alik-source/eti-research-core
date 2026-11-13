@@ -36,7 +36,7 @@ class AgentWorker:
         try:
             result = self.registry.execute(task["target_capability"], task["input"])
         except LookupError as exc:
-            result = {"error": {"type": type(exc).__name__, "message": "Unsupported capability"}}
+            result = {"error": {"type": type(exc).__name__, "message": "unsupported agent capability"}}
             updated = self.store.fail_claimed_agent_task(
                 task["id"], lease_token, result, retryable=False
             )
