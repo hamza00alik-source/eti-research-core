@@ -234,3 +234,16 @@ def test_agent_task_claims_are_single_owner_under_concurrency(tmp_path):
     with ThreadPoolExecutor(max_workers=2) as pool:
         claimed = list(pool.map(lambda _: store.claim_next_agent_task(), range(2)))
     assert {item["id"] for item in claimed if item is not None} == {t["id"] for t in tasks}
+
+
+def test_queued_task_cancellation_is_atomic_and_cannot_cancel_running_work(tmp_path):
+    store = MemoryStore(tmp_path / "cancel-task.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    queued = store.create_agent_task("owner", workspace["id"], "user", "test.echo", {})
+    cancelled = store.cancel_agent_task("owner", workspace["id"], queued["id"])
+    assert cancelled["status"] == "cancelled"
+
+    running = store.create_agent_task("owner", workspace["id"], "user", "test.echo", {})
+    store.claim_next_agent_task(lease_seconds=60)
+    with pytest.raises(ValueError, match="only queued tasks"):
+        store.cancel_agent_task("owner", workspace["id"], running["id"])
