@@ -136,3 +136,14 @@ python -m eti.worker --poll-seconds 2
 
 
 The PWA also displays the authenticated account's audit trail alongside its workspace memory and task ledger.
+
+
+## Model artifacts and approved inference
+
+- `ModelArtifactStore` stores fitted ETI `BaselineModel` objects under a content-addressed SHA-256 path and returns an `artifact://sha256/<digest>` reference.
+- The model approval endpoint verifies that the server-owned artifact exists, matches its registered checksum and deserializes as a fitted ETI model before allowing independent approval.
+- Artifacts are never accepted as user uploads. Joblib/pickle deserialization can execute code, so **never place untrusted files in `ETI_ARTIFACT_DIR`**. Only trusted server-side training code may write there.
+- Set `ETI_ARTIFACT_DIR` to a persistent private server directory writable only by the trusted ETI service account.
+- `POST /v1/inference/{model_id}/{version}` serves approved versions only. Requests must specify a supported asset class and exactly the feature names in the registered schema; values and returned probabilities are validated. Requests are authenticated and rate-limited.
+- Inference returns short/flat/long probabilities only. It does not size a position, approve a trade, bypass the risk engine or place an order.
+- No production model is trained or promoted by this change. The training-to-artifact-to-registry workflow and model drift monitoring remain to be completed before paper autonomy.
