@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import threading
 import time
 from typing import Any
 from uuid import uuid4
@@ -33,6 +34,41 @@ class AgentWorker:
             raise ValueError("lease_seconds must be an integer from 5 to 3600")
         self.lease_seconds = lease_seconds
         self.worker_id = str(uuid4())
+
+    def _start_lease_heartbeat(
+        self, task_id: str, lease_token: str
+    ) -> tuple[threading.Event, threading.Event, threading.Thread]:
+        """Keep a claimed task leased while a long capability is executing.
+
+        A failed renewal is fail-closed: the worker must not persist a result
+        after it can no longer prove that it owns the task lease.
+        """
+        stop = threading.Event()
+        lease_lost = threading.Event()
+        interval = max(1.0, self.lease_seconds / 3.0)
+
+        def renew_until_stopped() -> None:
+            while not stop.wait(interval):
+                try:
+                    self.store.renew_agent_task_lease(
+                        task_id, lease_token, lease_seconds=self.lease_seconds
+                    )
+                except Exception as exc:
+                    lease_lost.set()
+                    print(json.dumps({
+                        "event": "agent.task.lease_renewal_failed",
+                        "task_id": task_id,
+                        "error_type": type(exc).__name__,
+                    }, separators=(",", ":")), flush=True)
+                    return
+
+        thread = threading.Thread(
+            target=renew_until_stopped,
+            name=f"eti-lease-{task_id[:8]}",
+            daemon=True,
+        )
+        thread.start()
+        return stop, lease_lost, thread
 
     def _enqueue_strategy_followup(self, task: dict[str, Any]) -> None:
         task_input = task.get("input")
@@ -109,6 +145,9 @@ class AgentWorker:
         if task is None:
             return None
         lease_token = task["lease_token"]
+        stop_heartbeat, lease_lost, heartbeat_thread = self._start_lease_heartbeat(
+            task["id"], lease_token
+        )
         try:
             result = self.registry.execute(task["target_capability"], task["input"])
             if task["target_capability"] == "model.train_research":
@@ -123,6 +162,20 @@ class AgentWorker:
         except Exception as exc:
             result = {"error": {"type": type(exc).__name__, "message": "Temporary capability failure"}}
             status, retryable = "failed", True
+        finally:
+            stop_heartbeat.set()
+            heartbeat_thread.join(timeout=max(2.0, self.lease_seconds / 3.0 + 1.0))
+
+        if lease_lost.is_set():
+            # Another worker may now own or be processing this task. Never let
+            # this worker overwrite that newer state with a stale result.
+            print(json.dumps({
+                "event": "agent.task.result_discarded_after_lease_loss",
+                "task_id": task["id"],
+            }, separators=(",", ":")), flush=True)
+            return self.store.get_agent_task(
+                task["owner_id"], task["workspace_id"], task["id"]
+            )
 
         try:
             if status == "completed":
@@ -167,7 +220,7 @@ class AgentWorker:
                     "task_id": result["id"],
                     "status": result["status"],
                     "capability": result["target_capability"],
-                }, separators=(",", ":")))
+                }, separators=(",", ":")), flush=True)
 
 
 def main() -> None:
