@@ -86,10 +86,15 @@ def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[Baselin
             f"Need at least 250 usable rows for a 200-row fit and 30-row calibration; got {len(dataset)}"
         )
     split = int(len(dataset) * 0.8)
-    training = dataset.iloc[:split]
+    training_end = split - int(horizon)
+    training = dataset.iloc[:training_end]
     calibration = dataset.iloc[split:]
+    purged_rows = split - training_end
     if len(training) < 200 or len(calibration) < 30:
-        raise ValueError("Export split must contain at least 200 training and 30 calibration rows")
+        raise ValueError(
+            "Export split must contain at least 200 training rows and 30 calibration rows "
+            "after purging the label horizon"
+        )
 
     x_train = training[FEATURE_COLUMNS]
     y_train = training["label"].astype(int)
@@ -106,6 +111,7 @@ def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[Baselin
         "feature_version": "eti.features.v1",
         "training_rows": int(len(training)),
         "calibration_rows": int(len(calibration)),
+        "purged_rows": int(purged_rows),
         "training_end": training.index[-1].isoformat() if hasattr(training.index[-1], "isoformat") else str(training.index[-1]),
         "calibration_start": calibration.index[0].isoformat() if hasattr(calibration.index[0], "isoformat") else str(calibration.index[0]),
         "calibration_end": calibration.index[-1].isoformat() if hasattr(calibration.index[-1], "isoformat") else str(calibration.index[-1]),
