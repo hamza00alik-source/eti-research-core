@@ -427,3 +427,19 @@ def test_autonomy_schedules_spot_and_perpetual_swap_research(tmp_path):
         "crypto", "forex", "equity", "commodity", "index"
     }
 
+
+
+def test_autonomy_skips_dated_future_scan_without_exact_contract_symbol(tmp_path):
+    from datetime import datetime, timezone
+    store = MemoryStore(tmp_path / "future-symbol-guard.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    store.configure_autonomy(
+        "owner", workspace["id"], True, venues=["binance"],
+        symbols=["BTC/USDT"], timeframes=["1h"],
+        market_types=["spot", "swap", "future"],
+    )
+    store.enqueue_due_autonomy_tasks(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    tasks = store.list_agent_tasks("owner", workspace["id"], status="queued")
+    crypto_types = {task["input"]["market_type"] for task in tasks
+                    if task["input"].get("asset_class") == "crypto"}
+    assert crypto_types == {"spot", "swap"}
