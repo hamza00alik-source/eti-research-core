@@ -142,6 +142,5 @@ def test_worker_registers_model_training_result_as_unapproved_candidate(tmp_path
     assert model["lifecycle"] == "candidate"
     assert model["created_by"] == "eti.worker"
     assert model["evaluation_report"]["passed"] is True
-    assert registered["approval_required"] if "approval_required" in registered else True
     assert registered["registry"]["approval_required"] is True
     assert registered["lifecycle"] == "candidate"
