@@ -293,8 +293,9 @@ def test_model_training_research_runs_real_pipeline_and_writes_candidate(tmp_pat
     })
 
     class FakeProvider:
-        def __init__(self, venue):
+        def __init__(self, venue, market_type="spot"):
             self.venue = venue
+            self.market_type = market_type
         def fetch_ohlcv(self, symbol, timeframe, limit):
             return frame.tail(limit).reset_index(drop=True)
 
