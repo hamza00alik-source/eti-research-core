@@ -38,6 +38,8 @@
 
 ## v0.5 — portfolio and venue expansion
 - [x] Extensible asset-class provider protocol, registry and CSV history adapter for crypto/forex/equities/commodities/indices
+- [x] Canonical instrument specifications and venue-independent adapter capability registry
+- [x] Explicit shared-core / specialist-head / broker-adapter architecture contract
 - [ ] Live forex, equities, commodities and derivatives provider adapters
 - Venue-specific contract metadata, funding, margin and liquidation simulation
 - Portfolio correlation estimation, concentration and dynamic exposure controls
