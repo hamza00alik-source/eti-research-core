@@ -213,6 +213,12 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
         def fetch_ohlcv(self, symbol, timeframe, limit):
             captured["request"] = (symbol, timeframe, limit)
             return frame
+        def fetch_derivatives_context(self, symbol, timeframe, limit):
+            captured["derivatives_request"] = (symbol, timeframe, limit)
+            return {"funding_history": [], "open_interest_history": [],
+                    "history_coverage": {"has_historical_funding": False,
+                                         "has_historical_open_interest": False},
+                    "availability": {}}
 
     class FakeModel:
         calibration_status = "calibrated"
@@ -348,6 +354,11 @@ def test_market_snapshot_accepts_explicit_crypto_perpetual_market(monkeypatch):
         def fetch_ohlcv(self, symbol, timeframe, limit):
             captured["symbol"] = symbol
             return frame
+        def fetch_derivatives_context(self, symbol, timeframe, limit):
+            return {"funding_history": [], "open_interest_history": [],
+                    "history_coverage": {"has_historical_funding": False,
+                                         "has_historical_open_interest": False},
+                    "availability": {}}
 
     monkeypatch.setattr(agents, "CcxtPublicProvider", FakeProvider)
     monkeypatch.setattr(agents, "build_features",
@@ -411,3 +422,49 @@ def test_autonomous_snapshot_followup_preserves_noncrypto_asset_class(tmp_path):
     assert queued[0]["input"]["asset_class"] == "equity"
     assert queued[0]["input"]["venue"] == "yahoo"
     assert queued[0]["input"]["symbol"] == "AAPL"
+
+
+def test_derivative_features_are_selected_only_when_history_is_present():
+    import pandas as pd
+    from eti.data import validate_ohlcv
+    from eti.features import BASE_FEATURE_COLUMNS, build_features, feature_columns_for_frame
+
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=60, freq="h", tz="UTC"),
+        "open": [100.0 + i for i in range(60)], "high": [102.0 + i for i in range(60)],
+        "low": [99.0 + i for i in range(60)], "close": [101.0 + i for i in range(60)],
+        "volume": [10.0] * 60, "funding_rate": [0.0001] * 60,
+        "open_interest": [1000.0 + i * 2 for i in range(60)],
+    })
+    clean = validate_ohlcv(frame)
+    columns = feature_columns_for_frame(clean)
+    features = build_features(clean)
+    assert columns == BASE_FEATURE_COLUMNS + ["funding_rate", "open_interest_change"]
+    assert features["funding_rate"].iloc[-1] == pytest.approx(0.0001)
+    assert features["open_interest_change"].iloc[-1] > 0
+
+
+def test_derivatives_history_asof_join_does_not_use_future_observations():
+    import pandas as pd
+    from eti.providers import enrich_ohlcv_with_derivatives
+
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=3, freq="h", tz="UTC"),
+        "open": [100.0] * 3, "high": [101.0] * 3,
+        "low": [99.0] * 3, "close": [100.0] * 3, "volume": [1.0] * 3,
+    })
+    context = {
+        "funding_history": [{"timestamp": int(pd.Timestamp("2026-01-01T01:00:00Z").timestamp() * 1000), "funding_rate": 0.001}],
+        "open_interest_history": [{"timestamp": int(pd.Timestamp("2026-01-01T01:00:00Z").timestamp() * 1000), "open_interest": 200.0}],
+    }
+    result = enrich_ohlcv_with_derivatives(frame, context, "1h")
+    assert pd.isna(result.loc[0, "funding_rate"])
+    assert result.loc[1, "funding_rate"] == pytest.approx(0.001)
+    assert result.loc[2, "open_interest"] == pytest.approx(200.0)
+
+
+def test_default_registry_exposes_dynamic_market_and_derivative_research():
+    from eti.agents import default_capabilities
+    capabilities = default_capabilities().capabilities()
+    assert "market.discover" in capabilities
+    assert "derivatives.context" in capabilities
