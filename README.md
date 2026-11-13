@@ -77,13 +77,14 @@ All routes in this section require `Authorization: Bearer <access_token>`. The a
 - `GET/POST /v1/workspaces/{workspace_id}/agents/tasks`: list or queue durable task records.
 - `GET/PATCH /v1/workspaces/{workspace_id}/agents/tasks/{task_id}`: read a task or apply a guarded status transition.
 - `GET/POST /v1/workspaces/{workspace_id}/agents/messages`: list or append typed JSON messages.
+- `GET /v1/audit/events`: list the authenticated account's audit history.
 
 Every workspace route checks account ownership and returns not-found for another account's workspace. Agent tasks/messages remain a durable ledger only: creating a task does not run an agent, and message payloads are stored as data, never executed as code or instructions. Model registry APIs, worker dispatch, permissioned agent capabilities and production deployment remain future work.
 
 
 ## PWA account workspace
 
-The PWA now includes sign-in, invite-only account creation, workspace selection, JSON memory editing and task queue visibility. The bearer token is held in browser `sessionStorage` for the current tab session and is not written into the service-worker cache. Sign out clears the token from the current session.
+The PWA now includes wired sign-in, invite-only account creation, workspace selection, JSON memory editing, task queue visibility and an account-scoped audit trail. The bearer token is held in browser `sessionStorage` for the current tab session and is not written into the service-worker cache. Sign out clears the token from the current session.
 
 The service worker caches only the static app shell. It bypasses all `/v1/` endpoints, and the API sends `Cache-Control: no-store` for authenticated and dynamic routes. Security headers include a restrictive same-origin Content Security Policy, frame protection and MIME sniffing protection.
 
