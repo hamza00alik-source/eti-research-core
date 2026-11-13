@@ -175,7 +175,7 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
         calibration_status = "calibrated"
         calibration_report = {
             "passed": True, "method": "temperature_scaling",
-            "sample_count": 50, "temperature": 1.2,
+            "sample_count": 50, "class_counts": {"0": 16, "1": 17, "2": 17}, "temperature": 1.2,
             "nll_before": 1.2, "nll_after": 1.0,
         }
 
