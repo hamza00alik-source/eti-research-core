@@ -54,6 +54,16 @@ async function loadCapabilities(){
   $('#account-message').textContent='Could not load registered agent capabilities: '+error.message;
  }
 }
+async function loadModels(){
+ try{
+  const data=await api('/v1/models');
+  $('#model-list').textContent=data.items.length
+   ? JSON.stringify(data.items,null,2)
+   : 'No model versions are registered yet.';
+ }catch(error){
+  $('#model-list').textContent='Model registry unavailable: '+error.message;
+ }
+}
 async function loadWorkspaces(){
  await loadCapabilities();
  const data=await api('/v1/workspaces');
@@ -69,6 +79,7 @@ async function loadWorkspaces(){
   $('#task-list').textContent='No workspace selected.';
   $('#audit-list').textContent='No audit events yet.';
  }
+ await loadModels();
 }
 async function loadWorkspaceData(){
  if(!activeWorkspace)return;
@@ -159,6 +170,38 @@ $('#memory-form').addEventListener('submit',async event=>{
   await loadWorkspaceData();$('#account-message').textContent='Memory saved to this workspace.';
  }catch(error){$('#memory-list').textContent=error.message}
 });
+$('#refresh-models').addEventListener('click',loadModels);
+$('#model-register-form').addEventListener('submit',async event=>{
+ event.preventDefault();
+ let payload;
+ try{payload=JSON.parse(new FormData(event.currentTarget).get('payload'))}
+ catch(error){$('#model-message').textContent='Registration payload must be valid JSON.';return}
+ try{
+  const result=await api('/v1/models',{method:'POST',body:JSON.stringify(payload)});
+  $('#model-message').textContent='Candidate registered: '+result.model_id+' '+result.version+'. It is not approved for inference.';
+  await loadModels();
+ }catch(error){$('#model-message').textContent='Candidate registration failed: '+error.message}
+});
+$('#model-approve-form').addEventListener('submit',async event=>{
+ event.preventDefault();const form=new FormData(event.currentTarget);
+ const modelId=encodeURIComponent(form.get('model_id'));
+ const version=encodeURIComponent(form.get('version'));
+ try{
+  const result=await api('/v1/models/'+modelId+'/'+version+'/approve',{method:'POST'});
+  $('#model-message').textContent='Model approved: '+result.model_id+' '+result.version+'.';
+  await loadModels();
+ }catch(error){$('#model-message').textContent='Approval failed: '+error.message+'. The reviewer must differ from the creator and the artifact must pass integrity, schema and calibration checks.'}
+});
+$('#model-retire-form').addEventListener('submit',async event=>{
+ event.preventDefault();const form=new FormData(event.currentTarget);
+ const modelId=encodeURIComponent(form.get('model_id'));
+ const version=encodeURIComponent(form.get('version'));
+ try{
+  const result=await api('/v1/models/'+modelId+'/'+version+'/retire',{method:'POST'});
+  $('#model-message').textContent='Model retired: '+result.model_id+' '+result.version+'.';
+  await loadModels();
+ }catch(error){$('#model-message').textContent='Retirement failed: '+error.message}
+});
 $('#task-form').addEventListener('submit',async event=>{
  event.preventDefault();if(!activeWorkspace)return;
  const form=new FormData(event.currentTarget);let input;
@@ -168,7 +211,7 @@ $('#task-form').addEventListener('submit',async event=>{
    target_capability:form.get('capability'),input
   })});
   await loadWorkspaceData();
-  $('#account-message').textContent='Task recorded in the durable queue. No agent has executed it yet.';
+  $('#account-message').textContent='Task queued in the durable ledger. A registered worker can process it when online.';
  }catch(error){$('#task-list').textContent=error.message}
 });
 async function restoreSession(){
