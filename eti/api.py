@@ -13,7 +13,7 @@ from .runtime import runtime_lifespan
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr
 
-from .agents import default_capabilities
+from .agents import default_capabilities, derivatives_market_context, discover_market_universe
 from .artifacts import ModelArtifactError, ModelArtifactStore
 from .auth import AuthManager, AuthenticationError, RateLimitExceeded, RegistrationDisabled
 from .config import AppConfig
@@ -914,6 +914,43 @@ def supported_markets():
         "execution_market_types": ["spot"],
         "live_execution_enabled": False,
     }
+
+
+@app.get("/v1/markets/discover")
+def discover_markets(
+    venue: str = Query(default="binance", pattern="^(binance|mexc)$"),
+    market_type: str = Query(default="spot", pattern="^(spot|swap|future)$"),
+    limit: int = Query(default=100, ge=1, le=500),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return discover_market_universe({
+            "venue": venue, "market_type": market_type, "limit": limit,
+        })
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Public exchange market discovery is temporarily unavailable") from exc
+
+
+@app.get("/v1/markets/derivatives/context")
+def get_derivatives_context(
+    venue: str = Query(default="binance", pattern="^(binance|mexc)$"),
+    market_type: str = Query(default="swap", pattern="^(swap|future)$"),
+    symbol: str = Query(min_length=3, max_length=40),
+    timeframe: str = Query(default="1h", pattern="^(1h|4h|1d)$"),
+    limit: int = Query(default=100, ge=1, le=1000),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return derivatives_market_context({
+            "venue": venue, "market_type": market_type, "symbol": symbol,
+            "timeframe": timeframe, "limit": limit,
+        })
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Public derivatives data is temporarily unavailable") from exc
 
 
 @app.get("/providers/capabilities")
