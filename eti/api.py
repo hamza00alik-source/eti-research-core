@@ -1,4 +1,4 @@
-"""Research API and PWA host. No exchange order routes exist."""
+"""Research API and PWA host. No live order placement routes exist."""
 from __future__ import annotations
 from pathlib import Path
 import math
