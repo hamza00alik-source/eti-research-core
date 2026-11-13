@@ -6,6 +6,7 @@ are never interpreted as Python, shell commands, prompts or executable code.
 from __future__ import annotations
 
 from collections.abc import Callable
+import re
 from typing import Any
 
 import numpy as np
@@ -58,8 +59,8 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     limit = payload.get("limit", 200)
     if not isinstance(venue, str) or venue not in {"binance", "mexc"}:
         raise ValueError("venue must be binance or mexc")
-    if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
-        raise ValueError("symbol must be a valid spot pair such as BTC/USDT")
+    if not isinstance(symbol, str) or not re.fullmatch(r"[A-Z0-9]{2,20}/[A-Z0-9]{2,20}", symbol):
+        raise ValueError("symbol must be a canonical spot pair such as BTC/USDT")
     if not isinstance(timeframe, str) or timeframe not in {"1m", "5m", "15m", "30m", "1h", "4h", "1d"}:
         raise ValueError("unsupported timeframe")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 50 <= limit <= 500:
