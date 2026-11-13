@@ -89,7 +89,7 @@ The future versioned API should provide stable, client-neutral resources:
 - `/v1/markets`, `/v1/instruments` and `/v1/providers`
 - `/v1/portfolio`, `/v1/risk` and `/v1/audit`
 
-These are target contracts, not a claim that these endpoints are already implemented. The existing unversioned research API remains research-only until authentication, persistence, authorization and migration are implemented and tested.
+Implementation status (November 2026): authenticated routes exist for invite-only registration/login/profile, workspaces, memory, agent tasks/messages, capability discovery, audit history and model metadata. The current route shapes include `/v1/auth/register`, `/v1/auth/token`, `/v1/profile`, `/v1/workspaces`, `/v1/agents/capabilities` and `/v1/models`. The risk, portfolio, market and decision research endpoints are still largely unversioned. There is no `/v1/inference` endpoint yet. The list above remains the target for full client-neutral API coverage, not a claim that every family is implemented.
 
 ## Delivery sequence
 
@@ -104,4 +104,6 @@ These are target contracts, not a claim that these endpoints are already impleme
 
 ## Current implementation boundary
 
-The current repository has a research FastAPI app, a mobile-first PWA shell, provider and instrument adapter extension points, and deterministic risk gates. It does not yet have production authentication, persistent shared memory, an agent message service, a model registry service, encrypted broker credential storage, a deployed backend or a native Android app. Those must be implemented and verified before describing ETI as a connected multi-client platform.
+The current repository now has an invite-only authentication foundation (scrypt password hashes, short-lived signed bearer tokens, persistent hashed-subject login/signup throttles), account-scoped SQLite workspaces/memory/audit APIs, durable agent task/message APIs, and an explicit worker process. The worker uses atomic leases and random lease tokens, bounded retries and an allowlisted `market.snapshot` capability for completed public Binance/MEXC crypto spot candles. It is deterministic research tooling, not a general LLM multi-agent planner. The model registry supports immutable metadata, admin-governed registration, independent approval and retirement; it does not yet store or load model binaries or serve inference.
+
+The mobile-first PWA provides sign-in, workspace selection, memory editing and task visibility. It stores access tokens only in tab-scoped `sessionStorage`, and its service worker caches only the static shell. The PWA is not deployed. SQLite is a local/single-instance foundation; PostgreSQL, explicit retention/export/deletion, email verification, edge rate limiting, trusted-proxy configuration, managed secret rotation, backups and monitoring remain production requirements. The API has no provider credential vault, no live order execution and no native Android application. The product must not be described as a deployed or fully autonomous multi-client trading platform until these milestones are completed and independently verified.
