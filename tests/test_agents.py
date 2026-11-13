@@ -55,3 +55,34 @@ def test_worker_does_not_claim_when_queue_is_empty(tmp_path):
     store = MemoryStore(tmp_path / "empty-worker.sqlite3")
     result = AgentWorker(store, AgentCapabilityRegistry()).run_once()
     assert result is None
+
+
+def test_worker_retries_transient_errors_without_leaking_exception_text(tmp_path):
+    store = MemoryStore(tmp_path / "agent-retry.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    task = store.create_agent_task(
+        "owner", workspace["id"], "user", "test.transient", {"request": 1},
+        max_attempts=2,
+    )
+    attempts = {"count": 0}
+
+    def handler(payload):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("private credential must not appear in task output")
+        return {"ok": True, "attempt": attempts["count"]}
+
+    registry = AgentCapabilityRegistry()
+    registry.register("test.transient", handler)
+    worker = AgentWorker(store, registry)
+
+    first = worker.run_once()
+    assert first["id"] == task["id"]
+    assert first["status"] == "queued"
+    assert first["attempt_count"] == 1
+    assert "private credential" not in first["result"]["error"]["message"]
+
+    second = worker.run_once()
+    assert second["status"] == "completed"
+    assert second["attempt_count"] == 2
+    assert second["result"] == {"ok": True, "attempt": 2}
