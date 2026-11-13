@@ -175,3 +175,21 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
         )
         assert retired.status_code == 200
         assert retired.json()["lifecycle"] == "retired"
+
+
+def test_login_endpoint_returns_retry_after_when_rate_limited(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "login-rate.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    with TestClient(app) as client:
+        for _ in range(10):
+            response = client.post("/v1/auth/token", json={
+                "username": "missing_user",
+                "password": "a-long-password-123",
+            })
+            assert response.status_code == 401
+        limited = client.post("/v1/auth/token", json={
+            "username": "missing_user",
+            "password": "a-long-password-123",
+        })
+        assert limited.status_code == 429
+        assert int(limited.headers["retry-after"]) > 0
