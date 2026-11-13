@@ -1435,6 +1435,28 @@ class MemoryStore:
         )
         if any(key not in state for key in required):
             raise ValueError("paper tick state is incomplete")
+        numeric_keys = (
+            "cash", "position_qty", "position_cost", "equity", "peak_equity",
+            "realized_pnl", "max_drawdown", "daily_start_equity",
+        )
+        if any(isinstance(state[key], bool) or not isinstance(state[key], (int, float))
+               or not math.isfinite(state[key]) for key in numeric_keys):
+            raise ValueError("paper tick contains invalid numeric state")
+        if (state["cash"] < -1e-8 or state["position_qty"] < 0
+                or state["position_cost"] < 0 or state["equity"] <= 0
+                or state["peak_equity"] < state["equity"]
+                or state["status"] not in {"running", "stopped"}):
+            raise ValueError("paper tick state violates account invariants")
+        if state["entry_price"] is not None and (
+            isinstance(state["entry_price"], bool)
+            or not isinstance(state["entry_price"], (int, float))
+            or not math.isfinite(state["entry_price"]) or state["entry_price"] <= 0
+        ):
+            raise ValueError("paper tick entry price is invalid")
+        if any(not isinstance(event, dict)
+               or event.get("event_type") not in {"entry", "exit", "risk_stop"}
+               for event in trade_events):
+            raise ValueError("paper tick trade event is invalid")
         now = _utc_now()
         with self._connection() as conn:
             row = conn.execute(
