@@ -268,3 +268,42 @@ def test_live_settings_cannot_orphan_pending_exchange_order(tmp_path):
         store.save_live_execution_profile(
             "owner", "binance", ["BTC/USDT", "ETH/USDT"], "4h", 1000.0, {},
         )
+
+
+def test_live_authorization_requires_all_four_owner_confirmations(monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+    import eti.api as api
+
+    class FakeStore:
+        def __init__(self):
+            self.called = False
+        def authorize_live_execution(self, owner_id):
+            self.called = True
+            return {"owner_id": owner_id, "enabled": True}
+
+    store = FakeStore()
+    monkeypatch.setattr(api, "_require_model_admin", lambda account: None)
+    monkeypatch.setattr(api, "_memory_store", lambda: store)
+    account = {"id": "owner", "username": "hamza_eti"}
+
+    payload_without_ip_ack = api.LiveExecutionAuthorizationPayload(
+        confirm_live_trading=True,
+        confirm_spot_trading_permission=True,
+        confirm_withdrawals_disabled=True,
+        confirm_ip_restrictions=False,
+    )
+    with pytest.raises(HTTPException) as exc:
+        api.authorize_live_execution(payload_without_ip_ack, account)
+    assert exc.value.status_code == 422
+    assert store.called is False
+
+    payload_all_confirmed = api.LiveExecutionAuthorizationPayload(
+        confirm_live_trading=True,
+        confirm_spot_trading_permission=True,
+        confirm_withdrawals_disabled=True,
+        confirm_ip_restrictions=True,
+    )
+    result = api.authorize_live_execution(payload_all_confirmed, account)
+    assert result["mode"] == "live"
+    assert store.called is True
