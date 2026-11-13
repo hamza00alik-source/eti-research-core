@@ -195,3 +195,19 @@ def test_worker_logs_task_lifecycle_without_payload_or_result(tmp_path, capsys):
     assert '"status":"completed"' in output
     assert "must-not-be-logged" not in output
     assert "private_result" not in output
+
+
+def test_user_created_live_execution_task_is_rejected_by_worker(tmp_path):
+    store = MemoryStore(tmp_path / "manual-live-task.sqlite3")
+    workspace = _workspace(store)
+    task = store.create_agent_task(
+        "owner-1", workspace["id"], "user.requester", "live.tick",
+        {"owner_id": "owner-1", "venue": "binance", "symbol": "BTC/USDT",
+         "timeframe": "1h", "scheduled_by": "user.requester"},
+        max_attempts=1,
+    )
+    worker = AgentWorker(store)
+    result = worker.run_once()
+    assert result["id"] == task["id"]
+    assert result["status"] == "failed"
+    assert result["result"]["error"]["type"] == "ValueError"
