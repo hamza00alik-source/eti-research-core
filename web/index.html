@@ -19,7 +19,7 @@
 <section class="grid status-grid" aria-label="Live platform overview">
 <article><h2>Platform</h2><div id="health" class="value">Connecting…</div><p>Backend status</p></article>
 <article><h2>Live execution</h2><div id="execution" class="value">Disabled</div><p>Owner-authorized only</p></article>
-<article><h2>Markets</h2><div id="markets" class="value">Crypto spot</div><p>Currently connected public feeds</p></article>
+<article><h2>Markets</h2><div id="markets" class="value">Multi-asset research</div><p>Public research feeds; spot-only execution</p></article>
 </section>
 
 <section class="panel live-chart-panel" id="live-chart"><div class="section-heading"><div><div class="eyebrow">LIVE MARKET DATA</div><h2>Live candlestick chart</h2></div><span class="tag chart-feed-tag">BINANCE · SPOT</span></div><div class="chart-toolbar"><label>Market<select id="chart-symbol"><option value="BTCUSDT">BTC / USDT</option><option value="ETHUSDT">ETH / USDT</option><option value="SOLUSDT">SOL / USDT</option><option value="XRPUSDT">XRP / USDT</option><option value="BNBUSDT">BNB / USDT</option><option value="ADAUSDT">ADA / USDT</option></select></label><label>Timeframe<select id="chart-timeframe"><option value="1m">1 minute</option><option value="5m">5 minutes</option><option value="15m">15 minutes</option><option value="1h" selected>1 hour</option><option value="4h">4 hours</option><option value="1d">1 day</option></select></label><button id="chart-refresh" type="button" class="secondary-button">Refresh chart</button></div><div class="chart-price-row"><div><strong id="chart-last-price">—</strong><span id="chart-price-change">Waiting for feed</span></div><span id="chart-feed-status" class="chart-feed-status" role="status" aria-live="polite">Connecting…</span></div><div class="chart-canvas-wrap"><canvas id="market-chart" aria-label="Live candlestick price and volume chart"></canvas></div><div class="chart-legend"><span><i class="legend-up"></i> Bull candle</span><span><i class="legend-down"></i> Bear candle</span><span>Volume · public spot data</span></div><p class="muted chart-note">Live public Binance spot feed. Candles update as trades arrive; historical candles load on market/timeframe changes. Market data only — this chart does not place orders.</p></section><section class="panel" id="account-panel">
@@ -116,7 +116,8 @@
 <h3>Agent task ledger</h3>
 <form id="task-form">
 <label>Registered capability<select id="capability-select" name="capability" required><option value="market.snapshot">market.snapshot</option></select></label>
-<label class="wide-field">Task input (JSON)<textarea name="input" rows="3" spellcheck="false">{"venue":"mexc","symbol":"BTC/USDT","timeframe":"1h","limit":200}</textarea></label>
+<label class="wide-field">Task input (JSON)<textarea name="input" rows="4" spellcheck="false">{"venue":"mexc","asset_class":"crypto","market_type":"spot","symbol":"BTC/USDT","timeframe":"1h","limit":200}</textarea></label>
+<p class="muted">Research examples: crypto BTC/USDT (spot), BTC/USDT:USDT (perpetual), dated futures with exact CCXT expiry symbol; equity AAPL; forex EURUSD=X; commodity GC=F; index ^GSPC. Choose asset_class and market_type in the JSON. Yahoo coverage varies. Research only.</p>
 <button type="submit">Queue research task</button>
 </form>
 <pre id="task-list" aria-live="polite">No tasks loaded.</pre>
