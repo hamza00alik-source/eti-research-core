@@ -455,6 +455,8 @@ class MemoryStore:
                                 market_symbol = symbol
                                 if market_type == "swap" and symbol.endswith("/USDT") and ":" not in symbol:
                                     market_symbol = symbol + ":USDT"
+                                if market_type == "future" and (":" not in symbol or "-" not in symbol):
+                                    continue
                                 for timeframe in timeframes:
                                     task_id = str(uuid4())
                                     payload = {
