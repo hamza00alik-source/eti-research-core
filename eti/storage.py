@@ -342,7 +342,8 @@ class MemoryStore:
 
     def create_agent_task(
         self, owner_id: str, workspace_id: str, requester: str,
-        target_capability: str, input_data: Any, deadline_at: str | None = None
+        target_capability: str, input_data: Any, deadline_at: str | None = None,
+        max_attempts: int = 3
     ) -> dict[str, Any]:
         """Queue a typed task; this records work but does not execute an agent."""
         owner_id = _required_text(owner_id, "owner_id")
@@ -352,16 +353,18 @@ class MemoryStore:
         encoded = _encode_json(input_data)
         if deadline_at is not None:
             deadline_at = _required_text(deadline_at, "deadline_at", 40)
+        if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or not 1 <= max_attempts <= 10:
+            raise ValueError("max_attempts must be an integer from 1 to 10")
         task_id, now = str(uuid4()), _utc_now()
         with self._connection() as conn:
             if not self._owns_workspace(conn, owner_id, workspace_id):
                 raise LookupError("workspace not found")
             conn.execute(
                 "INSERT INTO agent_tasks(id, owner_id, workspace_id, requester, target_capability, "
-                "status, input_json, deadline_at, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)",
+                "status, input_json, deadline_at, max_attempts, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)",
                 (task_id, owner_id, workspace_id, requester, target_capability,
-                 encoded, deadline_at, now, now),
+                 encoded, deadline_at, max_attempts, now, now),
             )
             conn.execute(
                 "INSERT INTO audit_events(id, owner_id, workspace_id, event_type, payload_json, created_at) "
@@ -372,7 +375,8 @@ class MemoryStore:
         return {"id": task_id, "owner_id": owner_id, "workspace_id": workspace_id,
                 "requester": requester, "target_capability": target_capability,
                 "status": "queued", "input": json.loads(encoded), "result": None,
-                "deadline_at": deadline_at, "created_at": now, "updated_at": now}
+                "deadline_at": deadline_at, "attempt_count": 0, "max_attempts": max_attempts,
+                "lease_expires_at": None, "created_at": now, "updated_at": now}
 
     def list_agent_tasks(
         self, owner_id: str, workspace_id: str, status: str | None = None,
