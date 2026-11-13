@@ -66,10 +66,26 @@
 - [x] Define stable client-neutral API families and backend-only market plug-in contract
 - [x] Define authentication, authorization, encryption, audit and credential-handling requirements
 - [x] Add file-backed SQLite workspace/memory store with owner-scoped queries and isolation tests
-- [ ] Add authenticated API access, retention/deletion policy and production PostgreSQL backend
-- [ ] Implement authenticated session and scoped authorization
-- [ ] Implement durable agent task/message orchestration and audit events
-- [ ] Implement central model registry and versioned inference service
-- [ ] Migrate clients to versioned authenticated APIs
+- [x] Add authenticated API access for account-scoped workspaces, memory, agent ledgers, audit and model metadata
+- [ ] Add explicit data export, retention and deletion policy
+- [ ] Replace SQLite with production PostgreSQL before multi-instance deployment
+- [x] Implement invite-only authenticated sessions, signed short-lived tokens, persistent login/signup throttles and scoped authorization
+- [x] Implement durable SQLite agent task/message queue, atomic leases, lease-token completion, bounded retries and audit events
+- [x] Implement admin-governed immutable model metadata registry with independent approval and retirement
+- [ ] Implement safe model artifact storage, approved-version inference API and runtime monitoring
+- [x] Migrate PWA account, workspace, memory and agent task screens to authenticated APIs
+- [ ] Migrate market, instrument, provider, risk and portfolio resources to stable versioned APIs
 - [ ] Add encrypted provider credential vault and read-only connection verification
 - [ ] Build native Android client against the same API contract
+
+
+## v0.8 — durable worker and registry services
+- [x] Add a separate worker process; API startup does not start workers implicitly
+- [x] Add an allowlisted public crypto spot market-snapshot capability (Binance/MEXC)
+- [x] Add crash recovery through expiring leases, random lease tokens and bounded retry attempts
+- [x] Prevent clients from forging task completion; users may cancel queued tasks only
+- [x] Expose approved model metadata to signed-in accounts and restrict registry changes to server-listed administrators
+- [ ] Add general multi-agent planning/delegation and versioned capability permissions
+- [ ] Add model artifact persistence and approved-version inference
+- [ ] Add PostgreSQL queue/storage backend and worker health monitoring
+- [ ] Deploy HTTPS API + worker + PWA and verify end-to-end Android browser installation
