@@ -344,26 +344,38 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def discover_market_universe(payload: dict[str, Any]) -> dict[str, Any]:
-    """Discover currently listed crypto instruments from public exchange metadata."""
-    venue = payload.get("venue", "binance")
-    market_type = payload.get("market_type", "spot")
+    """Discover listed crypto markets or return curated Yahoo public reference instruments."""
+    asset_class = payload.get("asset_class", "crypto")
     limit = payload.get("limit", 100)
-    if venue not in {"binance", "mexc"}:
-        raise ValueError("venue must be binance or mexc")
-    if market_type not in {"spot", "swap", "future"}:
-        raise ValueError("market_type must be spot, swap, or future")
+    market_type = payload.get("market_type", "spot")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
         raise ValueError("limit must be an integer from 1 to 500")
-    provider = CcxtPublicProvider(venue, market_type)
-    instruments = provider.discover_markets(limit=limit)
+    if asset_class == "crypto":
+        venue = payload.get("venue", "binance")
+        if venue not in {"binance", "mexc"}:
+            raise ValueError("venue must be binance or mexc")
+        if market_type not in {"spot", "swap", "future"}:
+            raise ValueError("market_type must be spot, swap, or future")
+        instruments = CcxtPublicProvider(venue, market_type).discover_markets(limit=limit)
+        source = "CCXT public exchange market metadata"
+        venue_name = venue
+    elif asset_class in {"forex", "equity", "commodity", "index"}:
+        if market_type not in {"spot", "future"}:
+            raise ValueError("Yahoo Finance market type must be spot or future")
+        provider = YahooFinanceProvider(asset_class)
+        instruments = provider.discover_markets(limit=limit, market_type=market_type)
+        source = "curated Yahoo Finance public reference universe"
+        venue_name = "yahoo"
+    else:
+        raise ValueError("asset_class must be crypto, forex, equity, commodity, or index")
     return {
         "kind": "market_universe_discovery",
-        "venue": venue, "asset_class": "crypto", "market_type": market_type,
+        "venue": venue_name, "asset_class": asset_class, "market_type": market_type,
         "instrument_count": len(instruments), "instruments": instruments,
-        "discovery_source": "CCXT public exchange market metadata",
+        "discovery_source": source,
         "limitations": [
-            "Discovery covers only instruments listed by the selected connected public exchange adapter.",
-            "Quote-volume ranking is used only when the venue supplies bulk public tickers; otherwise results are alphabetically ordered.",
+            "Crypto discovery covers active instruments listed by Binance or MEXC and ranks by public quote volume when supported.",
+            "Yahoo Finance asset catalogues are curated reference lists, not exhaustive exchange listings or live screeners.",
             "Listed instruments are not automatically eligible for training, approval or live execution.",
         ],
     }
