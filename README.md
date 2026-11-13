@@ -147,3 +147,13 @@ The PWA also displays the authenticated account's audit trail alongside its work
 - `POST /v1/inference/{model_id}/{version}` serves approved versions only. Requests must specify a supported asset class and exactly the feature names in the registered schema; values and returned probabilities are validated. Requests are authenticated and rate-limited.
 - Inference returns short/flat/long probabilities only. It does not size a position, approve a trade, bypass the risk engine or place an order.
 - No production model is trained or promoted by this change. The training-to-artifact-to-registry workflow and model drift monitoring remain to be completed before paper autonomy.
+
+## Single-instance production runtime and encrypted backups
+
+- Railway's initial deployment uses one API service with a persistent volume mounted at `/app/data`. The durable worker runs inside that same service so API and worker share the same SQLite file; do not scale this service horizontally or split the worker onto another service while SQLite is in use.
+- Set `ETI_EMBEDDED_WORKER=1` to enable the worker in the API lifespan. Local development and Compose retain their separate worker service by default.
+- Set `ETI_BACKUP_ENABLED=1` to run an immediate and then daily encrypted SQLite snapshot to the configured S3-compatible object bucket. Snapshots use SQLite's online backup API, pass `PRAGMA integrity_check`, and are encrypted with AES-256-GCM before upload. Old objects are removed after the configured retention period (7–365 days).
+- Required backup variables: `ETI_BACKUP_S3_ENDPOINT`, `ETI_BACKUP_S3_BUCKET`, `ETI_BACKUP_S3_ACCESS_KEY_ID`, `ETI_BACKUP_S3_SECRET_ACCESS_KEY`, and `ETI_BACKUP_ENCRYPTION_KEY` (URL-safe base64 encoding of 32 random bytes). Optional: `ETI_BACKUP_S3_REGION`, `ETI_BACKUP_S3_ADDRESSING_STYLE` (`path` or `virtual`), `ETI_BACKUP_S3_PREFIX`, `ETI_BACKUP_RETENTION_DAYS`, and `ETI_BACKUP_INTERVAL_SECONDS`.
+- Restore with `python -m eti.backup restore --key '<exact-object-key>' --destination /app/data/eti.sqlite3`. Restore decrypts into a temporary file, verifies SQLite integrity, then atomically replaces the destination. Stop API/worker writes before running a restore.
+- Backups are encrypted independently of the storage provider. Keep the encryption key in Railway's sealed variables and in a separate secure offline recovery location; losing that key makes backups unrecoverable. Never put it in Git or chat.
+- This is a single-instance deployment design, not high availability. PostgreSQL migration is required before multiple API/worker replicas or horizontal scaling.
