@@ -11,7 +11,7 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, balanced_accuracy_score
 
 from .data import drop_incomplete_candles, fetch_ohlcv, validate_ohlcv
-from .features import FEATURE_COLUMNS, build_features, feature_columns_for_frame, make_labels
+from .features import BASE_FEATURE_COLUMNS, FEATURE_COLUMNS, build_features, feature_columns_for_frame, make_labels
 from .model import BaselineModel
 from .artifacts import ModelArtifactStore
 from .simulator import simulate_long_flat
@@ -111,7 +111,7 @@ def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[Baselin
     schema = {
         "features": list(feature_columns),
         "dataset_sha256": dataset_sha256,
-        "feature_version": "eti.features.v1",
+        "feature_version": "eti.features.v2" if feature_columns != BASE_FEATURE_COLUMNS else "eti.features.v1",
         "training_rows": int(len(training)),
         "calibration_rows": int(len(calibration)),
         "purged_rows": int(purged_rows),
