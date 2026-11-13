@@ -905,7 +905,8 @@ def supported_markets():
         "venues": ["binance", "mexc"],
         "asset_classes": ["crypto", "forex", "equity", "commodity", "index"],
         "crypto_public_market_types": ["spot", "swap", "future"],
-        "market_types": ["spot", "swap", "future", "margin", "option", "cfd"],
+        "market_types": ["spot", "swap", "future"],
+        "catalog_market_types": ["spot", "margin", "swap", "future", "option", "cfd"],
         "data_coverage": {
             "crypto": "Public CCXT OHLCV for supported spot, perpetual swap and dated-future symbols",
             "forex_equity_commodity_index": "Yahoo Finance public OHLCV plus validated CSV fallback; authenticated broker feeds are not connected",
