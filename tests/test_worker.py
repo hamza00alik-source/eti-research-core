@@ -144,3 +144,42 @@ def test_worker_registers_model_training_result_as_unapproved_candidate(tmp_path
     assert model["evaluation_report"]["passed"] is True
     assert registered["registry"]["approval_required"] is True
     assert registered["lifecycle"] == "candidate"
+
+
+
+def test_model_training_worker_registers_unapproved_candidate(tmp_path):
+    store = MemoryStore(tmp_path / "candidate.sqlite3")
+    workspace = _workspace(store)
+    registry = AgentCapabilityRegistry()
+    registry.register("model.train_research", lambda payload: {
+        "venue": "mexc",
+        "symbol": "BTC/USDT",
+        "timeframe": "1h",
+        "training_data_ref": "ccxt:mexc:BTC/USDT:1h:3000:dataset-sha",
+        "candidate_artifact": {
+            "artifact_uri": "artifact://sha256/" + "a" * 64,
+            "artifact_sha256": "a" * 64,
+        },
+        "input_schema": {"features": ["close", "volume"]},
+        "evaluation": {"fold_count": 4},
+        "evaluation_passed": False,
+        "quality_checks": {"balanced_accuracy_at_least_0_52": False},
+        "calibration_status": "failed",
+    })
+    task = store.create_agent_task(
+        "owner-1", workspace["id"], "eti.autonomy.model_training",
+        "model.train_research", {"venue": "mexc", "symbol": "BTC/USDT"},
+    )
+
+    result = AgentWorker(store, registry=registry).run_once()
+
+    assert result["id"] == task["id"]
+    assert result["status"] == "completed"
+    candidate = store.list_model_versions("candidate")
+    assert len(candidate) == 1
+    assert candidate[0]["lifecycle"] == "candidate"
+    assert candidate[0]["created_by"] == "eti.worker"
+    assert candidate[0]["evaluation_report"]["passed"] is False
+    assert candidate[0]["calibration_status"] == "failed"
+    assert result["result"]["registry"]["approval_required"] is True
+    assert result["result"]["registry"]["lifecycle"] == "candidate"
