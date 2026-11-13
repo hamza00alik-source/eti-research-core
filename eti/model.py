@@ -60,6 +60,9 @@ class BaselineModel:
         if sample_count < min_samples:
             report["reason"] = "insufficient_calibration_samples"
             return report
+        if not np.array_equal(np.sort(self.classes_), CLASSES):
+            report["reason"] = "training_model_missing_one_or_more_classes"
+            return report
         if any(counts[str(int(cls))] < 5 for cls in CLASSES):
             report["reason"] = "each_class_requires_at_least_five_calibration_samples"
             return report
