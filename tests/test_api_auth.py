@@ -283,6 +283,8 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
         calibration_report = {
             "passed": True, "method": "temperature_scaling",
             "sample_count": 50, "temperature": 1.2,
+            "class_counts": {"0": 16, "1": 17, "2": 17},
+            "nll_before": 1.2, "nll_after": 1.0,
         }
 
         def predict_proba(self, frame):
