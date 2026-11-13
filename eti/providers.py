@@ -268,6 +268,28 @@ class YahooFinanceProvider:
             raise ValueError(f"Unsupported Yahoo Finance asset class: {asset_class}")
         self.asset_class = asset_class
 
+    def discover_markets(self, limit: int = 100, market_type: str = "spot") -> list[dict]:
+        """Return a curated cross-region public reference universe for Yahoo-supported assets."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be an integer from 1 to 500")
+        universes = {
+            "forex": {"spot": ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "NZDUSD=X", "EURGBP=X"]},
+            "equity": {"spot": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK-B", "AVGO", "TSLA", "JPM", "LLY", "WMT", "V", "XOM", "ORCL", "COST", "MA", "NFLX", "AMD", "KO"]},
+            "commodity": {"future": ["GC=F", "SI=F", "PL=F", "PA=F", "CL=F", "NG=F", "HG=F", "ZC=F", "ZS=F", "ZW=F", "KC=F", "SB=F"]},
+            "index": {
+                "spot": ["^GSPC", "^IXIC", "^DJI", "^RUT", "^FTSE", "^GDAXI", "^N225", "^HSI"],
+                "future": ["ES=F", "NQ=F", "YM=F", "RTY=F"],
+            },
+        }
+        symbols = universes.get(self.asset_class, {}).get(market_type)
+        if symbols is None:
+            raise ValueError(f"Unsupported market type {market_type} for {self.asset_class}")
+        return [{
+            "symbol": symbol, "venue": "yahoo", "asset_class": self.asset_class,
+            "market_type": market_type, "quote": None, "active": None,
+            "discovery_source": "curated_public_reference_universe",
+        } for symbol in symbols[:limit]]
+
     def fetch_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 1500) -> pd.DataFrame:
         if not isinstance(symbol, str) or not symbol.strip() or len(symbol) > 40:
             raise ValueError("A valid Yahoo Finance symbol is required")
