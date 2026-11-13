@@ -168,6 +168,12 @@ def profile(account: dict[str, str] = Depends(current_account)):
     return {"account": account}
 
 
+@app.get("/v1/account/export")
+def export_account_data(account: dict[str, str] = Depends(current_account)):
+    """Download the caller's account-scoped research data as JSON."""
+    return _memory_store().export_account_data(account["id"])
+
+
 @app.get("/v1/workspaces")
 def list_workspaces(account: dict[str, str] = Depends(current_account)):
     return {"items": _memory_store().list_workspaces(account["id"])}
@@ -183,6 +189,14 @@ def create_workspace(payload: WorkspacePayload,
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return workspace
+
+
+@app.delete("/v1/workspaces/{workspace_id}", status_code=204)
+def delete_workspace(workspace_id: str,
+                     account: dict[str, str] = Depends(current_account)):
+    if not _memory_store().delete_workspace(account["id"], workspace_id):
+        raise HTTPException(status_code=404, detail="workspace not found")
+    return Response(status_code=204)
 
 
 @app.get("/v1/workspaces/{workspace_id}/memory")

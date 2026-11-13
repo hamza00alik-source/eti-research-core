@@ -387,3 +387,46 @@ def test_model_approval_rejects_missing_server_artifact(tmp_path, monkeypatch):
         )
         assert candidate.status_code == 200
         assert candidate.json()["lifecycle"] == "candidate"
+
+
+def test_account_export_is_authenticated_and_contains_only_callers_data(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "export.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        assert client.get("/v1/account/export").status_code == 401
+        first = _register(client, "export_first")
+        second = _register(client, "export_second")
+        h1 = {"Authorization": f"Bearer {first['access_token']}"}
+        h2 = {"Authorization": f"Bearer {second['access_token']}"}
+        workspace = client.post("/v1/workspaces", headers=h1, json={"name": "private"}).json()
+        client.put(f"/v1/workspaces/{workspace['id']}/memory/prefs/market",
+                   headers=h1, json={"value": ["crypto", "gold"]})
+        exported = client.get("/v1/account/export", headers=h1)
+        assert exported.status_code == 200
+        payload = exported.json()
+        assert payload["format"] == "eti-account-export-v1"
+        assert payload["workspaces"][0]["id"] == workspace["id"]
+        assert payload["memory"][0]["value"] == ["crypto", "gold"]
+        assert "password_hash" not in exported.text
+        assert client.get("/v1/account/export", headers=h2).json()["workspaces"] == []
+
+
+def test_workspace_deletion_is_owner_scoped_cascades_data_and_keeps_audit(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "delete-workspace.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        first = _register(client, "delete_first")
+        second = _register(client, "delete_second")
+        h1 = {"Authorization": f"Bearer {first['access_token']}"}
+        h2 = {"Authorization": f"Bearer {second['access_token']}"}
+        workspace = client.post("/v1/workspaces", headers=h1, json={"name": "to-delete"}).json()
+        client.put(f"/v1/workspaces/{workspace['id']}/memory/prefs/key",
+                   headers=h1, json={"value": "private"})
+        assert client.delete(f"/v1/workspaces/{workspace['id']}", headers=h2).status_code == 404
+        deleted = client.delete(f"/v1/workspaces/{workspace['id']}", headers=h1)
+        assert deleted.status_code == 204
+        assert client.get("/v1/workspaces", headers=h1).json()["items"] == []
+        events = client.get("/v1/audit/events", headers=h1).json()["items"]
+        assert any(event["event_type"] == "workspace.deleted" for event in events)
