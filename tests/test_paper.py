@@ -132,3 +132,16 @@ def test_paper_scheduler_only_enqueues_running_sessions(tmp_path):
     assert store.enqueue_due_paper_tasks(start) == 0
     tasks = store.list_agent_tasks("owner", workspace["id"], status="queued")
     assert tasks[0]["target_capability"] == "paper.tick"
+
+
+def test_paper_session_risk_limits_cannot_be_relaxed(tmp_path):
+    import pytest
+    store = MemoryStore(tmp_path / "paper-risk.sqlite3")
+    workspace = store.create_workspace("owner", "paper")
+    _approved_model(store)
+    with pytest.raises(ValueError, match="max_position_fraction"):
+        store.create_paper_session(
+            "owner", workspace["id"], "eti-mexc-btc-usdt-1h", "paper-test",
+            "mexc", "BTC/USDT", "1h", 1000.0,
+            {"max_position_fraction": 0.50},
+        )
