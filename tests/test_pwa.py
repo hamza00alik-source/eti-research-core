@@ -9,7 +9,7 @@ def test_pwa_account_controls_are_connected_to_authenticated_api():
     script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
     for selector in (
         "login-form", "register-form", "account-view", "workspace-form",
-        "workspace-select", "capability-select", "memory-form", "task-form", "audit-list", "worker-status", "export-account", "delete-workspace",
+        "workspace-select", "capability-select", "memory-form", "task-form", "audit-list", "worker-status", "export-account", "delete-workspace", "model-list", "model-register-form", "model-approve-form", "model-retire-form", "refresh-models",
     ):
         assert selector in html
         assert selector in script
@@ -49,3 +49,14 @@ def test_pwa_exports_account_json_and_confirms_workspace_deletion():
     assert "window.confirm(" in script
     assert "method:'DELETE'" in script
     assert "'/v1/workspaces/'+encodeURIComponent(activeWorkspace)" in script
+
+
+def test_pwa_model_registry_uses_server_governed_lifecycle_endpoints():
+    script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+    html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    assert "async function loadModels()" in script
+    assert "api('/v1/models')" in script
+    assert "api('/v1/models/'+modelId+'/'+version+'/approve'" in script
+    assert "api('/v1/models/'+modelId+'/'+version+'/retire'" in script
+    assert "Do not mark evaluation as passed" in html
+    assert "different reviewer account" in html
