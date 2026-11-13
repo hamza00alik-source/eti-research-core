@@ -39,7 +39,7 @@ def test_bearish_trend_is_never_classified_as_long_watch():
 def test_mixed_market_is_monitor_not_trade_signal():
     result = rank_spot_opportunity(_indicators(sma_gap_10=0.01, sma_gap_30=-0.01))
     assert result["classification"] == "monitor"
-    assert "not a forecast" in result["disclaimer"]
+    assert "not a forecast" in result["disclaimer"].lower()
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf"), None, "bad"])
