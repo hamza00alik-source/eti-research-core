@@ -82,6 +82,17 @@ All routes in this section require `Authorization: Bearer <access_token>`. The a
 Every workspace route checks account ownership and returns not-found for another account's workspace. Task and message payloads are stored as typed JSON data, never executed as code or instructions. Task records can be processed by the separately started allowlisted worker described below.
 
 
+## Model artifacts and approved inference
+
+- `ModelArtifactStore` stores fitted ETI `BaselineModel` objects under a content-addressed SHA-256 path and returns an `artifact://sha256/<digest>` reference.
+- Artifacts are immutable by digest; inference verifies the registry checksum before loading and rejects path-based or mismatched references.
+- The artifact directory is server-owned. Joblib/pickle deserialization can execute code, so **never accept model files from users or place untrusted files in `ETI_ARTIFACT_DIR`**. Only trusted server-side training code may write there. The API has no artifact upload endpoint.
+- Set `ETI_ARTIFACT_DIR` to a persistent private server directory. It must be backed up and writable only by the trusted ETI service account.
+- `POST /v1/inference/{model_id}/{version}` is available only for approved model versions. The request must specify a supported asset class and exactly the feature names in the registered input schema; values and returned probabilities are checked for finite valid numbers. Requests are authenticated and rate-limited.
+- Inference returns short/flat/long probabilities only. It does not size a position, approve a trade, bypass the risk engine or place an order.
+- The repository has not automatically trained or promoted a production model. The training-to-artifact-to-registry workflow and model drift monitoring remain to be completed before using inference in paper autonomy.
+
+
 ## Self-hosted container deployment (private beta foundation)
 
 The repository includes a Docker image and Compose stack for a single-host deployment. It runs the FastAPI/PWA service and the durable worker as separate containers sharing one persistent SQLite volume.
