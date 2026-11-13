@@ -390,3 +390,24 @@ def test_market_snapshot_accepts_yahoo_ticker_for_equities(monkeypatch):
     assert result["venue"] == "yahoo"
     assert result["asset_class"] == "equity"
     assert result["research_ranking"] is None
+
+
+def test_autonomous_snapshot_followup_preserves_noncrypto_asset_class(tmp_path):
+    store = MemoryStore(tmp_path / "autonomous-yahoo-followup.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    task = store.create_agent_task(
+        "owner", workspace["id"], "eti.autonomy.supervisor", "market.snapshot",
+        {"venue": "yahoo", "asset_class": "equity", "market_type": "spot",
+         "symbol": "AAPL", "timeframe": "1h",
+         "scheduled_by": "eti.autonomy.supervisor"},
+    )
+    registry = AgentCapabilityRegistry()
+    registry.register("market.snapshot", lambda payload: {"kind": "public_market_snapshot"})
+    completed = AgentWorker(store, registry).run_once()
+    assert completed["id"] == task["id"] and completed["status"] == "completed"
+    queued = store.list_agent_tasks("owner", workspace["id"], status="queued")
+    assert len(queued) == 1
+    assert queued[0]["target_capability"] == "strategy.walk_forward"
+    assert queued[0]["input"]["asset_class"] == "equity"
+    assert queued[0]["input"]["venue"] == "yahoo"
+    assert queued[0]["input"]["symbol"] == "AAPL"
