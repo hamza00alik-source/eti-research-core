@@ -171,6 +171,7 @@ def test_login_and_registration_are_rate_limited(tmp_path, monkeypatch):
 
 
 def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeypatch):
+    monkeypatch.setattr(ModelArtifactStore, "load_model", lambda self, uri, checksum: object())
     monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "models.sqlite3"))
     monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
     monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
@@ -326,3 +327,40 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
             json={"asset_class": "crypto_spot", "features": {"feature_a": 1.0}},
         )
         assert wrong_schema.status_code == 422
+
+
+def test_model_approval_rejects_missing_server_artifact(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "missing-artifact.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    monkeypatch.setenv("ETI_ADMIN_USERNAMES", "trainer_admin,reviewer_admin")
+    digest = "b" * 64
+    with TestClient(app) as client:
+        trainer = _register(client, "trainer_admin")
+        reviewer = _register(client, "reviewer_admin")
+        trainer_headers = {"Authorization": f"Bearer {trainer['access_token']}"}
+        reviewer_headers = {"Authorization": f"Bearer {reviewer['access_token']}"}
+        payload = {
+            "model_id": "missing-artifact-model",
+            "version": "0.1.0",
+            "artifact_uri": "artifact://sha256/" + digest,
+            "artifact_sha256": digest,
+            "input_schema": {"features": ["x"]},
+            "supported_classes": ["crypto_spot"],
+            "training_data_ref": "test-fixture",
+            "evaluation_report": {"passed": True},
+            "calibration_status": "calibrated",
+        }
+        created = client.post("/v1/models", headers=trainer_headers, json=payload)
+        assert created.status_code == 201
+        denied = client.post(
+            "/v1/models/missing-artifact-model/0.1.0/approve",
+            headers=reviewer_headers,
+        )
+        assert denied.status_code == 409
+        candidate = client.get(
+            "/v1/models/missing-artifact-model/0.1.0",
+            headers=trainer_headers,
+        )
+        assert candidate.status_code == 200
+        assert candidate.json()["lifecycle"] == "candidate"
