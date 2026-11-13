@@ -34,3 +34,23 @@ def test_csv_provider_remains_available_for_non_crypto_assets(tmp_path):
     frame = CsvOHLCVProvider(path).fetch_ohlcv("EUR/USD", "1h", 3)
     assert len(frame) == 3
     assert frame.iloc[-1]["close"] == pytest.approx(1.3)
+
+
+def test_yahoo_provider_normalizes_public_ohlcv(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from eti.providers import YahooFinanceProvider
+
+    index = pd.date_range("2026-01-01", periods=60, freq="h", tz="UTC")
+    source = pd.DataFrame({
+        "Open": [100.0] * 60, "High": [102.0] * 60,
+        "Low": [99.0] * 60, "Close": [101.0] * 60,
+        "Volume": [1000.0] * 60,
+    }, index=index)
+    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(
+        download=lambda *args, **kwargs: source
+    ))
+    frame = YahooFinanceProvider("equity").fetch_ohlcv("AAPL", "1h", 50)
+    assert len(frame) == 50
+    assert list(frame.columns) == ["timestamp", "open", "high", "low", "close", "volume"]
+    assert frame.iloc[-1]["close"] == pytest.approx(101.0)
