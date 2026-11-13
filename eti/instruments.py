@@ -6,6 +6,7 @@ or that an instrument is eligible to trade. Eligibility is validated separately.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Iterable
 
 
@@ -51,14 +52,18 @@ class InstrumentSpec:
 
         for field_name in ("contract_multiplier", "max_leverage"):
             value = getattr(self, field_name)
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-                raise ValueError(f"{field_name} must be positive")
+            if (
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value <= 0
+            ):
+                raise ValueError(f"{field_name} must be finite and positive")
         for field_name in ("tick_size", "lot_size", "min_quantity"):
             value = getattr(self, field_name)
             if value is not None and (
-                isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value <= 0
             ):
-                raise ValueError(f"{field_name} must be positive when supplied")
+                raise ValueError(f"{field_name} must be finite and positive when supplied")
         if market_type == "spot" and self.max_leverage != 1.0:
             raise ValueError("Spot instruments must use max_leverage=1.0 in the canonical catalog")
         if market_type == "spot" and self.supports_funding:
