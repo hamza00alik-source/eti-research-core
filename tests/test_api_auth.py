@@ -102,3 +102,23 @@ def test_authenticated_agent_task_and_message_ledger_api(tmp_path, monkeypatch):
         )
         assert len(messages.json()["items"]) == 1
         assert messages.json()["items"][0]["payload"]["max_leverage"] == 1
+
+
+def test_api_security_headers_prevent_private_response_caching():
+    with TestClient(app) as client:
+        response = client.get("/v1/profile")
+        assert response.status_code == 401
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert response.headers["x-frame-options"] == "DENY"
+        assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+        health = client.get("/health")
+        assert health.headers["cache-control"] == "no-store"
+
+
+def test_service_worker_does_not_cache_authenticated_api_routes():
+    with TestClient(app) as client:
+        response = client.get("/sw.js")
+        assert response.status_code == 200
+        assert "url.pathname.startsWith('/v1/')" in response.text
+        assert "cache:'no-store'" in response.text
