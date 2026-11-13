@@ -354,3 +354,32 @@ def test_market_snapshot_accepts_explicit_crypto_perpetual_market(monkeypatch):
     assert result["research_ranking"] is None
     assert any("funding" in item.lower() for item in result["limitations"])
 
+
+
+def test_market_snapshot_accepts_yahoo_ticker_for_equities(monkeypatch):
+    import pandas as pd
+    import eti.agents as agents
+
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=50, freq="h", tz="UTC"),
+        "open": [100.0] * 50, "high": [102.0] * 50,
+        "low": [99.0] * 50, "close": [101.0] * 50,
+        "volume": [1000.0] * 50,
+    })
+    names = ("ret_1", "ret_3", "ret_6", "volatility_20", "sma_gap_10",
+             "sma_gap_30", "rsi_14", "range_pct", "atr_pct")
+    captured = {}
+    class FakeYahooProvider:
+        def __init__(self, asset_class):
+            captured["asset_class"] = asset_class
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            captured["symbol"] = symbol
+            return frame
+    monkeypatch.setattr(agents, "YahooFinanceProvider", FakeYahooProvider)
+    monkeypatch.setattr(agents, "build_features",
+                        lambda _frame: pd.DataFrame([{name: 0.1 for name in names}]))
+    result = agents.market_snapshot({"asset_class": "equity", "symbol": "AAPL"})
+    assert captured == {"asset_class": "equity", "symbol": "AAPL"}
+    assert result["venue"] == "yahoo"
+    assert result["asset_class"] == "equity"
+    assert result["research_ranking"] is None
