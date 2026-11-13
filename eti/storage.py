@@ -361,6 +361,35 @@ class MemoryStore:
                 "status": "queued", "input": json.loads(encoded), "result": None,
                 "deadline_at": deadline_at, "created_at": now, "updated_at": now}
 
+    def list_agent_tasks(
+        self, owner_id: str, workspace_id: str, status: str | None = None,
+        limit: int = 100
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if status is not None and status not in {"queued", "running", "completed", "failed", "cancelled"}:
+            raise ValueError("invalid task status filter")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be an integer from 1 to 500")
+        query = ("SELECT * FROM agent_tasks WHERE owner_id = ? AND workspace_id = ?")
+        params: list[Any] = [owner_id, workspace_id]
+        if status is not None:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC, id LIMIT ?"
+        params.append(limit)
+        with self._connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [
+            {"id": row["id"], "owner_id": row["owner_id"], "workspace_id": row["workspace_id"],
+             "requester": row["requester"], "target_capability": row["target_capability"],
+             "status": row["status"], "input": json.loads(row["input_json"]),
+             "result": json.loads(row["result_json"]) if row["result_json"] is not None else None,
+             "deadline_at": row["deadline_at"], "created_at": row["created_at"],
+             "updated_at": row["updated_at"]}
+            for row in rows
+        ]
+
     def get_agent_task(self, owner_id: str, workspace_id: str, task_id: str) -> dict[str, Any] | None:
         owner_id = _required_text(owner_id, "owner_id")
         workspace_id = _required_text(workspace_id, "workspace_id")

@@ -1,14 +1,19 @@
 """Research API and PWA host. No exchange order routes exist."""
 from __future__ import annotations
 from pathlib import Path
-from fastapi import Depends, FastAPI, Header, HTTPException
+import sqlite3
+from typing import Any
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
 from .auth import AuthManager, AuthenticationError, RegistrationDisabled
 from .config import AppConfig
 from .decision import build_research_decision
-from .risk import RiskEngine, RiskRequest
 from .portfolio import assess_portfolio
+from .risk import RiskEngine, RiskRequest
+from .storage import MemoryStore
 
 app = FastAPI(title=AppConfig().app_name, version=AppConfig().version)
 risk_engine = RiskEngine()
@@ -25,11 +30,41 @@ class LoginPayload(BaseModel):
     password: str = Field(min_length=12, max_length=1024)
 
 
+class WorkspacePayload(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class MemoryPayload(BaseModel):
+    value: Any
+
+
+class AgentTaskPayload(BaseModel):
+    target_capability: str = Field(min_length=1, max_length=120)
+    input: Any
+    deadline_at: str | None = Field(default=None, max_length=40)
+
+
+class AgentTaskUpdatePayload(BaseModel):
+    status: str = Field(min_length=1, max_length=20)
+    result: Any = None
+
+
+class AgentMessagePayload(BaseModel):
+    recipient: str = Field(min_length=1, max_length=80)
+    message_type: str = Field(min_length=1, max_length=120)
+    payload: Any
+    task_id: str | None = Field(default=None, max_length=128)
+
+
 def _auth_manager() -> AuthManager:
     try:
         return AuthManager()
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail="Authentication is not configured") from exc
+
+
+def _memory_store() -> MemoryStore:
+    return MemoryStore()
 
 
 def current_account(authorization: str | None = Header(default=None)) -> dict[str, str]:
@@ -42,6 +77,11 @@ def current_account(authorization: str | None = Header(default=None)) -> dict[st
     except AuthenticationError as exc:
         raise HTTPException(status_code=401, detail=str(exc),
                             headers={"WWW-Authenticate": "Bearer"}) from exc
+
+
+def _require_workspace(store: MemoryStore, account: dict[str, str], workspace_id: str) -> None:
+    if not any(item["id"] == workspace_id for item in store.list_workspaces(account["id"])):
+        raise HTTPException(status_code=404, detail="workspace not found")
 
 
 @app.post("/v1/auth/register", status_code=201)
@@ -74,6 +114,139 @@ def login(payload: LoginPayload):
 @app.get("/v1/profile")
 def profile(account: dict[str, str] = Depends(current_account)):
     return {"account": account}
+
+
+@app.get("/v1/workspaces")
+def list_workspaces(account: dict[str, str] = Depends(current_account)):
+    return {"items": _memory_store().list_workspaces(account["id"])}
+
+
+@app.post("/v1/workspaces", status_code=201)
+def create_workspace(payload: WorkspacePayload,
+                     account: dict[str, str] = Depends(current_account)):
+    try:
+        workspace = _memory_store().create_workspace(account["id"], payload.name)
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="workspace name already exists") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return workspace
+
+
+@app.get("/v1/workspaces/{workspace_id}/memory")
+def list_memory(workspace_id: str, namespace: str | None = Query(default=None, max_length=80),
+                account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        return {"items": store.list_memory(account["id"], workspace_id, namespace)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.put("/v1/workspaces/{workspace_id}/memory/{namespace}/{key}")
+def put_memory(workspace_id: str, namespace: str, key: str, payload: MemoryPayload,
+               account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        return store.put_memory(account["id"], workspace_id, namespace, key, payload.value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/memory/{namespace}/{key}")
+def get_memory(workspace_id: str, namespace: str, key: str,
+               account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    item = store.get_memory(account["id"], workspace_id, namespace, key)
+    if item is None:
+        raise HTTPException(status_code=404, detail="memory item not found")
+    return item
+
+
+@app.delete("/v1/workspaces/{workspace_id}/memory/{namespace}/{key}", status_code=204)
+def delete_memory(workspace_id: str, namespace: str, key: str,
+                  account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    if not store.delete_memory(account["id"], workspace_id, namespace, key):
+        raise HTTPException(status_code=404, detail="memory item not found")
+    return Response(status_code=204)
+
+
+@app.get("/v1/workspaces/{workspace_id}/agents/tasks")
+def list_agent_tasks(workspace_id: str, status: str | None = None,
+                     limit: int = Query(default=100, ge=1, le=500),
+                     account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        return {"items": store.list_agent_tasks(account["id"], workspace_id, status, limit)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/agents/tasks", status_code=201)
+def create_agent_task(workspace_id: str, payload: AgentTaskPayload,
+                      account: dict[str, str] = Depends(current_account)):
+    try:
+        return _memory_store().create_agent_task(
+            account["id"], workspace_id, account["username"],
+            payload.target_capability, payload.input, payload.deadline_at)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/agents/tasks/{task_id}")
+def get_agent_task(workspace_id: str, task_id: str,
+                   account: dict[str, str] = Depends(current_account)):
+    task = _memory_store().get_agent_task(account["id"], workspace_id, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return task
+
+
+@app.patch("/v1/workspaces/{workspace_id}/agents/tasks/{task_id}")
+def update_agent_task(workspace_id: str, task_id: str, payload: AgentTaskUpdatePayload,
+                      account: dict[str, str] = Depends(current_account)):
+    try:
+        return _memory_store().update_agent_task(
+            account["id"], workspace_id, task_id, payload.status, payload.result)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="task not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/agents/messages")
+def list_agent_messages(workspace_id: str, task_id: str | None = None,
+                        limit: int = Query(default=100, ge=1, le=500),
+                        account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        return {"items": store.list_agent_messages(account["id"], workspace_id, task_id, limit)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/agents/messages", status_code=201)
+def create_agent_message(workspace_id: str, payload: AgentMessagePayload,
+                          account: dict[str, str] = Depends(current_account)):
+    try:
+        return _memory_store().send_agent_message(
+            account["id"], workspace_id, account["username"], payload.recipient,
+            payload.message_type, payload.payload, payload.task_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace or task not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 class PortfolioPayload(BaseModel):
