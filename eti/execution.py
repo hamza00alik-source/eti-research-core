@@ -326,6 +326,10 @@ def run_live_tick(payload: dict[str, Any], store) -> dict[str, Any]:
             return {"status": "below_exchange_minimum", "processed": True, "live_execution": True}
 
         store.update_live_execution_account_state(owner_id, daily_date, daily_start, peak_equity)
+        authorization = store.get_live_execution_profile(owner_id)
+        if not authorization or not authorization["enabled"]:
+            if not (risk_breach and side == "sell"):
+                return {"status": "disabled", "processed": False, "live_execution": False}
         task_id = task_id if isinstance(task_id, str) and task_id else str(uuid4())
         client_order_id = "eti" + task_id.replace("-", "")[:29]
         intent, created = store.create_live_order_intent(
@@ -333,6 +337,16 @@ def run_live_tick(payload: dict[str, Any], store) -> dict[str, Any]:
         )
         if not created:
             return {"status": "duplicate_order_blocked", "order_id": intent["id"], "live_execution": True}
+        authorization = store.get_live_execution_profile(owner_id)
+        if not authorization or not authorization["enabled"]:
+            if not (risk_breach and side == "sell"):
+                store.update_live_order(
+                    owner_id, client_order_id, "canceled",
+                    result={"reason": "owner_authorization_revoked_before_submission",
+                            "candle_at": candle_at, "timeframe": timeframe, "price": price},
+                )
+                return {"status": "canceled", "reason": "owner_authorization_revoked",
+                        "order_id": intent["id"], "live_execution": False}
 
         try:
             result = exchange.create_order(
