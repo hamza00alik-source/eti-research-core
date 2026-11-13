@@ -35,7 +35,7 @@ async def security_headers(request, call_next):
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; script-src 'self'; style-src 'self'; "
-        "img-src 'self' data:; connect-src 'self'; manifest-src 'self'; "
+        "img-src 'self' data:; connect-src 'self' https://api.binance.com wss://stream.binance.com:9443; manifest-src 'self'; "
         "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     )
     if request.url.path.startswith((
