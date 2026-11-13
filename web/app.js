@@ -98,17 +98,17 @@ async function loadWorkspaceData(){
   : 'No active worker heartbeat. Start the separate worker process on the ETI backend.';
 }
 $('#login-form').addEventListener('submit',async event=>{
- event.preventDefault();const form=new FormData(event.currentTarget);
+ event.preventDefault();const formElement=event.currentTarget;const form=new FormData(formElement);
  $('#account-message').textContent='Signing in…';
  try{
   const data=await api('/v1/auth/token',{method:'POST',body:JSON.stringify({
    username:form.get('username'),password:form.get('password')
   })});
-  await acceptSession(data);event.currentTarget.reset();
+  await acceptSession(data);formElement.reset();
  }catch(error){showAuth(error.message)}
 });
 $('#register-form').addEventListener('submit',async event=>{
- event.preventDefault();const form=new FormData(event.currentTarget);
+ event.preventDefault();const formElement=event.currentTarget;const form=new FormData(formElement);
  $('#account-message').textContent='Creating invited account…';
  try{
   const data=await api('/v1/auth/register',{method:'POST',body:JSON.stringify({
