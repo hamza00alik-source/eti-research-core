@@ -5,7 +5,9 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 ## Safety status
 
 - Live spot execution is available but disabled by default. It requires owner-managed credentials, saved capital/risk limits and explicit one-time owner authorization; no per-trade approval is required.
-- Initial live venues are Binance and MEXC spot only. No margin, leverage, shorting, withdrawals or non-crypto broker connections are supported.
+- Live execution remains Binance/MEXC spot only and disabled by default. Research data now distinguishes crypto spot, perpetual swaps and dated futures where each exchange lists the requested contract. Derivative execution is not implemented.
+- Forex, equities, indices and commodities can be researched from validated user-supplied OHLCV CSV files; live providers for those asset classes are not yet connected.
+- Derivative candidate training is exploratory: long/short price-only evaluation is available, but funding history, open interest, liquidation data and contract-specific margin/fee schedules are missing. A quality gate prevents derivative candidates from passing approval until funding history is supported.
 - Training is not automatic: model fitting is an explicit CLI action and is not part of startup or CI.
 - No profitability claim: backtests do not establish future performance.
 - Independent risk: model decisions must pass deterministic risk and portfolio checks; defaults disable shorts and leverage above 1x.
@@ -34,8 +36,8 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 | Layer | Current state |
 |---|---|
 | Core | Modular configuration, provider interface and documented service boundaries |
-| Market data | Public OHLCV for Binance/MEXC, completed-candle filtering, CSV input |
-| Market catalog | Canonical venue-independent instrument specifications and filtered instrument catalog; current live discovery is crypto spot only |
+| Market data | Public OHLCV for Binance/MEXC spot, swaps and dated futures where listed; completed-candle filtering; validated CSV input for crypto, forex, equities, commodities and indices |
+| Market catalog | Canonical venue-independent instrument specifications and filtered instrument catalog; live public OHLCV currently supports crypto spot/swaps/dated futures where listed |
 | Adapter registry | Venue adapters advertise asset-class/market-type capabilities; unsupported combinations fail closed |
 | Quantitative | Causal technical features, MA and momentum baselines |
 | AI | From-scratch HistGradientBoosting baseline; nested CLI evaluation compares it with a majority-class baseline; no model trained on startup or in CI |
@@ -81,7 +83,7 @@ Open `http://localhost:8000`; health check is `/health`.
 
 ## Existing research workflow
 
-Training remains an explicit CLI action and is not started by API startup or CI. No live order placement endpoints exist. Current live public market discovery is crypto spot on Binance/MEXC only; other labelled asset classes are available only through validated local CSV OHLCV data.
+Training remains an explicit CLI action and is not started by API startup or CI. No live order placement endpoints exist. Current live public crypto OHLCV discovery supports spot, swaps and dated futures on Binance/MEXC only where each venue lists the requested market. Forex, equities, commodities and indices are available through validated local CSV OHLCV data; live providers are not connected. Derivative research does not yet include funding-history, open-interest or liquidation datasets and derivative candidates are blocked from approval.
 
 The model registry stores immutable version metadata and checksums, not model binaries. A separate allowlisted worker can execute the first deterministic public-market research capability; this is not yet a general LLM agent network. The PWA remains an undeployed frontend shell until a backend and HTTPS host are configured.
 
