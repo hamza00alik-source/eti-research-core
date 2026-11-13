@@ -167,6 +167,7 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
         **report,
         "limitations": [
             "Fixed rule-based moving-average and momentum candidates; not a trained AI model.",
+            "This evaluator uses a long/flat rule set; it is not a validated short-selling or derivatives execution strategy.",
             "Validation data selects candidates; test windows are held out from candidate selection.",
             "Historical results do not establish future profitability and are not trade signals.",
             "Price-only rule evaluation; provider-specific financing, corporate actions, futures rolls and contract costs are not modeled.",
