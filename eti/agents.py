@@ -9,10 +9,12 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from .features import build_features
 from .providers import CcxtPublicProvider
 from .opportunities import rank_spot_opportunity
+from .strategy_evaluation import run_strategy_walk_forward
 
 
 AgentHandler = Callable[[dict[str, Any]], dict[str, Any]]
@@ -106,7 +108,58 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate fixed rule candidates on public candles; report is stored as task result."""
+    venue = payload.get("venue", "mexc")
+    symbol = payload.get("symbol")
+    timeframe = payload.get("timeframe", "1h")
+    limit = payload.get("limit", 500)
+    if not isinstance(venue, str) or venue not in {"binance", "mexc"}:
+        raise ValueError("venue must be binance or mexc")
+    if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
+        raise ValueError("symbol must be a valid spot pair such as BTC/USDT")
+    if not isinstance(timeframe, str) or timeframe not in {"1m", "5m", "15m", "30m", "1h", "4h", "1d"}:
+        raise ValueError("unsupported timeframe")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 300 <= limit <= 500:
+        raise ValueError("strategy walk-forward limit must be from 300 to 500")
+    options = {
+        "min_history": payload.get("min_history", 120),
+        "validation_size": payload.get("validation_size", 80),
+        "test_size": payload.get("test_size", 80),
+        "step_size": payload.get("step_size", 80),
+        "purge_bars": payload.get("purge_bars", 2),
+    }
+    for name, value in options.items():
+        minimum = 0 if name == "purge_bars" else 1
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise ValueError(f"{name} has an invalid value")
+    fee_bps, slippage_bps = payload.get("fee_bps", 6.0), payload.get("slippage_bps", 2.0)
+    frame = CcxtPublicProvider(venue).fetch_ohlcv(symbol, timeframe, limit)
+    if len(frame) < options["min_history"] + options["validation_size"] + options["test_size"] + 2 * options["purge_bars"]:
+        raise ValueError("provider returned insufficient completed candles for walk-forward evaluation")
+    timestamps = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+    if timestamps.isna().any() or timestamps.duplicated().any() or not timestamps.is_monotonic_increasing:
+        raise ValueError("provider timestamps must be valid, unique, and chronological")
+    close = pd.Series(pd.to_numeric(frame["close"], errors="coerce").to_numpy(dtype=float),
+                      index=pd.DatetimeIndex(timestamps), name="close")
+    report = run_strategy_walk_forward(close, **options, fee_bps=fee_bps, slippage_bps=slippage_bps)
+    return {
+        "kind": "strategy_walk_forward_report", "venue": venue, "asset_class": "crypto",
+        "market_type": "spot", "symbol": symbol, "timeframe": timeframe,
+        "requested_candles": limit, "available_candles": len(frame),
+        "data_start": timestamps.iloc[0].isoformat(), "data_end": timestamps.iloc[-1].isoformat(),
+        **report,
+        "limitations": [
+            "Fixed rule-based moving-average and momentum candidates; not a trained AI model.",
+            "Validation data selects candidates; test windows are held out from candidate selection.",
+            "Historical results do not establish future profitability and are not trade signals.",
+            "Public spot data only; no credentials, balances, orders, or live execution.",
+        ],
+    }
+
+
 def default_capabilities() -> AgentCapabilityRegistry:
     registry = AgentCapabilityRegistry()
     registry.register("market.snapshot", market_snapshot)
+    registry.register("strategy.walk_forward", strategy_walk_forward)
     return registry

@@ -130,3 +130,60 @@ def test_market_snapshot_defaults_to_mexc_public_feed(monkeypatch):
     assert result["market_type"] == "spot"
     assert result["research_ranking"]["method"] == "transparent_heuristic_v1"
     assert result["research_ranking"]["is_predictive_model"] is False
+
+
+
+def test_strategy_walk_forward_capability_uses_public_data_and_returns_report(monkeypatch):
+    import numpy as np
+    import pandas as pd
+    import eti.agents as agents
+
+    rng = np.random.default_rng(8)
+    close = 100 * np.exp(np.cumsum(rng.normal(0.0001, 0.008, 500)))
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=500, freq="h", tz="UTC"),
+        "open": close, "high": close * 1.01, "low": close * 0.99,
+        "close": close, "volume": np.full(500, 100.0),
+    })
+    captured = {}
+    class FakeProvider:
+        def __init__(self, venue):
+            captured["venue"] = venue
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            captured["request"] = (symbol, timeframe, limit)
+            return frame
+    monkeypatch.setattr(agents, "CcxtPublicProvider", FakeProvider)
+    result = agents.strategy_walk_forward({"venue": "mexc", "symbol": "BTC/USDT"})
+    assert captured["venue"] == "mexc"
+    assert captured["request"] == ("BTC/USDT", "1h", 500)
+    assert result["kind"] == "strategy_walk_forward_report"
+    assert result["fold_count"] >= 2
+    assert result["safety"]["is_trained_model"] is False
+    assert result["safety"]["places_orders"] is False
+
+
+def test_strategy_walk_forward_rejects_invalid_request():
+    from eti.agents import strategy_walk_forward
+    with pytest.raises(ValueError, match="limit"):
+        strategy_walk_forward({"symbol": "BTC/USDT", "limit": 200})
+    with pytest.raises(ValueError, match="venue"):
+        strategy_walk_forward({"venue": "private", "symbol": "BTC/USDT"})
+
+
+def test_autonomous_snapshot_automatically_queues_strategy_followup(tmp_path):
+    store = MemoryStore(tmp_path / "autonomous-followup.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    task = store.create_agent_task(
+        "owner", workspace["id"], "eti.autonomy.supervisor", "market.snapshot",
+        {"venue": "mexc", "symbol": "BTC/USDT", "timeframe": "1h",
+         "scheduled_by": "eti.autonomy.supervisor"},
+    )
+    registry = AgentCapabilityRegistry()
+    registry.register("market.snapshot", lambda payload: {"kind": "public_market_snapshot"})
+    completed = AgentWorker(store, registry).run_once()
+    assert completed["id"] == task["id"] and completed["status"] == "completed"
+    queued = store.list_agent_tasks("owner", workspace["id"], status="queued")
+    assert len(queued) == 1
+    assert queued[0]["target_capability"] == "strategy.walk_forward"
+    assert queued[0]["input"]["source_snapshot_task_id"] == task["id"]
+    assert queued[0]["input"]["limit"] == 500
