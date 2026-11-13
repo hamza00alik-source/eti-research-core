@@ -14,6 +14,8 @@ class BaselineModel:
             l2_regularization=1.0, random_state=random_state,
         )
         self.classes_: np.ndarray | None = None
+        self.calibration_status = "uncalibrated"
+        self.calibration_report: dict | None = None
 
     def fit(self, x, y):
         y = np.asarray(y, dtype=int)
@@ -21,6 +23,8 @@ class BaselineModel:
             raise ValueError("Training data contains fewer than two label classes")
         self.estimator.fit(x, y)
         self.classes_ = self.estimator.classes_
+        self.calibration_status = "uncalibrated"
+        self.calibration_report = None
         return self
 
     def calibration_temperature(self) -> float | None:
