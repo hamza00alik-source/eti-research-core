@@ -60,7 +60,7 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("venue must be binance or mexc")
     if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
         raise ValueError("symbol must be a valid spot pair such as BTC/USDT")
-    if timeframe not in {"1m", "5m", "15m", "30m", "1h", "4h", "1d"}:
+    if not isinstance(timeframe, str) or timeframe not in {"1m", "5m", "15m", "30m", "1h", "4h", "1d"}:
         raise ValueError("unsupported timeframe")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 50 <= limit <= 500:
         raise ValueError("limit must be an integer from 50 to 500")
