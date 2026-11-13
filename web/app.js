@@ -413,7 +413,7 @@ $('#live-execution-form')?.addEventListener('submit',async event=>{
   })});
   $('#live-execution-status').textContent=result.note;await loadLiveExecution();
  }catch(error){$('#live-execution-status').textContent='Could not save live settings: '+error.message}
- finally{button.disabled=false}
+ finally{button.disabled=$('#live-execution-status').textContent.startsWith('LIVE TRADING AUTHORIZED')}
 });
 $('#authorize-live-execution')?.addEventListener('click',async()=>{
  const confirmations={
