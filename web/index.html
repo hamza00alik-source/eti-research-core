@@ -61,8 +61,8 @@
 <label class="workspace-picker">Active workspace<select id="workspace-select"><option value="">Select workspace</option></select></label>
 <div class="autonomy-card" aria-labelledby="autonomy-heading">
  <div><div class="eyebrow">AUTONOMOUS OPERATION</div><h3 id="autonomy-heading">Let ETI run its research and training loop</h3>
- <p class="muted">One action starts public spot and perpetual-swap watchlist scans. When daily training is enabled, ETI discovers Binance/MEXC spot, swap and dated-future listings, then queues top-ranked crypto instruments plus forex, equity, commodity and index benchmarks. Up to ten candidate-training runs per cycle. Research only: no orders and no live trading.</p></div>
- <label>Research market types<select id="autonomy-market-types" multiple size="2" aria-label="Research market types"><option value="spot" selected>Spot</option><option value="swap" selected>Perpetual swaps</option></select></label>
+ <p class="muted">One action starts public spot, perpetual-swap and optionally dated-futures watchlist scans. When daily training is enabled, ETI discovers Binance/MEXC spot, swap and dated-future listings, then queues top-ranked crypto instruments plus forex, equity, commodity and index benchmarks. Up to ten candidate-training runs per cycle. Research only: no orders and no live trading.</p></div>
+ <label>Research market types<select id="autonomy-market-types" multiple size="3" aria-label="Research market types"><option value="spot" selected>Spot</option><option value="swap" selected>Perpetual swaps</option><option value="future">Dated futures</option></select></label>
  <div class="workspace-actions"><button id="autonomy-toggle" type="button">Start autonomous operation</button><span id="autonomy-status" class="muted" role="status" aria-live="polite">Checking status…</span></div>
 </div>
 <div class="autonomy-card" aria-labelledby="training-heading">
