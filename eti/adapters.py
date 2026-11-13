@@ -6,7 +6,7 @@ contracts. This registry does not provide order placement or bypass risk gates.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 import pandas as pd
 
@@ -39,7 +39,6 @@ class AdapterCapabilities:
         object.__setattr__(self, "market_types", markets)
 
 
-@runtime_checkable
 class MarketAdapter(Protocol):
     """Minimal read-side adapter contract; no order methods are defined."""
 
@@ -57,7 +56,11 @@ class AdapterRegistry:
         self._adapters: dict[str, MarketAdapter] = {}
 
     def register(self, adapter: MarketAdapter, *, replace: bool = False) -> None:
-        if not isinstance(adapter, MarketAdapter):
+        if (
+            not isinstance(getattr(adapter, "capabilities", None), AdapterCapabilities)
+            or not callable(getattr(adapter, "discover_instruments", None))
+            or not callable(getattr(adapter, "fetch_ohlcv", None))
+        ):
             raise TypeError("adapter must implement capabilities, discover_instruments and fetch_ohlcv")
         venue = adapter.capabilities.venue
         if venue in self._adapters and not replace:
