@@ -60,3 +60,30 @@ def test_username_and_token_policy_validation(tmp_path):
     with pytest.raises(ValueError, match="token_ttl"):
         AuthManager(tmp_path / "bad.sqlite3", secret="s" * 40,
                     registration_key="invite-key-123456", token_ttl_seconds=10)
+
+
+def test_persistent_rate_limit_is_atomic_and_hides_subject(tmp_path):
+    from eti.auth import RateLimitExceeded
+
+    path = tmp_path / "auth.sqlite3"
+    auth = AuthManager(path, secret="s" * 40, registration_key="invite-key-123456")
+    auth.consume_rate_limit("login", "192.0.2.55", limit=2, window_seconds=60, now=100)
+    auth.consume_rate_limit("login", "192.0.2.55", limit=2, window_seconds=60, now=101)
+    with pytest.raises(RateLimitExceeded) as exc:
+        auth.consume_rate_limit("login", "192.0.2.55", limit=2, window_seconds=60, now=102)
+    assert exc.value.retry_after == 58
+    with __import__("sqlite3").connect(path) as conn:
+        rows = conn.execute("SELECT bucket_key FROM auth_rate_limits").fetchall()
+    assert len(rows) == 2
+    assert "192.0.2.55" not in rows[0][0]
+
+
+def test_rate_limit_window_expires(tmp_path):
+    from eti.auth import RateLimitExceeded
+
+    auth = AuthManager(tmp_path / "auth.sqlite3", secret="s" * 40,
+                       registration_key="invite-key-123456")
+    auth.consume_rate_limit("login", "user-a", limit=1, window_seconds=60, now=100)
+    with pytest.raises(RateLimitExceeded):
+        auth.consume_rate_limit("login", "user-a", limit=1, window_seconds=60, now=120)
+    auth.consume_rate_limit("login", "user-a", limit=1, window_seconds=60, now=161)
