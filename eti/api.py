@@ -899,15 +899,33 @@ def health():
 
 @app.get("/markets/supported")
 def supported_markets():
-    return {"venues": ["binance", "mexc"], "asset_classes": ["crypto"],
-            "market_types": ["spot"], "other_asset_classes": "CSV historical data only"}
+    return {
+        "venues": ["binance", "mexc"],
+        "asset_classes": ["crypto", "forex", "equity", "commodity", "index"],
+        "crypto_public_market_types": ["spot", "swap", "future"],
+        "market_types": ["spot", "swap", "future", "margin", "option", "cfd"],
+        "data_coverage": {
+            "crypto": "Public CCXT OHLCV for supported spot, perpetual swap and dated-future symbols",
+            "forex_equity_commodity_index": "Validated user-supplied OHLCV CSV; live broker/data feeds are not connected",
+        },
+        "execution_market_types": ["spot"],
+        "live_execution_enabled": False,
+    }
 
 
 @app.get("/providers/capabilities")
 def provider_capabilities():
-    return {"live_public_provider": ["crypto spot via Binance/MEXC"],
-            "historical_csv_adapter": ["crypto", "forex", "equity", "commodity", "index"],
-            "not_connected": ["forex broker feeds", "equity broker feeds", "commodity feeds"]}
+    return {
+        "live_public_provider": [
+            "crypto spot via Binance/MEXC where listed",
+            "crypto perpetual swaps via Binance/MEXC where listed",
+            "crypto dated futures via Binance/MEXC where listed",
+        ],
+        "historical_csv_adapter": ["crypto", "forex", "equity", "commodity", "index"],
+        "not_connected": ["live forex feeds", "live equity feeds", "live commodity feeds", "live index feeds"],
+        "derivatives_data_gaps": ["funding history", "open interest history", "liquidation data", "exchange-specific margin tiers"],
+        "live_execution": "spot only; derivatives execution is not implemented",
+    }
 
 
 @app.get("/risk/config")
