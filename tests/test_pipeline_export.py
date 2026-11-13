@@ -3,7 +3,7 @@ import pandas as pd
 
 from eti.model import BaselineModel
 from eti.features import FEATURE_COLUMNS
-from eti.pipeline import fit_deployable_model
+from eti.pipeline import export_deployable_model, fit_deployable_model
 
 
 def test_deployable_fit_uses_exact_feature_schema_and_only_completed_rows(monkeypatch):
@@ -37,3 +37,23 @@ def test_deployable_fit_uses_exact_feature_schema_and_only_completed_rows(monkey
     assert schema["features"] == FEATURE_COLUMNS
     assert schema["training_rows"] == 254
     assert schema["label_horizon_bars"] == 6
+
+
+def test_exported_model_is_explicitly_marked_uncalibrated(monkeypatch):
+    schema = {"features": list(FEATURE_COLUMNS)}
+    monkeypatch.setattr(
+        "eti.pipeline.fit_deployable_model",
+        lambda frame, horizon: (object(), schema),
+    )
+    monkeypatch.setattr(
+        "eti.pipeline.ModelArtifactStore.save_model",
+        lambda self, model: {
+            "artifact_uri": "artifact://sha256/" + "c" * 64,
+            "artifact_sha256": "c" * 64,
+        },
+    )
+    exported = export_deployable_model(
+        pd.DataFrame(), "eti-test", "0.1.0", "dataset:test"
+    )
+    assert exported["calibration_status"] == "uncalibrated"
+    assert exported["supported_classes"] == ["crypto_spot"]
