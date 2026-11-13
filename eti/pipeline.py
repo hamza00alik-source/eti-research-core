@@ -228,9 +228,15 @@ def main():
     parser.add_argument("--limit", type=int, default=3000)
     parser.add_argument("--csv", type=Path, help="Use a local OHLCV CSV instead of downloading")
     parser.add_argument("--output", type=Path, default=Path("artifacts/baseline_metrics.json"))
+    parser.add_argument("--save-model", action="store_true",
+                        help="explicitly fit and save one deployable model artifact after evaluation")
+    parser.add_argument("--model-id", default="eti-baseline")
+    parser.add_argument("--model-version", default="0.1.0")
     args = parser.parse_args()
     if args.csv and args.symbols:
         parser.error("--csv cannot be combined with --symbols")
+    if args.save_model and args.symbols:
+        parser.error("--save-model currently requires one symbol or one CSV dataset")
     if args.csv:
         frame = pd.read_csv(args.csv)
         now_ms = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
@@ -248,6 +254,19 @@ def main():
     else:
         frame = fetch_ohlcv(args.exchange, args.symbol, args.timeframe, args.limit)
         metrics = run_nested_experiment(frame) if args.evaluation == "nested" else run_experiment(frame, timeframe=args.timeframe)
+    if args.save_model:
+        if args.csv:
+            training_ref = "csv:" + args.csv.name
+        else:
+            training_ref = f"ccxt:{args.exchange}:{args.symbol}:{args.timeframe}:{args.limit}"
+        metrics["exported_model"] = export_deployable_model(
+            frame, args.model_id, args.model_version, training_ref
+        )
+        metrics["warning"] = (
+            str(metrics.get("warning", "")) +
+            " Exported model is a candidate artifact only; it is not registered, "
+            "approved, or enabled for autonomous trading."
+        ).strip()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps(metrics, indent=2))
