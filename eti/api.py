@@ -19,6 +19,28 @@ app = FastAPI(title=AppConfig().app_name, version=AppConfig().version)
 risk_engine = RiskEngine()
 
 
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self'; style-src 'self'; "
+        "img-src 'self' data:; connect-src 'self'; manifest-src 'self'; "
+        "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    )
+    if request.url.path.startswith((
+        "/v1/", "/health", "/risk", "/markets", "/providers",
+        "/decision", "/portfolio", "/execution"
+    )):
+        response.headers["Cache-Control"] = "no-store"
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
 class RegisterPayload(BaseModel):
     username: str = Field(min_length=3, max_length=32)
     password: str = Field(min_length=12, max_length=1024)
