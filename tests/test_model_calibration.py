@@ -21,6 +21,7 @@ def test_temperature_calibration_is_applied_to_model_probabilities():
         "passed": True,
         "method": "temperature_scaling",
         "sample_count": 50,
+        "class_counts": {"0": 16, "1": 17, "2": 17},
         "temperature": 2.0,
         "nll_before": 1.2,
         "nll_after": 1.0,
@@ -63,7 +64,8 @@ def test_refitting_model_resets_previous_calibration_state():
     model.calibration_status = "calibrated"
     model.calibration_report = {
         "passed": True, "method": "temperature_scaling",
-        "sample_count": 50, "temperature": 1.5,
+        "sample_count": 50, "class_counts": {"0": 16, "1": 17, "2": 17},
+        "temperature": 1.5,
         "nll_before": 1.2, "nll_after": 1.0,
     }
 
