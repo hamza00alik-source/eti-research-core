@@ -160,7 +160,7 @@ The PWA also displays the authenticated account's audit trail alongside its work
 
 ## Explicit model artifact export from the training CLI
 
-The normal research command does not export a deployable model. The opt-in `--save-model` flag runs only after the requested evaluation completes and writes a candidate to the private `ETI_ARTIFACT_DIR` content-addressed store. The candidate classifier is fit on the earlier 80% of completed labelled rows; temperature scaling is fit only on the later chronological 20% calibration segment. The metrics report includes the artifact URI, SHA-256, feature schema, training/calibration windows and calibration evidence.
+The normal research command does not export a deployable model. The opt-in `--save-model` flag runs only after the requested evaluation completes and writes a candidate to the private `ETI_ARTIFACT_DIR` content-addressed store. The candidate classifier is fit on the earlier 80% of completed labelled rows; the label horizon is purged between the fit and calibration windows to prevent future-price leakage. Temperature scaling is fit only on the later chronological 20% calibration segment. The metrics report includes the artifact URI, SHA-256, feature schema, training/calibration windows and calibration evidence.
 
 Example command shape (do not run until the project is ready for the planned training phase):
 
