@@ -110,7 +110,8 @@ def export_deployable_model(
         "input_schema": input_schema,
         "supported_classes": ["crypto_spot"],
         "training_data_ref": training_data_ref,
-        "note": "Candidate artifact only. Register and obtain independent approval before inference.",
+        "calibration_status": "uncalibrated",
+        "note": "Uncalibrated candidate artifact only. Complete calibration, evaluation and independent approval before inference.",
     }
 
 
