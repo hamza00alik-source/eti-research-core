@@ -57,3 +57,18 @@
 - Monitoring, audit log, kill switch and reproducible decision trace
 - Independent risk approval for every simulated decision
 - Live execution remains a separate explicitly reviewed milestone and disabled by default
+
+
+## v0.7 — shared multi-client platform foundation
+- [x] Define one backend as the source of truth for Android and web/PWA
+- [x] Specify account-scoped shared memory and typed agent-to-agent task/message flow
+- [x] Specify central model registry, immutable versions and gated promotion lifecycle
+- [x] Define stable client-neutral API families and backend-only market plug-in contract
+- [x] Define authentication, authorization, encryption, audit and credential-handling requirements
+- [ ] Implement persistent workspace memory with isolation and retention tests
+- [ ] Implement authenticated session and scoped authorization
+- [ ] Implement durable agent task/message orchestration and audit events
+- [ ] Implement central model registry and versioned inference service
+- [ ] Migrate clients to versioned authenticated APIs
+- [ ] Add encrypted provider credential vault and read-only connection verification
+- [ ] Build native Android client against the same API contract
