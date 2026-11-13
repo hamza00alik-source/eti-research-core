@@ -4,7 +4,8 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 
 ## Safety status
 
-- Research-only: no live order placement routes exist. Owner-only Binance/MEXC credentials can be stored encrypted and tested for private read access; live trading permission and order execution are not enabled.
+- Live spot execution is available but disabled by default. It requires owner-managed credentials, saved capital/risk limits and explicit one-time owner authorization; no per-trade approval is required.
+- Initial live venues are Binance and MEXC spot only. No margin, leverage, shorting, withdrawals or non-crypto broker connections are supported.
 - Training is not automatic: model fitting is an explicit CLI action and is not part of startup or CI.
 - No profitability claim: backtests do not establish future performance.
 - Independent risk: model decisions must pass deterministic risk and portfolio checks; defaults disable shorts and leverage above 1x.
@@ -17,7 +18,16 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 - API keys and secrets are encrypted with AES-256-GCM before they reach SQLite. Each ciphertext is authenticated against the owner, venue and credential field. The API returns only a masked key suffix.
 - Configure `ETI_CREDENTIAL_ENCRYPTION_KEY` as URL-safe base64 of 32 cryptographically random bytes. Generate it with `python -c 'import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())'`. Keep a secure offline copy: losing or rotating this key without re-encrypting the stored credentials makes them unrecoverable.
 - Use exchange keys with withdrawals disabled and IP restrictions enabled. Do not paste exchange keys into chat.
-- This vault is connection groundwork only. It does not enable live execution; the autonomous order gateway, owner authorization, independent risk checks and order reconciliation must be completed and tested separately.
+- This vault supplies the owner-managed connection layer. Live execution remains off until separately configured and explicitly authorized by the owner.
+
+## Autonomous live spot execution
+
+- Live execution is off by default. The owner must connect a Binance/MEXC key, configure a USDT spot watchlist and capital allocation, then complete a one-time authorization with explicit confirmations for spot trading permission, disabled withdrawals and exchange IP restrictions.
+- After authorization, the worker schedules one evaluation per completed candle. It selects the latest approved, calibrated model for each eligible market and executes model-driven entries/exits automatically; there is no per-trade approval prompt.
+- The first release is spot-only and long/flat: no shorts, margin, leverage or withdrawals. Hard risk ceilings are enforced server-side: max 0.5% equity risk per trade, 10% single-position size, 25% gross exposure, 2% daily loss stop and 8% drawdown stop. Owner settings may be lower, never higher.
+- Every order starts with a durable client-order intent. Duplicate task retries are blocked; uncertain exchange responses trigger a fail-closed stop rather than resubmitting blindly. Open orders are reconciled before another signal can trade. The owner kill switch stops new scheduling; an order already accepted by an exchange may still need exchange-side cancellation/reconciliation.
+- The initial watchlist is owner-bounded. ETI only trades symbols with an approved, calibrated model; symbols without one are skipped. Candidate model approval remains a separate model-governance step.
+- Market orders can experience slippage and losses. This is an execution system, not a profitability guarantee. Start with a small allocation and verify exchange permissions and order history before increasing capital.
 
 ## Architecture implemented
 
