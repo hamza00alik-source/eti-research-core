@@ -76,7 +76,7 @@ async function loadAutonomy(){
   modelTrainingEnabled=Boolean(autonomyProfile.model_training_enabled);
   modelTrainingIntervalSeconds=Number(autonomyProfile.model_training_interval_seconds||86400);
   const marketTypeSelect=$('#autonomy-market-types');
-  if(marketTypeSelect){const selected=autonomyProfile.market_types||['spot'];
+  if(marketTypeSelect){const selected=autonomyProfile.market_types||['spot','swap'];
    Array.from(marketTypeSelect.options).forEach(option=>option.selected=selected.includes(option.value));}
   status.textContent=!autonomyEnabled?'Autonomous operation is OFF':modelTrainingEnabled?'Autonomous operation is ON · market scans + daily model training · research only':'Market scans are ON · daily model training is OFF';
   button.textContent=autonomyEnabled&&modelTrainingEnabled?'Pause autonomous operation':autonomyEnabled?'Complete autonomous setup':'Start autonomous operation';
