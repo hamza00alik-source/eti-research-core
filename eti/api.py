@@ -59,6 +59,11 @@ class LoginPayload(BaseModel):
     password: str = Field(min_length=12, max_length=1024)
 
 
+class PasswordChangePayload(BaseModel):
+    current_password: str = Field(min_length=12, max_length=1024)
+    new_password: str = Field(min_length=12, max_length=1024)
+
+
 class WorkspacePayload(BaseModel):
     name: str = Field(min_length=1, max_length=80)
 
@@ -111,6 +116,11 @@ def _apply_auth_rate_limits(manager: AuthManager, request, action: str, username
                                        window_seconds=900)
     elif action == "register":
         manager.consume_rate_limit("register-ip", ip, limit=5, window_seconds=3600)
+    elif action == "password-change":
+        manager.consume_rate_limit("password-change-ip", ip, limit=10, window_seconds=3600)
+        if username:
+            manager.consume_rate_limit("password-change-user", username.strip().lower(),
+                                       limit=5, window_seconds=3600)
 
 
 def current_account(authorization: str | None = Header(default=None)) -> dict[str, str]:
@@ -162,6 +172,23 @@ def login(payload: LoginPayload, request: Request):
                             headers={"WWW-Authenticate": "Bearer"}) from exc
     return {"account": account, "access_token": manager.issue_token(account),
             "token_type": "bearer", "expires_in": manager.token_ttl_seconds}
+
+
+@app.post("/v1/auth/password")
+def change_password(payload: PasswordChangePayload, request: Request,
+                    account: dict[str, str] = Depends(current_account)):
+    manager = _auth_manager()
+    try:
+        _apply_auth_rate_limits(manager, request, "password-change", account["username"])
+        manager.change_password(account["id"], payload.current_password, payload.new_password)
+    except RateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc),
+                            headers={"Retry-After": str(exc.retry_after)}) from exc
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "password_updated", "message": "Password updated. Sign in again."}
 
 
 @app.get("/v1/profile")

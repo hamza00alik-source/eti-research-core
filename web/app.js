@@ -107,6 +107,17 @@ $('#login-form').addEventListener('submit',async event=>{
   await acceptSession(data);formElement.reset();
  }catch(error){showAuth(error.message)}
 });
+$('#password-form').addEventListener('submit',async event=>{
+ event.preventDefault();const formElement=event.currentTarget;const form=new FormData(formElement);
+ const button=event.currentTarget.querySelector('button[type="submit"]');button.disabled=true;
+ try{
+  await api('/v1/auth/password',{method:'POST',body:JSON.stringify({
+   current_password:form.get('current_password'),new_password:form.get('new_password')
+  })});
+  formElement.reset();clearSession();showAuth('Password updated successfully. Sign in again with your new password.');
+ }catch(error){$('#account-message').textContent='Password change failed: '+error.message}
+ finally{button.disabled=false}
+});
 $('#register-form').addEventListener('submit',async event=>{
  event.preventDefault();const formElement=event.currentTarget;const form=new FormData(formElement);
  $('#account-message').textContent='Creating invited account…';
@@ -114,7 +125,7 @@ $('#register-form').addEventListener('submit',async event=>{
   const data=await api('/v1/auth/register',{method:'POST',body:JSON.stringify({
    username:form.get('username'),password:form.get('password'),invite_code:form.get('invite_code')
   })});
-  await acceptSession(data);event.currentTarget.reset();
+  await acceptSession(data);formElement.reset();
  }catch(error){showAuth(error.message)}
 });
 $('#signout').addEventListener('click',()=>{
@@ -149,10 +160,10 @@ $('#delete-workspace').addEventListener('click',async()=>{
  finally{button.disabled=false}
 });
 $('#workspace-form').addEventListener('submit',async event=>{
- event.preventDefault();const form=new FormData(event.currentTarget);
+ event.preventDefault();const formElement=event.currentTarget;const form=new FormData(formElement);
  try{
   const data=await api('/v1/workspaces',{method:'POST',body:JSON.stringify({name:form.get('name')})});
-  activeWorkspace=data.id;await loadWorkspaces();event.currentTarget.reset();
+  activeWorkspace=data.id;await loadWorkspaces();formElement.reset();
   $('#account-message').textContent='Workspace created.';
  }catch(error){$('#account-message').textContent=error.message}
 });
@@ -183,7 +194,7 @@ $('#model-register-form').addEventListener('submit',async event=>{
  }catch(error){$('#model-message').textContent='Candidate registration failed: '+error.message}
 });
 $('#model-approve-form').addEventListener('submit',async event=>{
- event.preventDefault();const form=new FormData(event.currentTarget);
+ event.preventDefault();const formElement=event.currentTarget;const form=new FormData(formElement);
  const modelId=encodeURIComponent(form.get('model_id'));
  const version=encodeURIComponent(form.get('version'));
  try{
@@ -193,7 +204,7 @@ $('#model-approve-form').addEventListener('submit',async event=>{
  }catch(error){$('#model-message').textContent='Approval failed: '+error.message+'. The reviewer must differ from the creator and the artifact must pass integrity, schema and calibration checks.'}
 });
 $('#model-retire-form').addEventListener('submit',async event=>{
- event.preventDefault();const form=new FormData(event.currentTarget);
+ event.preventDefault();const formElement=event.currentTarget;const form=new FormData(formElement);
  const modelId=encodeURIComponent(form.get('model_id'));
  const version=encodeURIComponent(form.get('version'));
  try{

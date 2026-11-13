@@ -87,3 +87,18 @@ def test_rate_limit_window_expires(tmp_path):
     with pytest.raises(RateLimitExceeded):
         auth.consume_rate_limit("login", "user-a", limit=1, window_seconds=60, now=120)
     auth.consume_rate_limit("login", "user-a", limit=1, window_seconds=60, now=161)
+
+
+def test_password_change_requires_current_password_and_persists(tmp_path):
+    auth = AuthManager(tmp_path / "auth.sqlite3", secret="s" * 40,
+                       registration_key="invite-key-123456")
+    account = auth.register("trader01", "old-password-123", "invite-key-123456")
+    with pytest.raises(AuthenticationError, match="current password"):
+        auth.change_password(account["id"], "wrong-password-123", "new-password-456")
+    auth.change_password(account["id"], "old-password-123", "new-password-456")
+    with pytest.raises(ValueError, match="invalid username or password"):
+        auth.authenticate("trader01", "old-password-123")
+    assert auth.authenticate("trader01", "new-password-456") == account
+    reopened = AuthManager(tmp_path / "auth.sqlite3", secret="s" * 40,
+                           registration_key="invite-key-123456")
+    assert reopened.authenticate("trader01", "new-password-456") == account
