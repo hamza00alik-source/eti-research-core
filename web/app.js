@@ -422,7 +422,7 @@ $('#authorize-live-execution')?.addEventListener('click',async()=>{
   confirm_withdrawals_disabled:$('#confirm-withdrawals-disabled').checked,
   confirm_ip_restrictions:$('#confirm-ip-restrictions').checked
  };
- if(!confirmations.confirm_live_trading||!confirmations.confirm_spot_trading_permission||!confirmations.confirm_withdrawals_disabled){
+ if(!confirmations.confirm_live_trading||!confirmations.confirm_spot_trading_permission||!confirmations.confirm_withdrawals_disabled||!confirmations.confirm_ip_restrictions){
   $('#live-execution-status').textContent='Complete all four one-time safety confirmations first.';return;
  }
  if(!window.confirm('Authorize ETI to place real Binance/MEXC spot orders automatically within your saved capital and risk limits? Individual trades will not require confirmation.'))return;
