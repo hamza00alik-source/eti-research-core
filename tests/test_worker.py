@@ -255,3 +255,29 @@ def test_worker_auto_approves_only_quality_passed_calibrated_artifact(tmp_path, 
     assert model["approved_by"] == "eti.quality_gate"
     assert registered["registry"]["approval_required"] is False
     assert registered["registry"]["promotion_authority"] == "eti.quality_gate"
+
+
+def test_worker_reports_research_and_model_training_schedule_counts_separately(
+    tmp_path, capsys, monkeypatch
+):
+    store = MemoryStore(tmp_path / "scheduler-telemetry.sqlite3")
+    workspace = _workspace(store)
+    store.configure_autonomy(
+        "owner-1", workspace["id"], True,
+        venues=["mexc"], symbols=["BTC/USDT"], timeframes=["1h"],
+        model_training_enabled=True, model_training_interval_seconds=86400,
+    )
+    registry = AgentCapabilityRegistry()
+    registry.register("market.snapshot", lambda payload: {"snapshot": "test"})
+    registry.register("model.train_research", lambda payload: {"training": "test"})
+    monkeypatch.setattr(AgentWorker, "_register_model_candidate", lambda self, result: result)
+    worker = AgentWorker(store, registry=registry)
+
+    worker.run_once()
+    output = capsys.readouterr().out
+
+    assert '"event":"autonomy.tasks_scheduled"' in output
+    assert '"research_tasks":1' in output
+    assert '"model_training_tasks":1' in output
+    assert '"paper_tasks":0' in output
+    assert '"live_tasks":0' in output

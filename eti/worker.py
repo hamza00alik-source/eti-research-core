@@ -157,11 +157,15 @@ class AgentWorker:
         # Seed public research, simulated paper and owner-authorized live spot tasks.
         # Live orders are reachable only through the supervisor-gated live.tick capability.
         scheduled = self.store.enqueue_due_autonomy_tasks()
+        research_scheduled = int(scheduled.get("research_tasks", 0))
+        training_scheduled = int(scheduled.get("model_training_tasks", 0))
         paper_scheduled = self.store.enqueue_due_paper_tasks()
         live_scheduled = self.store.enqueue_due_live_execution_tasks()
-        if scheduled or paper_scheduled or live_scheduled:
+        if research_scheduled or training_scheduled or paper_scheduled or live_scheduled:
             print(json.dumps({"event": "autonomy.tasks_scheduled",
-                              "research_tasks": scheduled, "paper_tasks": paper_scheduled,
+                              "research_tasks": research_scheduled,
+                              "model_training_tasks": training_scheduled,
+                              "paper_tasks": paper_scheduled,
                               "live_tasks": live_scheduled},
                              separators=(",", ":")), flush=True)
         self.store.record_agent_worker_heartbeat(self.worker_id, self.registry.capabilities())

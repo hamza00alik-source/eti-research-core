@@ -415,13 +415,14 @@ class MemoryStore:
             row=conn.execute("SELECT * FROM autonomy_profiles WHERE owner_id=?", (owner_id,)).fetchone()
         return self._autonomy_profile_dict(row) if row else None
 
-    def enqueue_due_autonomy_tasks(self, now: datetime | None = None) -> int:
+    def enqueue_due_autonomy_tasks(self, now: datetime | None = None) -> dict[str, int]:
         """Atomically enqueue due research scans; never creates execution/order tasks."""
         current = now or datetime.now(timezone.utc)
         if current.tzinfo is None:
             raise ValueError("now must be timezone-aware")
         now_text=current.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00","Z")
-        queued=0
+        research_queued = 0
+        training_queued = 0
         with self._connection() as conn:
             rows=conn.execute("SELECT * FROM autonomy_profiles WHERE enabled=1").fetchall()
             for row in rows:
@@ -464,7 +465,7 @@ class MemoryStore:
                                      _encode_json({"task_id": task_id, "venue": venue,
                                                    "symbol": symbol, "timeframe": timeframe}), now_text),
                                 )
-                                queued += 1
+                                research_queued += 1
                 training_enabled = bool(row["model_training_enabled"])
                 training_previous = row["last_model_training_at"]
                 training_due = training_enabled and (
@@ -506,8 +507,8 @@ class MemoryStore:
                                                    "symbol": symbol, "timeframe": timeframe}),
                                      now_text),
                                 )
-                                queued += 1
-        return queued
+                                training_queued += 1
+        return {"research_tasks": research_queued, "model_training_tasks": training_queued}
 
     def record_agent_worker_heartbeat(
         self, worker_id: str, capabilities: list[str], now: int | None = None
