@@ -292,16 +292,16 @@ def test_autonomy_profile_schedules_owner_scoped_research_tasks_and_respects_int
     )
     assert profile["enabled"] is True
     first_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert store.enqueue_due_autonomy_tasks(first_time) == 2
-    assert store.enqueue_due_autonomy_tasks(first_time) == 0
+    assert store.enqueue_due_autonomy_tasks(first_time) == {"research_tasks": 2, "model_training_tasks": 0}
+    assert store.enqueue_due_autonomy_tasks(first_time) == {"research_tasks": 0, "model_training_tasks": 0}
     assert len(store.list_agent_tasks("owner-a", workspace["id"], status="queued")) == 2
     assert store.list_agent_tasks("owner-b", workspace["id"]) == []
     assert store.enqueue_due_autonomy_tasks(
         datetime(2026, 1, 1, 0, 14, tzinfo=timezone.utc)
-    ) == 0
+    ) == {"research_tasks": 0, "model_training_tasks": 0}
     assert store.enqueue_due_autonomy_tasks(
         datetime(2026, 1, 1, 0, 15, tzinfo=timezone.utc)
-    ) == 2
+    ) == {"research_tasks": 2, "model_training_tasks": 0}
 
 
 def test_autonomy_can_be_disabled_and_reconfigured(tmp_path):
@@ -310,7 +310,7 @@ def test_autonomy_can_be_disabled_and_reconfigured(tmp_path):
     workspace = store.create_workspace("owner-a", "research")
     store.configure_autonomy("owner-a", workspace["id"], True, symbols=["BTC/USDT"])
     store.configure_autonomy("owner-a", workspace["id"], False, symbols=["BTC/USDT"])
-    assert store.enqueue_due_autonomy_tasks(datetime(2026, 1, 1, tzinfo=timezone.utc)) == 0
+    assert store.enqueue_due_autonomy_tasks(datetime(2026, 1, 1, tzinfo=timezone.utc)) == {"research_tasks": 0, "model_training_tasks": 0}
     assert store.get_autonomy_profile("owner-a")["enabled"] is False
 
 
@@ -336,7 +336,7 @@ def test_autonomy_schedules_separate_daily_model_training_tasks(tmp_path):
     assert profile["model_training_enabled"] is True
     assert profile["model_training_interval_seconds"] == 86400
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert store.enqueue_due_autonomy_tasks(start) == 2
+    assert store.enqueue_due_autonomy_tasks(start) == {"research_tasks": 1, "model_training_tasks": 1}
     tasks = store.list_agent_tasks("owner-a", workspace["id"], status="queued")
     assert {task["target_capability"] for task in tasks} == {
         "market.snapshot", "model.train_research"
@@ -344,13 +344,13 @@ def test_autonomy_schedules_separate_daily_model_training_tasks(tmp_path):
     training = next(task for task in tasks if task["target_capability"] == "model.train_research")
     assert training["input"]["limit"] == 3000
     assert training["input"]["scheduled_by"] == "eti.autonomy.model_training"
-    assert store.enqueue_due_autonomy_tasks(start) == 0
+    assert store.enqueue_due_autonomy_tasks(start) == {"research_tasks": 0, "model_training_tasks": 0}
     assert store.enqueue_due_autonomy_tasks(
         datetime(2026, 1, 1, 0, 15, tzinfo=timezone.utc)
-    ) == 1
+    ) == {"research_tasks": 1, "model_training_tasks": 0}
     assert store.enqueue_due_autonomy_tasks(
         datetime(2026, 1, 2, tzinfo=timezone.utc)
-    ) == 2
+    ) == {"research_tasks": 1, "model_training_tasks": 1}
     all_tasks = store.list_agent_tasks("owner-a", workspace["id"])
     assert sum(t["target_capability"] == "model.train_research" for t in all_tasks) == 2
 
