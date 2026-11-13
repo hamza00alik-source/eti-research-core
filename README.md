@@ -75,8 +75,9 @@ All routes in this section require `Authorization: Bearer <access_token>`. The a
 - `GET /v1/workspaces/{workspace_id}/memory`: list memory items (optional `namespace` filter).
 - `GET/PUT/DELETE /v1/workspaces/{workspace_id}/memory/{namespace}/{key}`: read, write or delete a JSON memory item.
 - `GET/POST /v1/workspaces/{workspace_id}/agents/tasks`: list or queue durable task records.
-- `GET/PATCH /v1/workspaces/{workspace_id}/agents/tasks/{task_id}`: read a task or apply a guarded status transition.
+- `GET/PATCH /v1/workspaces/{workspace_id}/agents/tasks/{task_id}`: read a task or cancel it while still queued; only the worker may complete/fail claimed work.
 - `GET/POST /v1/workspaces/{workspace_id}/agents/messages`: list or append typed JSON messages.
+- `GET /v1/agents/capabilities`: list server-implemented allowlisted capabilities.
 
 Every workspace route checks account ownership and returns not-found for another account's workspace. Task and message payloads are stored as typed JSON data, never executed as code or instructions. Task records can be processed by the separately started allowlisted worker described below.
 
