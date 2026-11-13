@@ -48,6 +48,7 @@ Open `http://localhost:8000`; health check is `/health`.
 - Passwords are hashed with scrypt; sessions are HMAC-SHA256 signed bearer tokens with a 15-minute default expiry.
 - The server must set `ETI_AUTH_SECRET` (at least 32 bytes) and `ETI_REGISTRATION_KEY` (at least 16 characters). Never place either value in frontend code, Git, notebooks, or client settings.
 - Registration remains closed when the invite key is absent. This is deliberately not open self-service signup.
+- Signup and login use persistent SQLite request windows with hashed subject identifiers; the API returns HTTP 429 and `Retry-After` when a limit is reached. The transport peer address is used rather than trusting client-supplied forwarding headers.
 - Example server environment:
   ```bash
   export ETI_AUTH_SECRET='replace-with-a-long-random-secret-of-at-least-32-bytes'
