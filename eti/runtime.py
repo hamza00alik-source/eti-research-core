@@ -9,6 +9,7 @@ import time
 
 from .worker import AgentWorker
 from .backup import backup_once
+from .storage import MemoryStore
 
 
 logger = logging.getLogger("eti.runtime")
@@ -44,6 +45,10 @@ def _backup_loop(stop: threading.Event) -> None:
 async def runtime_lifespan(_app):
     threads: list[threading.Thread] = []
     stops: list[threading.Event] = []
+    worker_enabled = os.environ.get("ETI_EMBEDDED_WORKER", "0").lower() in {"1", "true", "yes"}
+    backup_enabled = os.environ.get("ETI_BACKUP_ENABLED", "0").lower() in {"1", "true", "yes"}
+    if worker_enabled or backup_enabled:
+        MemoryStore()  # initialize the shared database before either background loop starts
 
     if os.environ.get("ETI_EMBEDDED_WORKER", "0").lower() in {"1", "true", "yes"}:
         stop = threading.Event()
