@@ -54,7 +54,7 @@ class AgentCapabilityRegistry:
 
 
 def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
-    """Fetch completed public crypto spot candles and summarize causal indicators."""
+    """Fetch completed public crypto spot or derivatives candles and summarize indicators."""
     venue = payload.get("venue", "mexc")
     market_type = payload.get("market_type", "spot")
     symbol = payload.get("symbol")
@@ -62,7 +62,7 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     limit = payload.get("limit", 200)
     if not isinstance(venue, str) or venue not in {"binance", "mexc"}:
         raise ValueError("venue must be binance or mexc")
-    if market_type not in {"spot", "swap", "future"}:
+    if not isinstance(market_type, str) or market_type not in {"spot", "swap", "future"}:
         raise ValueError("market_type must be spot, swap, or future")
     if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
         raise ValueError("symbol must be a valid CCXT market symbol such as BTC/USDT or BTC/USDT:USDT")
@@ -120,7 +120,7 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
     limit = payload.get("limit", 500)
     if not isinstance(venue, str) or venue not in {"binance", "mexc"}:
         raise ValueError("venue must be binance or mexc")
-    if market_type not in {"spot", "swap", "future"}:
+    if not isinstance(market_type, str) or market_type not in {"spot", "swap", "future"}:
         raise ValueError("market_type must be spot, swap, or future")
     if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
         raise ValueError("symbol must be a valid CCXT market symbol such as BTC/USDT or BTC/USDT:USDT")
@@ -165,7 +165,7 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
-    """Train and evaluate a bounded research candidate from public spot candles."""
+    """Train a crypto spot/derivatives research candidate; approval remains gated by data quality."""
     venue = payload.get("venue", "mexc")
     market_type = payload.get("market_type", "spot")
     symbol = payload.get("symbol")
@@ -174,7 +174,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     horizon = payload.get("horizon", 6)
     if not isinstance(venue, str) or venue not in {"binance", "mexc"}:
         raise ValueError("venue must be binance or mexc")
-    if market_type not in {"spot", "swap", "future"}:
+    if not isinstance(market_type, str) or market_type not in {"spot", "swap", "future"}:
         raise ValueError("market_type must be spot, swap, or future")
     if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
         raise ValueError("symbol must be a valid CCXT market symbol such as BTC/USDT or BTC/USDT:USDT")
@@ -196,6 +196,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     evaluation = run_nested_experiment(
         frame, horizon=horizon, min_train=500, validation_size=100,
         test_size=100, step_size=250, timeframe=timeframe,
+        allow_short=market_type in {"swap", "future"},
     )
     model, schema = fit_deployable_model(frame, horizon=horizon)
     from .artifacts import ModelArtifactStore
@@ -217,6 +218,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     )
     quality_checks = {
         "at_least_three_test_folds": fold_count >= 3,
+        "derivative_funding_history_available": market_type == "spot",
         "balanced_accuracy_at_least_0_52": isinstance(mean_score, (int, float)) and mean_score >= 0.52,
         "confidence_interval_lower_above_chance": isinstance(score_ci.get("lower"), (int, float)) and score_ci["lower"] > 0.50,
         "model_selected_in_majority_of_folds": selected_model_folds > fold_count / 2 if fold_count else False,
@@ -226,7 +228,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     }
     evaluation_passed = bool(quality_checks) and all(quality_checks.values())
     training_data_ref = (
-        f"ccxt:{venue}:{symbol}:{timeframe}:{len(frame)}:"
+        f"ccxt:{venue}:{market_type}:{symbol}:{timeframe}:{len(frame)}:"
         f"{schema.get('dataset_sha256', 'unknown')}"
     )
     trading_folds = {item.get("fold"): item for item in trading.get("folds", [])}
@@ -282,7 +284,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
             "Nested test folds are held out from candidate selection; final artifact calibration uses a separate chronological holdout.",
             "Calibration failure blocks approval; no automatic promotion occurs.",
             "Single-market evaluation is not a portfolio backtest and does not establish future profitability.",
-            "Public crypto OHLCV only; derivative funding, open interest, liquidation and contract-specific costs are not yet included in candidate evaluation.",
+            "Derivative candidates use a long/short price-only simulation; funding history, open interest, liquidation and contract-specific costs are not yet included. The funding-data quality gate blocks approval.",
         ],
     }
 
