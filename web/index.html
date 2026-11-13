@@ -41,6 +41,11 @@
 <button type="submit">Create workspace</button>
 </form>
 <label class="workspace-picker">Active workspace<select id="workspace-select"><option value="">Select workspace</option></select></label>
+<div class="autonomy-card" aria-labelledby="autonomy-heading">
+ <div><div class="eyebrow">AUTONOMOUS RESEARCH</div><h3 id="autonomy-heading">Let ETI run market research</h3>
+ <p class="muted">ETI will automatically scan BTC, ETH, SOL and XRP spot markets on MEXC every 15 minutes. Research only: no private exchange keys, no orders and no live trading.</p></div>
+ <div class="workspace-actions"><button id="autonomy-toggle" type="button">Enable autonomous research</button><span id="autonomy-status" class="muted" role="status" aria-live="polite">Checking status…</span></div>
+</div>
 <div class="workspace-actions"><button id="delete-workspace" type="button" class="secondary-button">Delete selected workspace</button></div>
 <div id="workspace-tools" hidden>
 <h3>Persistent memory</h3>
