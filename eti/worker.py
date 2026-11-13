@@ -35,6 +35,11 @@ class AgentWorker:
         self.lease_seconds = lease_seconds
         self.worker_id = str(uuid4())
 
+    @staticmethod
+    def _log_event(event: str, **fields: Any) -> None:
+        """Emit structured, payload-free worker lifecycle telemetry."""
+        print(json.dumps({"event": event, **fields}, separators=(",", ":")), flush=True)
+
     def _start_lease_heartbeat(
         self, task_id: str, lease_token: str
     ) -> tuple[threading.Event, threading.Event, threading.Thread]:
@@ -145,34 +150,50 @@ class AgentWorker:
         if task is None:
             return None
         lease_token = task["lease_token"]
+        capability = task["target_capability"]
+        attempt = task.get("attempt_count")
+        self._log_event(
+            "agent.task.claimed", task_id=task["id"], capability=capability,
+            attempt_count=attempt,
+        )
+        started_at = time.monotonic()
+        self._log_event(
+            "agent.task.execution_started", task_id=task["id"], capability=capability,
+            attempt_count=attempt,
+        )
         stop_heartbeat, lease_lost, heartbeat_thread = self._start_lease_heartbeat(
             task["id"], lease_token
         )
+        error_type = None
         try:
-            result = self.registry.execute(task["target_capability"], task["input"])
-            if task["target_capability"] == "model.train_research":
+            result = self.registry.execute(capability, task["input"])
+            if capability == "model.train_research":
                 result = self._register_model_candidate(result)
             status, retryable = "completed", False
         except LookupError as exc:
-            result = {"error": {"type": type(exc).__name__, "message": "unsupported agent capability"}}
+            error_type = type(exc).__name__
+            result = {"error": {"type": error_type, "message": "unsupported agent capability"}}
             status, retryable = "failed", False
         except ValueError as exc:
-            result = {"error": {"type": type(exc).__name__, "message": str(exc)[:300]}}
+            error_type = type(exc).__name__
+            result = {"error": {"type": error_type, "message": str(exc)[:300]}}
             status, retryable = "failed", False
         except Exception as exc:
-            result = {"error": {"type": type(exc).__name__, "message": "Temporary capability failure"}}
+            error_type = type(exc).__name__
+            result = {"error": {"type": error_type, "message": "Temporary capability failure"}}
             status, retryable = "failed", True
         finally:
             stop_heartbeat.set()
             heartbeat_thread.join(timeout=max(2.0, self.lease_seconds / 3.0 + 1.0))
 
+        duration_ms = round((time.monotonic() - started_at) * 1000, 2)
         if lease_lost.is_set():
             # Another worker may now own or be processing this task. Never let
             # this worker overwrite that newer state with a stale result.
-            print(json.dumps({
-                "event": "agent.task.result_discarded_after_lease_loss",
-                "task_id": task["id"],
-            }, separators=(",", ":")), flush=True)
+            self._log_event(
+                "agent.task.result_discarded_after_lease_loss",
+                task_id=task["id"], capability=capability, duration_ms=duration_ms,
+            )
             return self.store.get_agent_task(
                 task["owner_id"], task["workspace_id"], task["id"]
             )
@@ -188,13 +209,23 @@ class AgentWorker:
                     task["id"], lease_token, result, retryable=retryable
                 )
                 message_type = "task.requeued" if updated["status"] == "queued" else "task.failed"
-        except ValueError:
+        except ValueError as exc:
             # A user may cancel a running task, or the lease may expire while a
             # capability is running. A stale worker must never overwrite it.
+            self._log_event(
+                "agent.task.completion_rejected", task_id=task["id"],
+                capability=capability, duration_ms=duration_ms,
+                error_type=type(exc).__name__,
+            )
             return self.store.get_agent_task(
                 task["owner_id"], task["workspace_id"], task["id"]
             )
 
+        self._log_event(
+            "agent.task.execution_finished", task_id=task["id"], capability=capability,
+            status=updated["status"], duration_ms=duration_ms,
+            error_type=error_type,
+        )
         self.store.send_agent_message(
             task["owner_id"], task["workspace_id"], "eti.worker",
             task["requester"], message_type,

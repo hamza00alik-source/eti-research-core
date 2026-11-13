@@ -171,3 +171,27 @@ def test_worker_registers_model_training_result_as_unapproved_candidate(tmp_path
     assert model["evaluation_report"]["passed"] is True
     assert registered["registry"]["approval_required"] is True
     assert registered["lifecycle"] == "candidate"
+
+
+def test_worker_logs_task_lifecycle_without_payload_or_result(tmp_path, capsys):
+    store = MemoryStore(tmp_path / "worker-events.sqlite3")
+    workspace = _workspace(store)
+    store.create_agent_task(
+        "owner-1", workspace["id"], "test.requester", "test.echo",
+        {"secret_payload": "must-not-be-logged"}, max_attempts=1,
+    )
+    registry = AgentCapabilityRegistry()
+    registry.register("test.echo", lambda payload: {"private_result": payload["secret_payload"]})
+    worker = AgentWorker(store, registry=registry)
+
+    result = worker.run_once()
+    output = capsys.readouterr().out
+
+    assert result["status"] == "completed"
+    assert '"event":"agent.task.claimed"' in output
+    assert '"event":"agent.task.execution_started"' in output
+    assert '"event":"agent.task.execution_finished"' in output
+    assert '"capability":"test.echo"' in output
+    assert '"status":"completed"' in output
+    assert "must-not-be-logged" not in output
+    assert "private_result" not in output
