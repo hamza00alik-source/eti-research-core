@@ -265,3 +265,17 @@ def test_agent_task_completion_requires_current_unexpired_lease_token(tmp_path):
         store.complete_claimed_agent_task(task["id"], first["lease_token"], {"ok": False}, now=107)
     done = store.complete_claimed_agent_task(task["id"], second["lease_token"], {"ok": True}, now=107)
     assert done["status"] == "completed"
+
+
+def test_agent_worker_heartbeat_reports_online_and_offline_windows(tmp_path):
+    store = MemoryStore(tmp_path / "worker-heartbeat.sqlite3")
+    recorded = store.record_agent_worker_heartbeat(
+        "worker-1", ["market.snapshot", "market.snapshot"], now=1000
+    )
+    assert recorded["capabilities"] == ["market.snapshot"]
+    online = store.list_agent_workers(online_window_seconds=60, now=1059)
+    assert len(online) == 1
+    assert online[0]["online"] is True
+    assert online[0]["capabilities"] == ["market.snapshot"]
+    offline = store.list_agent_workers(online_window_seconds=60, now=1061)
+    assert offline[0]["online"] is False
