@@ -35,29 +35,34 @@ class AgentWorker:
         lease_token = task["lease_token"]
         try:
             result = self.registry.execute(task["target_capability"], task["input"])
+            status, retryable = "completed", False
         except LookupError as exc:
             result = {"error": {"type": type(exc).__name__, "message": "unsupported agent capability"}}
-            updated = self.store.fail_claimed_agent_task(
-                task["id"], lease_token, result, retryable=False
-            )
-            message_type = "task.failed"
+            status, retryable = "failed", False
         except ValueError as exc:
             result = {"error": {"type": type(exc).__name__, "message": str(exc)[:300]}}
-            updated = self.store.fail_claimed_agent_task(
-                task["id"], lease_token, result, retryable=False
-            )
-            message_type = "task.failed"
+            status, retryable = "failed", False
         except Exception as exc:
             result = {"error": {"type": type(exc).__name__, "message": "Temporary capability failure"}}
-            updated = self.store.fail_claimed_agent_task(
-                task["id"], lease_token, result, retryable=True
+            status, retryable = "failed", True
+
+        try:
+            if status == "completed":
+                updated = self.store.complete_claimed_agent_task(
+                    task["id"], lease_token, result
+                )
+                message_type = "task.completed"
+            else:
+                updated = self.store.fail_claimed_agent_task(
+                    task["id"], lease_token, result, retryable=retryable
+                )
+                message_type = "task.requeued" if updated["status"] == "queued" else "task.failed"
+        except ValueError:
+            # A user may cancel a running task, or the lease may expire while a
+            # capability is running. A stale worker must never overwrite it.
+            return self.store.get_agent_task(
+                task["owner_id"], task["workspace_id"], task["id"]
             )
-            message_type = "task.requeued" if updated["status"] == "queued" else "task.failed"
-        else:
-            updated = self.store.complete_claimed_agent_task(
-                task["id"], lease_token, result
-            )
-            message_type = "task.completed"
 
         self.store.send_agent_message(
             task["owner_id"], task["workspace_id"], "eti.worker",
