@@ -163,6 +163,9 @@ class MemoryStore:
                     symbols_json TEXT NOT NULL,
                     timeframes_json TEXT NOT NULL,
                     last_scheduled_at TEXT,
+                    model_training_enabled INTEGER NOT NULL DEFAULT 0,
+                    model_training_interval_seconds INTEGER NOT NULL DEFAULT 86400,
+                    last_model_training_at TEXT,
                     updated_at TEXT NOT NULL
                 );
 
@@ -188,6 +191,16 @@ class MemoryStore:
                     ON model_versions(model_id, lifecycle);
                 """
             )
+            autonomy_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(autonomy_profiles)").fetchall()
+            }
+            for column, definition in (
+                ("model_training_enabled", "INTEGER NOT NULL DEFAULT 0"),
+                ("model_training_interval_seconds", "INTEGER NOT NULL DEFAULT 86400"),
+                ("last_model_training_at", "TEXT"),
+            ):
+                if column not in autonomy_columns:
+                    conn.execute(f"ALTER TABLE autonomy_profiles ADD COLUMN {column} {definition}")
             task_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info(agent_tasks)").fetchall()
             }
@@ -206,7 +219,9 @@ class MemoryStore:
     def configure_autonomy(
         self, owner_id: str, workspace_id: str, enabled: bool,
         venues: list[str] | None = None, symbols: list[str] | None = None,
-        timeframes: list[str] | None = None, interval_seconds: int = 900
+        timeframes: list[str] | None = None, interval_seconds: int = 900,
+        model_training_enabled: bool = False,
+        model_training_interval_seconds: int = 86400
     ) -> dict[str, Any]:
         """Persist an owner-scoped autonomous public-market research schedule."""
         owner_id = _required_text(owner_id, "owner_id")
@@ -228,6 +243,14 @@ class MemoryStore:
             raise ValueError("unsupported timeframes")
         if isinstance(interval_seconds, bool) or not isinstance(interval_seconds, int) or not 300 <= interval_seconds <= 86400:
             raise ValueError("interval_seconds must be between 300 and 86400")
+        if not isinstance(model_training_enabled, bool):
+            raise ValueError("model_training_enabled must be boolean")
+        if (isinstance(model_training_interval_seconds, bool)
+                or not isinstance(model_training_interval_seconds, int)
+                or not 86400 <= model_training_interval_seconds <= 604800):
+            raise ValueError("model_training_interval_seconds must be between 86400 and 604800")
+        if model_training_enabled and len(set(venues)) * len(set(symbols)) * len(set(timeframes)) > 8:
+            raise ValueError("model training schedule supports at most 8 market combinations")
         now = _utc_now()
         with self._connection() as conn:
             if not self._owns_workspace(conn, owner_id, workspace_id):
@@ -235,21 +258,28 @@ class MemoryStore:
             conn.execute(
                 """INSERT INTO autonomy_profiles
                 (owner_id, workspace_id, enabled, interval_seconds, venues_json, symbols_json,
-                 timeframes_json, last_scheduled_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
+                 timeframes_json, last_scheduled_at, model_training_enabled,
+                 model_training_interval_seconds, last_model_training_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?)
                 ON CONFLICT(owner_id) DO UPDATE SET workspace_id=excluded.workspace_id,
                 enabled=excluded.enabled, interval_seconds=excluded.interval_seconds,
                 venues_json=excluded.venues_json, symbols_json=excluded.symbols_json,
-                timeframes_json=excluded.timeframes_json, updated_at=excluded.updated_at""",
+                timeframes_json=excluded.timeframes_json,
+                model_training_enabled=excluded.model_training_enabled,
+                model_training_interval_seconds=excluded.model_training_interval_seconds,
+                updated_at=excluded.updated_at""",
                 (owner_id, workspace_id, int(enabled), interval_seconds,
                  _encode_json(sorted(set(venues))), _encode_json(sorted(set(symbols))),
-                 _encode_json(sorted(set(timeframes))), now),
+                 _encode_json(sorted(set(timeframes))), int(model_training_enabled),
+                 model_training_interval_seconds, now),
             )
             row=conn.execute("SELECT * FROM autonomy_profiles WHERE owner_id=?", (owner_id,)).fetchone()
             conn.execute(
                 "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?)",
                 (str(uuid4()), owner_id, workspace_id, "autonomy.enabled" if enabled else "autonomy.disabled",
-                 _encode_json({"enabled": enabled, "interval_seconds": interval_seconds}), now),
+                 _encode_json({"enabled": enabled, "interval_seconds": interval_seconds,
+                              "model_training_enabled": model_training_enabled,
+                              "model_training_interval_seconds": model_training_interval_seconds}), now),
             )
         return self._autonomy_profile_dict(row)
 
@@ -259,6 +289,9 @@ class MemoryStore:
                 "enabled": bool(row["enabled"]), "interval_seconds": row["interval_seconds"],
                 "venues": json.loads(row["venues_json"]), "symbols": json.loads(row["symbols_json"]),
                 "timeframes": json.loads(row["timeframes_json"]),
+                "model_training_enabled": bool(row["model_training_enabled"]),
+                "model_training_interval_seconds": row["model_training_interval_seconds"],
+                "last_model_training_at": row["last_model_training_at"],
                 "last_scheduled_at": row["last_scheduled_at"], "updated_at": row["updated_at"]}
 
     def get_autonomy_profile(self, owner_id: str) -> dict[str, Any] | None:
