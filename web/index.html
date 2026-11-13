@@ -57,7 +57,7 @@
 </div>
 <div class="autonomy-card exchange-connect-card" aria-labelledby="exchange-connect-heading">
  <div><div class="eyebrow">OWNER-MANAGED EXCHANGE ACCESS</div><h3 id="exchange-connect-heading">Connect an exchange account</h3>
- <p class="muted">Only the account administrator can add or remove keys. ETI verifies private read access and encrypts credentials at rest. Create an API key with withdrawals disabled and IP restrictions enabled. Trading permission is not yet verified and live orders remain unavailable.</p></div>
+ <p class="muted">Only the account administrator can add or remove keys. ETI verifies private read access and encrypts credentials at rest. Create an API key with withdrawals disabled; IP restrictions are strongly recommended where supported. Trading permission is not yet verified and live orders remain unavailable.</p></div>
  <form id="exchange-credential-form" class="registry-form">
   <label>Exchange<select name="venue"><option value="binance">Binance</option><option value="mexc">MEXC</option></select></label>
   <label>API key<input name="api_key" type="password" autocomplete="off" minlength="8" maxlength="256" required></label>
@@ -89,7 +89,7 @@
   <label class="confirm-line"><input id="confirm-live-trading" type="checkbox"> I authorize ETI to place real spot market orders automatically. I understand trades can lose money.</label>
   <label class="confirm-line"><input id="confirm-spot-permission" type="checkbox"> My exchange API key has spot trading permission.</label>
   <label class="confirm-line"><input id="confirm-withdrawals-disabled" type="checkbox"> Withdrawals are disabled on this API key.</label>
-  <label class="confirm-line"><input id="confirm-ip-restrictions" type="checkbox"> I have enabled exchange IP restrictions for this API key.</label>
+  <label class="confirm-line"><input id="confirm-ip-restrictions" type="checkbox"> I have enabled exchange IP restrictions where supported (recommended).</label>
   <button id="authorize-live-execution" type="button">Authorize autonomous live trading</button>
   <button id="live-kill-switch" type="button" class="danger-button" hidden>Stop all live trading (kill switch)</button>
  </div>
