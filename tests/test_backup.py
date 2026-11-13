@@ -1,7 +1,8 @@
 import base64
 import sqlite3
 
-from eti.backup import decrypt_snapshot, encrypt_snapshot, restore_snapshot, snapshot_sqlite
+from eti.backup import (decrypt_snapshot, encrypt_snapshot, restore_snapshot, snapshot_sqlite,
+                        validate_backup_configuration)
 
 
 def test_encrypted_backup_round_trip_and_integrity(tmp_path):
@@ -32,3 +33,30 @@ def test_backup_authentication_rejects_tampering():
         pass
     else:
         raise AssertionError("tampered backup must not decrypt")
+
+
+def test_backup_configuration_fails_closed_when_secrets_are_missing(monkeypatch):
+    import pytest
+
+    for name in (
+        "ETI_BACKUP_S3_ENDPOINT", "ETI_BACKUP_S3_BUCKET",
+        "ETI_BACKUP_S3_ACCESS_KEY_ID", "ETI_BACKUP_S3_SECRET_ACCESS_KEY",
+        "ETI_BACKUP_ENCRYPTION_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(RuntimeError, match="missing required backup settings"):
+        validate_backup_configuration()
+
+
+def test_backup_configuration_rejects_invalid_retention(monkeypatch):
+    import base64
+    import pytest
+
+    monkeypatch.setenv("ETI_BACKUP_S3_ENDPOINT", "https://objects.example.invalid")
+    monkeypatch.setenv("ETI_BACKUP_S3_BUCKET", "eti-backups")
+    monkeypatch.setenv("ETI_BACKUP_S3_ACCESS_KEY_ID", "test-access")
+    monkeypatch.setenv("ETI_BACKUP_S3_SECRET_ACCESS_KEY", "test-secret")
+    monkeypatch.setenv("ETI_BACKUP_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"x" * 32).decode())
+    monkeypatch.setenv("ETI_BACKUP_RETENTION_DAYS", "2")
+    with pytest.raises(ValueError, match="retention"):
+        validate_backup_configuration()
