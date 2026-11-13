@@ -197,9 +197,9 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         fold_diagnostics.append({
             "fold": fold.get("fold"),
             "selected_candidate": fold.get("selected_candidate"),
-            "validation_scores": fold.get("validation"),
-            "test_accuracy": (fold.get("test") or {}).get("accuracy"),
-            "test_balanced_accuracy": (fold.get("test") or {}).get("balanced_accuracy"),
+            "validation_scores": fold.get("validation_scores"),
+            "test_accuracy": fold.get("test_accuracy"),
+            "test_balanced_accuracy": fold.get("test_balanced_accuracy"),
             "boundaries": fold.get("boundaries"),
         })
     trading = evaluation.get("trading_performance", {})
