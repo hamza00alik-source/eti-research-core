@@ -47,3 +47,17 @@ def test_artifact_checksum_is_verified_before_deserialization(tmp_path):
     path.write_bytes(path.read_bytes() + b"tamper")
     with pytest.raises(ModelArtifactError, match="checksum"):
         store.load_model(reference["artifact_uri"], reference["artifact_sha256"])
+
+
+def test_artifact_store_rejects_symlinked_digest_directory(tmp_path):
+    model, _ = _fitted_model()
+    store = ModelArtifactStore(tmp_path / "artifacts")
+    reference = store.save_model(model)
+    digest = reference["artifact_sha256"]
+    real_directory = store.root / digest[:2]
+    moved_directory = store.root / "real"
+    real_directory.rename(moved_directory)
+    real_directory.symlink_to(moved_directory, target_is_directory=True)
+
+    with pytest.raises(ModelArtifactError, match="symbolic-link"):
+        store.load_model(reference["artifact_uri"], digest)
