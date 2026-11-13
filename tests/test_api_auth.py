@@ -176,6 +176,8 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
         calibration_report = {
             "passed": True, "method": "temperature_scaling",
             "sample_count": 50, "temperature": 1.2,
+            "class_counts": {"0": 16, "1": 17, "2": 17},
+            "nll_before": 1.2, "nll_after": 1.0,
         }
 
     monkeypatch.setattr(ModelArtifactStore, "load_model", lambda self, uri, checksum: CalibratedStub())
