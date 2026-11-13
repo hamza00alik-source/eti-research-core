@@ -40,26 +40,79 @@ async function acceptSession(data){
  showAccount(data.account);await loadWorkspaces();await loadAutonomy();
 }
 let autonomyEnabled=false;
+let autonomyProfile=null;
+let modelTrainingEnabled=false;
+let modelTrainingIntervalSeconds=86400;
+async function saveAutonomyConfig(patch={}){
+ const current=autonomyProfile||{};
+ const next={...current,...patch};
+ const data=await api('/v1/autonomy',{method:'PUT',body:JSON.stringify({
+  enabled:next.enabled??autonomyEnabled,
+  workspace_id:activeWorkspace||null,
+  venues:next.venues||['mexc'],
+  symbols:next.symbols||['BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT'],
+  timeframes:next.timeframes||['1h'],
+  interval_seconds:next.interval_seconds||900,
+  model_training_enabled:next.model_training_enabled??modelTrainingEnabled,
+  model_training_interval_seconds:next.model_training_interval_seconds||modelTrainingIntervalSeconds
+ })});
+ autonomyProfile=data.profile;
+ autonomyEnabled=Boolean(data.profile.enabled);
+ modelTrainingEnabled=Boolean(data.profile.model_training_enabled);
+ modelTrainingIntervalSeconds=Number(data.profile.model_training_interval_seconds||86400);
+ return data.profile;
+}
 async function loadAutonomy(){
  const status=$('#autonomy-status'),button=$('#autonomy-toggle');
  if(!status||!button)return;
  try{
-  const data=await api('/v1/autonomy');autonomyEnabled=Boolean(data.profile?.enabled);
+  const data=await api('/v1/autonomy');autonomyProfile=data.profile||{};
+  autonomyEnabled=Boolean(autonomyProfile.enabled);
+  modelTrainingEnabled=Boolean(autonomyProfile.model_training_enabled);
+  modelTrainingIntervalSeconds=Number(autonomyProfile.model_training_interval_seconds||86400);
   status.textContent=autonomyEnabled?'Autonomous research is ON · research only':'Autonomous research is OFF';
   button.textContent=autonomyEnabled?'Pause autonomous research':'Enable autonomous research';
+  const trainingButton=$('#model-training-toggle');
+  const trainingStatus=$('#model-training-status');
+  const cadence=$('#model-training-interval');
+  if(trainingButton){
+   trainingButton.disabled=!autonomyEnabled;
+   trainingButton.textContent=modelTrainingEnabled?'Pause daily model training':'Enable daily model training';
+  }
+  if(trainingStatus)trainingStatus.textContent=!autonomyEnabled
+   ?'Enable autonomous research first'
+   :modelTrainingEnabled?'Scheduled training is ON · research candidates only':'Scheduled training is OFF';
+  if(cadence)cadence.value=String(modelTrainingIntervalSeconds);
  }catch(error){status.textContent='Autonomy status unavailable: '+error.message;button.disabled=true}
 }
 $('#autonomy-toggle')?.addEventListener('click',async()=>{
  const button=$('#autonomy-toggle'),status=$('#autonomy-status');
  button.disabled=true;status.textContent='Updating…';
  try{
-  const data=await api('/v1/autonomy',{method:'PUT',body:JSON.stringify({enabled:!autonomyEnabled,workspace_id:activeWorkspace||null})});
-  autonomyEnabled=Boolean(data.profile.enabled);
-  status.textContent=autonomyEnabled?'Autonomous research is ON · scans run every 15 minutes':'Autonomous research is OFF';
-  button.textContent=autonomyEnabled?'Pause autonomous research':'Enable autonomous research';
+  await saveAutonomyConfig({enabled:!autonomyEnabled});
+  await loadAutonomy();
   await loadWorkspaceData();
  }catch(error){status.textContent='Could not update autonomy: '+error.message}
  finally{button.disabled=false}
+});
+$('#model-training-toggle')?.addEventListener('click',async()=>{
+ const button=$('#model-training-toggle'),status=$('#model-training-status');
+ if(!autonomyEnabled){status.textContent='Enable autonomous research first';return}
+ button.disabled=true;status.textContent='Updating…';
+ try{
+  await saveAutonomyConfig({model_training_enabled:!modelTrainingEnabled});
+  await loadAutonomy();
+  await loadWorkspaceData();
+ }catch(error){status.textContent='Could not update model training: '+error.message}
+ finally{button.disabled=false}
+});
+$('#model-training-interval')?.addEventListener('change',async event=>{
+ modelTrainingIntervalSeconds=Number(event.target.value);
+ if(!autonomyEnabled||!modelTrainingEnabled)return;
+ const status=$('#model-training-status');
+ status.textContent='Saving cadence…';
+ try{await saveAutonomyConfig({model_training_interval_seconds:modelTrainingIntervalSeconds});await loadAutonomy()}
+ catch(error){status.textContent='Could not update cadence: '+error.message}
 });
 async function loadCapabilities(){
  const select=$('#capability-select');
