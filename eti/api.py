@@ -63,6 +63,15 @@ class WorkspacePayload(BaseModel):
     name: str = Field(min_length=1, max_length=80)
 
 
+class AutonomyConfigPayload(BaseModel):
+    enabled: bool = True
+    workspace_id: str | None = Field(default=None, min_length=1, max_length=128)
+    venues: list[str] = Field(default_factory=lambda: ["mexc"], min_length=1, max_length=2)
+    symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"], min_length=1, max_length=20)
+    timeframes: list[str] = Field(default_factory=lambda: ["1h"], min_length=1, max_length=6)
+    interval_seconds: int = Field(default=900, ge=300, le=86400)
+
+
 class MemoryPayload(BaseModel):
     value: Any
 
@@ -173,6 +182,40 @@ def profile(account: dict[str, str] = Depends(current_account)):
 def export_account_data(account: dict[str, str] = Depends(current_account)):
     """Download the caller's account-scoped research data as JSON."""
     return _memory_store().export_account_data(account["id"])
+
+
+
+
+@app.get("/v1/autonomy")
+def get_autonomy_status(account: dict[str, str] = Depends(current_account)):
+    profile = _memory_store().get_autonomy_profile(account["id"])
+    return {"profile": profile, "mode": "research_only",
+            "live_execution_enabled": False,
+            "note": "Autonomy currently schedules public market research only; it cannot place orders."}
+
+
+@app.put("/v1/autonomy")
+def set_autonomy_config(payload: AutonomyConfigPayload,
+                        account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    workspaces = store.list_workspaces(account["id"])
+    workspace_id = payload.workspace_id
+    if workspace_id is None:
+        workspace_id = workspaces[0]["id"] if workspaces else store.create_workspace(
+            account["id"], "ETI Autonomous Research"
+        )["id"]
+    try:
+        profile = store.configure_autonomy(
+            account["id"], workspace_id, payload.enabled, payload.venues,
+            payload.symbols, payload.timeframes, payload.interval_seconds
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"profile": profile, "mode": "research_only",
+            "live_execution_enabled": False,
+            "note": "The worker will schedule research scans automatically. No exchange credentials or orders are used."}
 
 
 @app.get("/v1/workspaces")
