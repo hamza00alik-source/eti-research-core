@@ -72,7 +72,8 @@
 - [x] Implement invite-only authenticated sessions, signed short-lived tokens, persistent login/signup throttles and scoped authorization
 - [x] Implement durable SQLite agent task/message queue, atomic leases, lease-token completion, bounded retries and audit events
 - [x] Implement admin-governed immutable model metadata registry with independent approval and retirement
-- [ ] Implement safe model artifact storage, approved-version inference API and runtime monitoring
+- [x] Implement server-owned content-addressed model artifact storage and authenticated inference for independently approved versions
+- [ ] Add inference runtime monitoring, drift detection and model health alerts
 - [x] Migrate PWA account, workspace, memory and agent task screens to authenticated APIs
 - [ ] Migrate market, instrument, provider, risk and portfolio resources to stable versioned APIs
 - [ ] Add encrypted provider credential vault and read-only connection verification
@@ -85,7 +86,9 @@
 - [x] Add crash recovery through expiring leases, random lease tokens and bounded retry attempts
 - [x] Prevent clients from forging task completion; users may cancel queued tasks only
 - [x] Expose approved model metadata to signed-in accounts and restrict registry changes to server-listed administrators
+- [x] Add explicit opt-in final-model artifact export to the training CLI (exports remain uncalibrated)
+- [ ] Implement time-series probability calibration and calibration report validation before model approval
 - [ ] Add general multi-agent planning/delegation and versioned capability permissions
-- [ ] Add model artifact persistence and approved-version inference
+- [x] Add model artifact persistence, checksum verification and approved-version inference
 - [ ] Add PostgreSQL queue/storage backend and worker health monitoring
 - [ ] Deploy HTTPS API + worker + PWA and verify end-to-end Android browser installation
