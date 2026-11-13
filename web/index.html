@@ -16,6 +16,11 @@
 <header class="topbar"><a class="brand" href="#home" aria-label="ETI home"><img src="/eti-icon.svg" alt=""><span>ETI</span></a><span class="mode-pill">RESEARCH MODE</span></header>
 <main id="home">
 <section class="hero"><div class="eyebrow">EVOLUTIONARY TRADING INTELLIGENCE</div><h1>Market intelligence.<br><span>Risk before execution.</span></h1><p>One research workspace for markets, models and portfolio risk.</p></section>
+<section class="grid status-grid" aria-label="Live platform overview">
+<article><h2>Platform</h2><div id="health" class="value">Connecting…</div><p>Backend status</p></article>
+<article><h2>Live execution</h2><div id="execution" class="value">Disabled</div><p>Owner-authorized only</p></article>
+<article><h2>Markets</h2><div id="markets" class="value">Crypto spot</div><p>Currently connected public feeds</p></article>
+</section>
 
 <section class="panel live-chart-panel" id="live-chart"><div class="section-heading"><div><div class="eyebrow">LIVE MARKET DATA</div><h2>Live candlestick chart</h2></div><span class="tag chart-feed-tag">BINANCE · SPOT</span></div><div class="chart-toolbar"><label>Market<select id="chart-symbol"><option value="BTCUSDT">BTC / USDT</option><option value="ETHUSDT">ETH / USDT</option><option value="SOLUSDT">SOL / USDT</option><option value="XRPUSDT">XRP / USDT</option><option value="BNBUSDT">BNB / USDT</option><option value="ADAUSDT">ADA / USDT</option></select></label><label>Timeframe<select id="chart-timeframe"><option value="1m">1 minute</option><option value="5m">5 minutes</option><option value="15m">15 minutes</option><option value="1h" selected>1 hour</option><option value="4h">4 hours</option><option value="1d">1 day</option></select></label><button id="chart-refresh" type="button" class="secondary-button">Refresh chart</button></div><div class="chart-price-row"><div><strong id="chart-last-price">—</strong><span id="chart-price-change">Waiting for feed</span></div><span id="chart-feed-status" class="chart-feed-status" role="status" aria-live="polite">Connecting…</span></div><div class="chart-canvas-wrap"><canvas id="market-chart" aria-label="Live candlestick price and volume chart"></canvas></div><div class="chart-legend"><span><i class="legend-up"></i> Bull candle</span><span><i class="legend-down"></i> Bear candle</span><span>Volume · public spot data</span></div><p class="muted chart-note">Live public Binance spot feed. Candles update as trades arrive; historical candles load on market/timeframe changes. Market data only — this chart does not place orders.</p></section><section class="panel" id="account-panel">
 <div class="section-heading"><div><div class="eyebrow">PRIVATE WORKSPACE</div><h2>Account and research memory</h2></div><span class="tag">SIGNED-IN ACCESS</span></div>
@@ -164,11 +169,6 @@
 <p id="account-message" class="form-message" role="status" aria-live="polite">Sign in to access your private memory and agent ledger. Registration requires a server-issued invite code.</p>
 </section>
 
-<section class="grid status-grid" aria-label="System overview">
-<article><h2>System</h2><div id="health" class="value">Connecting…</div><p>Backend status</p></article>
-<article><h2>Execution</h2><div id="execution" class="value">Disabled</div><p>Live orders unavailable</p></article>
-<article><h2>Market data</h2><div id="markets" class="value">Crypto spot</div><p>Currently connected public feeds</p></article>
-</section>
 <section class="panel" id="decision"><div class="section-heading"><div><div class="eyebrow">RESEARCH TOOL</div><h2>Decision gate simulator</h2></div><span class="tag">PAPER ONLY</span></div>
 <p>Enter hypothetical model probabilities and portfolio context. ETI applies independent trade-risk and portfolio checks. This tool does not place orders.</p>
 <form id="decision-form">
