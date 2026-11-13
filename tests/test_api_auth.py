@@ -331,9 +331,8 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
 
         non_finite_input = client.post(
             "/v1/inference/eti-inference-test/0.1.0",
-            headers=user_headers,
-            json={"asset_class": "crypto_spot",
-                  "features": {"feature_a": float("nan"), "feature_b": 0.7}},
+            headers={**user_headers, "Content-Type": "application/json"},
+            content='{"asset_class":"crypto_spot","features":{"feature_a":NaN,"feature_b":0.7}}',
         )
         assert non_finite_input.status_code == 422
 
