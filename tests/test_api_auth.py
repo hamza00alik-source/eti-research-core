@@ -171,7 +171,14 @@ def test_login_and_registration_are_rate_limited(tmp_path, monkeypatch):
 
 
 def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeypatch):
-    monkeypatch.setattr(ModelArtifactStore, "load_model", lambda self, uri, checksum: object())
+    class CalibratedStub:
+        calibration_status = "calibrated"
+        calibration_report = {
+            "passed": True, "method": "temperature_scaling",
+            "sample_count": 50, "temperature": 1.2,
+        }
+
+    monkeypatch.setattr(ModelArtifactStore, "load_model", lambda self, uri, checksum: CalibratedStub())
     monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "models.sqlite3"))
     monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
     monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
@@ -270,6 +277,11 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
 
     class StubModel:
         probabilities = [0.2, 0.5, 0.3]
+        calibration_status = "calibrated"
+        calibration_report = {
+            "passed": True, "method": "temperature_scaling",
+            "sample_count": 50, "temperature": 1.2,
+        }
 
         def predict_proba(self, frame):
             return np.array([self.probabilities])
@@ -430,3 +442,41 @@ def test_workspace_deletion_is_owner_scoped_cascades_data_and_keeps_audit(tmp_pa
         assert client.get("/v1/workspaces", headers=h1).json()["items"] == []
         events = client.get("/v1/audit/events", headers=h1).json()["items"]
         assert any(event["event_type"] == "workspace.deleted" for event in events)
+
+
+def test_registry_cannot_approve_artifact_without_embedded_calibration(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "uncalibrated.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    monkeypatch.setenv("ETI_ADMIN_USERNAMES", "trainer_admin,reviewer_admin")
+
+    class UncalibratedStub:
+        calibration_status = "uncalibrated"
+        calibration_report = None
+
+    monkeypatch.setattr(
+        ModelArtifactStore, "load_model",
+        lambda self, uri, checksum: UncalibratedStub(),
+    )
+    digest = "d" * 64
+    with TestClient(app) as client:
+        trainer = _register(client, "trainer_admin")
+        reviewer = _register(client, "reviewer_admin")
+        trainer_headers = {"Authorization": f"Bearer {trainer['access_token']}"}
+        reviewer_headers = {"Authorization": f"Bearer {reviewer['access_token']}"}
+        payload = {
+            "model_id": "uncalibrated-model", "version": "0.1.0",
+            "artifact_uri": "artifact://sha256/" + digest, "artifact_sha256": digest,
+            "input_schema": {"features": ["x"]}, "supported_classes": ["crypto_spot"],
+            "training_data_ref": "test-fixture",
+            "evaluation_report": {"passed": True}, "calibration_status": "calibrated",
+        }
+        assert client.post("/v1/models", headers=trainer_headers, json=payload).status_code == 201
+        denied = client.post(
+            "/v1/models/uncalibrated-model/0.1.0/approve", headers=reviewer_headers
+        )
+        assert denied.status_code == 409
+        candidate = client.get(
+            "/v1/models/uncalibrated-model/0.1.0", headers=trainer_headers
+        )
+        assert candidate.json()["lifecycle"] == "candidate"
