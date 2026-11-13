@@ -73,14 +73,18 @@ async function loadWorkspaces(){
 async function loadWorkspaceData(){
  if(!activeWorkspace)return;
  $('#workspace-tools').hidden=false;
- const [memory,tasks,audit]=await Promise.all([
+ const [memory,tasks,audit,workerStatus]=await Promise.all([
   api('/v1/workspaces/'+encodeURIComponent(activeWorkspace)+'/memory'),
   api('/v1/workspaces/'+encodeURIComponent(activeWorkspace)+'/agents/tasks'),
-  api('/v1/audit/events?limit=100')
+  api('/v1/audit/events?limit=100'),
+  api('/v1/agents/status')
  ]);
  $('#memory-list').textContent=JSON.stringify(memory.items,null,2);
  $('#task-list').textContent=JSON.stringify(tasks.items,null,2);
  $('#audit-list').textContent=JSON.stringify(audit.items,null,2);
+ $('#worker-status').textContent=workerStatus.online_count
+  ? JSON.stringify(workerStatus.items.filter(item=>item.online),null,2)
+  : 'No active worker heartbeat. Start the separate worker process on the ETI backend.';
 }
 $('#login-form').addEventListener('submit',async event=>{
  event.preventDefault();const form=new FormData(event.currentTarget);

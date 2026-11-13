@@ -103,7 +103,7 @@ The PWA still requires a deployed HTTPS backend and configured server secrets be
 
 ## Durable agent worker (first execution capability)
 
-The API exposes the authenticated capability list at `GET /v1/agents/capabilities`. The first built-in capability is `market.snapshot`: it fetches completed public crypto spot candles from Binance or MEXC and returns a descriptive snapshot with causal technical indicators. MEXC is the default public venue; a task may explicitly select Binance. The PWA populates its capability picker from the authenticated server allowlist. It does not train a model, recommend a trade, access private exchange accounts or place orders.
+The API exposes the authenticated capability list at `GET /v1/agents/capabilities` and worker heartbeat status at `GET /v1/agents/status`. The PWA shows workers as online only when a heartbeat was received within the last 60 seconds. The first built-in capability is `market.snapshot`: it fetches completed public crypto spot candles from Binance or MEXC and returns a descriptive snapshot with causal technical indicators. MEXC is the default public venue; a task may explicitly select Binance. The PWA populates its capability picker from the authenticated server allowlist. It does not train a model, recommend a trade, access private exchange accounts or place orders.
 
 Start a worker explicitly from the same server environment and database as the API:
 

@@ -231,6 +231,12 @@ def list_agent_capabilities(account: dict[str, str] = Depends(current_account)):
     return {"items": default_capabilities().capabilities()}
 
 
+@app.get("/v1/agents/status")
+def agent_worker_status(account: dict[str, str] = Depends(current_account)):
+    items = _memory_store().list_agent_workers(online_window_seconds=60)
+    return {"items": items, "online_count": sum(1 for item in items if item["online"])}
+
+
 @app.get("/v1/workspaces/{workspace_id}/agents/tasks")
 def list_agent_tasks(workspace_id: str, status: str | None = None,
                      limit: int = Query(default=100, ge=1, le=500),

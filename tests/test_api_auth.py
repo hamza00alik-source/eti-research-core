@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from eti.api import app
+from eti.storage import MemoryStore
 
 
 def _register(client, username, invite="private-invite-code-123456"):
@@ -240,3 +241,18 @@ def test_audit_endpoint_is_authenticated_and_account_scoped(tmp_path, monkeypatc
         assert any(item["event_type"] == "agent.task.queued"
                    for item in events.json()["items"])
         assert client.get("/v1/audit/events", headers=h2).json()["items"] == []
+
+
+def test_agent_worker_status_is_authenticated_and_reports_heartbeat(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "worker-status.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        assert client.get("/v1/agents/status").status_code == 401
+        account = _register(client, "worker_status")
+        headers = {"Authorization": f"Bearer {account['access_token']}"}
+        MemoryStore().record_agent_worker_heartbeat("worker-test", ["market.snapshot"])
+        response = client.get("/v1/agents/status", headers=headers)
+        assert response.status_code == 200
+        assert response.json()["online_count"] == 1
+        assert response.json()["items"][0]["capabilities"] == ["market.snapshot"]

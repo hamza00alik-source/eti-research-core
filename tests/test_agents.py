@@ -51,10 +51,15 @@ def test_market_snapshot_rejects_unsupported_inputs_before_network_access():
         market_snapshot({"venue": "binance", "symbol": "BTC/USDT", "limit": 10000})
 
 
-def test_worker_does_not_claim_when_queue_is_empty(tmp_path):
+def test_worker_does_not_claim_when_queue_is_empty_but_reports_heartbeat(tmp_path):
     store = MemoryStore(tmp_path / "empty-worker.sqlite3")
-    result = AgentWorker(store, AgentCapabilityRegistry()).run_once()
+    worker = AgentWorker(store, AgentCapabilityRegistry())
+    result = worker.run_once()
     assert result is None
+    workers = store.list_agent_workers()
+    assert len(workers) == 1
+    assert workers[0]["worker_id"] == worker.worker_id
+    assert workers[0]["online"] is True
 
 
 def test_worker_retries_transient_errors_without_leaking_exception_text(tmp_path):

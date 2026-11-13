@@ -148,6 +148,12 @@ class MemoryStore:
                 CREATE INDEX IF NOT EXISTS idx_agent_messages_task
                     ON agent_messages(owner_id, workspace_id, task_id, created_at);
 
+                CREATE TABLE IF NOT EXISTS agent_workers (
+                    worker_id TEXT PRIMARY KEY,
+                    last_seen_at TEXT NOT NULL,
+                    capabilities_json TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS model_versions (
                     id TEXT PRIMARY KEY,
                     model_id TEXT NOT NULL,
@@ -181,6 +187,52 @@ class MemoryStore:
             ):
                 if column not in task_columns:
                     conn.execute(f"ALTER TABLE agent_tasks ADD COLUMN {column} {definition}")
+
+
+    def record_agent_worker_heartbeat(
+        self, worker_id: str, capabilities: list[str], now: int | None = None
+    ) -> dict[str, Any]:
+        worker_id = _required_text(worker_id, "worker_id", 80)
+        if not isinstance(capabilities, list) or any(
+            not isinstance(item, str) or not item.strip() or len(item) > 120
+            for item in capabilities
+        ):
+            raise ValueError("capabilities must be a list of non-empty strings")
+        normalized = sorted(set(item.strip() for item in capabilities))
+        encoded = _encode_json(normalized)
+        current = datetime.now(timezone.utc) if now is None else datetime.fromtimestamp(now, timezone.utc)
+        seen = current.isoformat(timespec="microseconds").replace("+00:00", "Z")
+        with self._connection() as conn:
+            conn.execute(
+                "INSERT INTO agent_workers(worker_id, last_seen_at, capabilities_json) "
+                "VALUES (?, ?, ?) ON CONFLICT(worker_id) DO UPDATE SET "
+                "last_seen_at = excluded.last_seen_at, capabilities_json = excluded.capabilities_json",
+                (worker_id, seen, encoded),
+            )
+        return {"worker_id": worker_id, "last_seen_at": seen, "capabilities": normalized}
+
+    def list_agent_workers(
+        self, online_window_seconds: int = 60, now: int | None = None
+    ) -> list[dict[str, Any]]:
+        if (isinstance(online_window_seconds, bool) or
+                not isinstance(online_window_seconds, int) or
+                not 5 <= online_window_seconds <= 300):
+            raise ValueError("online_window_seconds must be an integer from 5 to 300")
+        current = datetime.now(timezone.utc) if now is None else datetime.fromtimestamp(now, timezone.utc)
+        cutoff = (current - timedelta(seconds=online_window_seconds)).isoformat(
+            timespec="microseconds"
+        ).replace("+00:00", "Z")
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT worker_id, last_seen_at, capabilities_json "
+                "FROM agent_workers ORDER BY worker_id"
+            ).fetchall()
+        return [
+            {"worker_id": row["worker_id"], "last_seen_at": row["last_seen_at"],
+             "capabilities": json.loads(row["capabilities_json"]),
+             "online": row["last_seen_at"] >= cutoff}
+            for row in rows
+        ]
 
     def create_workspace(self, owner_id: str, name: str) -> dict[str, str]:
         owner_id = _required_text(owner_id, "owner_id")
