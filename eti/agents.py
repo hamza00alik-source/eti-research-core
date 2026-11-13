@@ -74,13 +74,13 @@ def _market_provider(payload: dict[str, Any]):
 
 
 def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
-    """Fetch completed public crypto spot or derivatives candles and summarize indicators."""
+    """Fetch completed public multi-asset OHLCV candles and summarize causal indicators."""
     asset_class, market_type, venue, provider = _market_provider(payload)
     symbol = payload.get("symbol")
     timeframe = payload.get("timeframe", "1h")
     limit = payload.get("limit", 200)
-    if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
-        raise ValueError("symbol must be a valid CCXT market symbol such as BTC/USDT or BTC/USDT:USDT")
+    if not isinstance(symbol, str) or not 1 <= len(symbol) <= 40 or (asset_class == "crypto" and "/" not in symbol):
+        raise ValueError("symbol must be a valid CCXT symbol for crypto or a Yahoo Finance ticker for other asset classes")
     if not isinstance(timeframe, str) or timeframe not in {"1m", "5m", "15m", "30m", "1h", "4h", "1d"}:
         raise ValueError("unsupported timeframe")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 50 <= limit <= 500:
@@ -132,8 +132,8 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
     symbol = payload.get("symbol")
     timeframe = payload.get("timeframe", "1h")
     limit = payload.get("limit", 500)
-    if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
-        raise ValueError("symbol must be a valid CCXT market symbol such as BTC/USDT or BTC/USDT:USDT")
+    if not isinstance(symbol, str) or not 1 <= len(symbol) <= 40 or (asset_class == "crypto" and "/" not in symbol):
+        raise ValueError("symbol must be a valid CCXT symbol for crypto or a Yahoo Finance ticker for other asset classes")
     if not isinstance(timeframe, str) or timeframe not in {"1m", "5m", "15m", "30m", "1h", "4h", "1d"}:
         raise ValueError("unsupported timeframe")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 300 <= limit <= 500:
@@ -175,14 +175,14 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
-    """Train a crypto spot/derivatives research candidate; approval remains gated by data quality."""
+    """Train a multi-asset research candidate; approval remains gated by data quality."""
     asset_class, market_type, venue, provider = _market_provider(payload)
     symbol = payload.get("symbol")
     timeframe = payload.get("timeframe", "1h")
     limit = payload.get("limit", 3000)
     horizon = payload.get("horizon", 6)
-    if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
-        raise ValueError("symbol must be a valid CCXT market symbol such as BTC/USDT or BTC/USDT:USDT")
+    if not isinstance(symbol, str) or not 1 <= len(symbol) <= 40 or (asset_class == "crypto" and "/" not in symbol):
+        raise ValueError("symbol must be a valid CCXT symbol for crypto or a Yahoo Finance ticker for other asset classes")
     if not isinstance(timeframe, str) or timeframe not in {"1h", "4h", "1d"}:
         raise ValueError("timeframe must be one of: 1h, 4h, or 1d")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1500 <= limit <= 5000:
