@@ -81,6 +81,26 @@ class ExchangeCredentialsPayload(BaseModel):
     api_secret: SecretStr = Field(min_length=8, max_length=256)
 
 
+class LiveExecutionSettingsPayload(BaseModel):
+    venue: str = Field(default="binance", pattern="^(binance|mexc)$")
+    symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"], min_length=1, max_length=8)
+    timeframe: str = Field(default="1h", pattern="^(1h|4h|1d)$")
+    capital_allocation_usdt: float = Field(default=100.0, ge=20, le=1000000)
+    max_risk_per_trade: float = Field(default=0.005, gt=0, le=0.005)
+    max_position_fraction: float = Field(default=0.10, gt=0, le=0.10)
+    max_gross_exposure: float = Field(default=0.25, gt=0, le=0.25)
+    max_daily_loss: float = Field(default=0.02, gt=0, le=0.02)
+    max_drawdown: float = Field(default=0.08, gt=0, le=0.08)
+    confidence_threshold: float = Field(default=0.60, ge=0.55, le=0.95)
+
+
+class LiveExecutionAuthorizationPayload(BaseModel):
+    confirm_live_trading: bool = False
+    confirm_spot_trading_permission: bool = False
+    confirm_withdrawals_disabled: bool = False
+    confirm_ip_restrictions: bool = False
+
+
 class MemoryPayload(BaseModel):
     value: Any
 
@@ -274,6 +294,73 @@ def delete_exchange_credentials(venue: str,
     if not deleted:
         raise HTTPException(status_code=404, detail="exchange credentials not found")
     return {"deleted": True, "venue": venue}
+
+
+
+
+@app.get("/v1/execution/profile")
+def get_live_execution_profile(account: dict[str, str] = Depends(current_account)):
+    _require_model_admin(account)
+    profile = _memory_store().get_live_execution_profile(account["id"])
+    return {"profile": profile, "mode": "live" if profile and profile["enabled"] else "disabled",
+            "per_trade_approval": False, "live_execution_available": True}
+
+
+@app.put("/v1/execution/profile")
+def save_live_execution_profile(payload: LiveExecutionSettingsPayload,
+                                account: dict[str, str] = Depends(current_account)):
+    _require_model_admin(account)
+    risk_config = {
+        "max_risk_per_trade": payload.max_risk_per_trade,
+        "max_position_fraction": payload.max_position_fraction,
+        "max_gross_exposure": payload.max_gross_exposure,
+        "max_daily_loss": payload.max_daily_loss,
+        "max_drawdown": payload.max_drawdown,
+        "confidence_threshold": payload.confidence_threshold,
+    }
+    try:
+        profile = _memory_store().save_live_execution_profile(
+            account["id"], payload.venue, payload.symbols, payload.timeframe,
+            payload.capital_allocation_usdt, risk_config,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"profile": profile, "mode": "disabled",
+            "note": "Settings are saved but live trading is still disabled. Authorize once to let ETI execute within these hard limits."}
+
+
+@app.post("/v1/execution/authorize")
+def authorize_live_execution(payload: LiveExecutionAuthorizationPayload,
+                             account: dict[str, str] = Depends(current_account)):
+    _require_model_admin(account)
+    if not all((payload.confirm_live_trading, payload.confirm_spot_trading_permission,
+                payload.confirm_withdrawals_disabled)):
+        raise HTTPException(status_code=422, detail="All one-time live trading and API-key safety confirmations are required")
+    try:
+        profile = _memory_store().authorize_live_execution(account["id"])
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="live execution settings not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"profile": profile, "mode": "live", "per_trade_approval": False,
+            "note": "ETI may execute eligible spot orders automatically within the saved capital allocation and hard risk limits. The kill switch remains owner-controlled."}
+
+
+@app.post("/v1/execution/kill-switch")
+def live_execution_kill_switch(account: dict[str, str] = Depends(current_account)):
+    _require_model_admin(account)
+    profile = _memory_store().disable_live_execution(account["id"], "owner_kill_switch")
+    if profile is None:
+        raise HTTPException(status_code=404, detail="live execution profile not found")
+    return {"profile": profile, "mode": "disabled", "message": "Live order scheduling is disabled."}
+
+
+@app.get("/v1/execution/orders")
+def list_live_execution_orders(limit: int = Query(default=100, ge=1, le=500),
+                               account: dict[str, str] = Depends(current_account)):
+    _require_model_admin(account)
+    return {"items": _memory_store().list_live_orders(account["id"], limit),
+            "per_trade_approval": False}
 
 
 @app.get("/v1/paper/sessions")

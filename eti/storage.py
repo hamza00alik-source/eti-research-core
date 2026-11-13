@@ -202,6 +202,58 @@ class MemoryStore:
                     PRIMARY KEY(owner_id, venue)
                 );
 
+                CREATE TABLE IF NOT EXISTS live_execution_profiles (
+                    owner_id TEXT PRIMARY KEY,
+                    venue TEXT NOT NULL CHECK(venue IN ('binance','mexc')),
+                    symbols_json TEXT NOT NULL,
+                    timeframe TEXT NOT NULL CHECK(timeframe IN ('1h','4h','1d')),
+                    capital_allocation_usdt REAL NOT NULL CHECK(capital_allocation_usdt >= 20),
+                    risk_config_json TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+                    daily_date TEXT,
+                    daily_start_equity REAL NOT NULL DEFAULT 0,
+                    peak_equity REAL NOT NULL DEFAULT 0,
+                    authorized_at TEXT,
+                    kill_switch_at TEXT,
+                    last_scheduled_at TEXT,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS live_execution_states (
+                    owner_id TEXT NOT NULL,
+                    venue TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    last_processed_candle TEXT,
+                    position_qty REAL NOT NULL DEFAULT 0,
+                    entry_price REAL,
+                    daily_date TEXT,
+                    daily_start_equity REAL NOT NULL DEFAULT 0,
+                    peak_equity REAL NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(owner_id,venue,symbol,timeframe)
+                );
+
+                CREATE TABLE IF NOT EXISTS live_orders (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    venue TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    side TEXT NOT NULL CHECK(side IN ('buy','sell')),
+                    amount REAL NOT NULL CHECK(amount > 0),
+                    client_order_id TEXT NOT NULL UNIQUE,
+                    exchange_order_id TEXT,
+                    status TEXT NOT NULL CHECK(status IN ('submitting','open','closed','canceled','rejected','unknown')),
+                    filled REAL NOT NULL DEFAULT 0,
+                    average REAL,
+                    cost REAL,
+                    result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_live_orders_owner
+                    ON live_orders(owner_id,created_at);
+
                 CREATE TABLE IF NOT EXISTS paper_sessions (
                     id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
@@ -1601,3 +1653,391 @@ class MemoryStore:
                      _encode_json({"venue": venue}), now),
                 )
         return cursor.rowcount == 1
+
+
+    @staticmethod
+    def _live_profile_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "owner_id": row["owner_id"], "venue": row["venue"],
+            "symbols": json.loads(row["symbols_json"]), "timeframe": row["timeframe"],
+            "capital_allocation_usdt": row["capital_allocation_usdt"],
+            "risk_config": json.loads(row["risk_config_json"]),
+            "enabled": bool(row["enabled"]), "daily_date": row["daily_date"],
+            "daily_start_equity": row["daily_start_equity"], "peak_equity": row["peak_equity"],
+            "authorized_at": row["authorized_at"],
+            "kill_switch_at": row["kill_switch_at"],
+            "last_scheduled_at": row["last_scheduled_at"], "updated_at": row["updated_at"],
+        }
+
+    def save_live_execution_profile(
+        self, owner_id: str, venue: str, symbols: list[str], timeframe: str,
+        capital_allocation_usdt: float, risk_config: dict[str, Any],
+    ) -> dict[str, Any]:
+        owner_id = _required_text(owner_id, "owner_id")
+        if not self.list_workspaces(owner_id):
+            self.create_workspace(owner_id, "ETI Live Execution")
+        if venue not in {"binance", "mexc"}:
+            raise ValueError("venue must be binance or mexc")
+        if not isinstance(symbols, list) or not 1 <= len(symbols) <= 8:
+            raise ValueError("symbols must contain 1 to 8 spot pairs")
+        normalized = sorted(set(_required_text(item, "symbol", 40) for item in symbols))
+        if any("/" not in item or not item.endswith("/USDT") for item in normalized):
+            raise ValueError("live spot symbols must be USDT-quoted pairs")
+        if timeframe not in {"1h", "4h", "1d"}:
+            raise ValueError("live execution timeframe must be 1h, 4h, or 1d")
+        if (isinstance(capital_allocation_usdt, bool)
+                or not isinstance(capital_allocation_usdt, (int, float))
+                or not math.isfinite(capital_allocation_usdt)
+                or not 20 <= capital_allocation_usdt <= 1_000_000):
+            raise ValueError("capital allocation must be between 20 and 1000000 USDT")
+        if not isinstance(risk_config, dict):
+            raise ValueError("risk_config must be an object")
+        defaults = {
+            "max_risk_per_trade": 0.005, "max_position_fraction": 0.10,
+            "max_gross_exposure": 0.25, "max_daily_loss": 0.02,
+            "max_drawdown": 0.08, "confidence_threshold": 0.60,
+        }
+        config = {**defaults, **risk_config}
+        ceilings = {
+            "max_risk_per_trade": 0.005, "max_position_fraction": 0.10,
+            "max_gross_exposure": 0.25, "max_daily_loss": 0.02,
+            "max_drawdown": 0.08,
+        }
+        for name, ceiling in ceilings.items():
+            value = config.get(name)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or not 0 < value <= ceiling):
+                raise ValueError(f"{name} exceeds the hard live risk ceiling")
+        threshold = config.get("confidence_threshold")
+        if (isinstance(threshold, bool) or not isinstance(threshold, (int, float))
+                or not math.isfinite(threshold) or not 0.55 <= threshold <= 0.95):
+            raise ValueError("confidence_threshold must be between 0.55 and 0.95")
+        config.update({"allow_short": False, "max_leverage": 1.0, "allow_live_orders": False})
+        now = _utc_now()
+        with self._connection() as conn:
+            existing = conn.execute(
+                "SELECT enabled,venue,timeframe FROM live_execution_profiles WHERE owner_id=?", (owner_id,)
+            ).fetchone()
+            if existing and existing["enabled"]:
+                raise ValueError("pause live execution before changing its settings")
+            open_positions = conn.execute(
+                "SELECT venue,symbol,timeframe FROM live_execution_states WHERE owner_id=? AND position_qty>0",
+                (owner_id,),
+            ).fetchall()
+            if any(item["venue"] != venue or item["timeframe"] != timeframe or item["symbol"] not in normalized
+                   for item in open_positions):
+                raise ValueError("close ETI-managed positions before changing venue, timeframe or watchlist")
+            pending_orders = conn.execute(
+                "SELECT venue,symbol FROM live_orders WHERE owner_id=? AND status IN ('submitting','open','unknown')",
+                (owner_id,),
+            ).fetchall()
+            if any(item["venue"] != venue or item["symbol"] not in normalized
+                   or (existing and existing["timeframe"] != timeframe)
+                   for item in pending_orders):
+                raise ValueError("reconcile pending live orders before changing venue, timeframe or watchlist")
+            conn.execute(
+                """INSERT INTO live_execution_profiles
+                (owner_id,venue,symbols_json,timeframe,capital_allocation_usdt,risk_config_json,
+                 enabled,authorized_at,kill_switch_at,last_scheduled_at,updated_at)
+                VALUES(?,?,?,?,?,?,0,NULL,NULL,NULL,?)
+                ON CONFLICT(owner_id) DO UPDATE SET venue=excluded.venue,
+                symbols_json=excluded.symbols_json,timeframe=excluded.timeframe,
+                capital_allocation_usdt=excluded.capital_allocation_usdt,
+                risk_config_json=excluded.risk_config_json,last_scheduled_at=NULL,
+                updated_at=excluded.updated_at""",
+                (owner_id, venue, _encode_json(normalized), timeframe,
+                 float(capital_allocation_usdt), _encode_json(config), now),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) VALUES(?,?,NULL,?,?,?)",
+                (str(uuid4()), owner_id, "live.execution.settings_saved",
+                 _encode_json({"venue": venue, "symbols": normalized, "timeframe": timeframe,
+                               "capital_allocation_usdt": float(capital_allocation_usdt)}), now),
+            )
+        return self.get_live_execution_profile(owner_id)
+
+    def get_live_execution_profile(self, owner_id: str) -> dict[str, Any] | None:
+        owner_id = _required_text(owner_id, "owner_id")
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM live_execution_profiles WHERE owner_id=?", (owner_id,)
+            ).fetchone()
+        return self._live_profile_dict(row) if row else None
+
+    def authorize_live_execution(self, owner_id: str) -> dict[str, Any]:
+        owner_id = _required_text(owner_id, "owner_id")
+        now = _utc_now()
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM live_execution_profiles WHERE owner_id=?", (owner_id,)
+            ).fetchone()
+            if row is None:
+                raise LookupError("live execution settings not found")
+            credential = conn.execute(
+                "SELECT 1 FROM exchange_credentials WHERE owner_id=? AND venue=?",
+                (owner_id, row["venue"]),
+            ).fetchone()
+            if credential is None:
+                raise ValueError("connect and verify the selected exchange before authorizing live execution")
+            symbols = json.loads(row["symbols_json"])
+            eligible = 0
+            for symbol in symbols:
+                model_id = f"eti-{row['venue']}-{symbol.replace('/', '-').replace(':', '-')}-{row['timeframe']}".lower()
+                if conn.execute(
+                    "SELECT 1 FROM model_versions WHERE model_id=? AND lifecycle='approved' LIMIT 1",
+                    (model_id,),
+                ).fetchone():
+                    eligible += 1
+            if eligible == 0:
+                raise ValueError("at least one approved model is required for the selected live watchlist")
+            conn.execute(
+                "UPDATE live_execution_profiles SET enabled=1,authorized_at=?,kill_switch_at=NULL,last_scheduled_at=NULL,updated_at=? WHERE owner_id=?",
+                (now, now, owner_id),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) VALUES(?,?,NULL,?,?,?)",
+                (str(uuid4()), owner_id, "live.execution.authorized",
+                 _encode_json({"venue": row["venue"], "eligible_models": eligible,
+                               "symbols": symbols, "capital_allocation_usdt": row["capital_allocation_usdt"]}), now),
+            )
+        return self.get_live_execution_profile(owner_id)
+
+    def disable_live_execution(self, owner_id: str, reason: str = "owner_kill_switch") -> dict[str, Any] | None:
+        owner_id = _required_text(owner_id, "owner_id")
+        reason = _required_text(reason, "reason", 120)
+        now = _utc_now()
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT workspace_id FROM autonomy_profiles WHERE owner_id=?", (owner_id,)
+            ).fetchone()
+            cursor = conn.execute(
+                "UPDATE live_execution_profiles SET enabled=0,kill_switch_at=?,updated_at=? WHERE owner_id=?",
+                (now, now, owner_id),
+            )
+            if cursor.rowcount:
+                conn.execute(
+                    "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) VALUES(?,?,NULL,?,?,?)",
+                    (str(uuid4()), owner_id, "live.execution.disabled",
+                     _encode_json({"reason": reason}), now),
+                )
+        return self.get_live_execution_profile(owner_id)
+
+    def enqueue_due_live_execution_tasks(self, now: datetime | None = None) -> int:
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            raise ValueError("now must be timezone-aware")
+        now_text = current.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+        intervals = {"1h": 3600, "4h": 14400, "1d": 86400}
+        queued = 0
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM live_execution_profiles WHERE enabled=1"
+            ).fetchall()
+            for row in rows:
+                previous = row["last_scheduled_at"]
+                if previous:
+                    last = datetime.fromisoformat(previous.replace("Z", "+00:00"))
+                    if (current.astimezone(timezone.utc) - last).total_seconds() < intervals[row["timeframe"]]:
+                        continue
+                conn.execute(
+                    "UPDATE live_execution_profiles SET last_scheduled_at=?,updated_at=? WHERE owner_id=?",
+                    (now_text, now_text, row["owner_id"]),
+                )
+                for symbol in json.loads(row["symbols_json"]):
+                    task_id = str(uuid4())
+                    payload = {"owner_id": row["owner_id"], "venue": row["venue"],
+                               "symbol": symbol, "timeframe": row["timeframe"],
+                               "task_id": task_id, "scheduled_by": "eti.live.supervisor"}
+                    conn.execute(
+                        """INSERT INTO agent_tasks
+                        (id,owner_id,workspace_id,requester,target_capability,status,input_json,
+                         max_attempts,created_at,updated_at)
+                        VALUES(?,?,(SELECT id FROM workspaces WHERE owner_id=? ORDER BY created_at LIMIT 1),
+                        'eti.live.supervisor','live.tick','queued',?,2,?,?)""",
+                        (task_id, row["owner_id"], row["owner_id"], _encode_json(payload), now_text, now_text),
+                    )
+                    conn.execute(
+                        "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) VALUES(?,?,NULL,?,?,?)",
+                        (str(uuid4()), row["owner_id"], "live.execution.tick_scheduled",
+                         _encode_json({"task_id": task_id, "venue": row["venue"], "symbol": symbol}), now_text),
+                    )
+                    queued += 1
+        return queued
+
+
+    def list_live_execution_states(self, owner_id: str, venue: str, timeframe: str) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM live_execution_states WHERE owner_id=? AND venue=? AND timeframe=?",
+                (owner_id, venue, timeframe),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_live_execution_account_state(
+        self, owner_id: str, daily_date: str, daily_start_equity: float, peak_equity: float,
+    ) -> dict[str, Any]:
+        owner_id = _required_text(owner_id, "owner_id")
+        daily_date = _required_text(daily_date, "daily_date", 10)
+        for value in (daily_start_equity, peak_equity):
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value <= 0):
+                raise ValueError("live account risk state must contain positive finite equity values")
+        now = _utc_now()
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE live_execution_profiles SET daily_date=?,daily_start_equity=?,peak_equity=?,updated_at=? WHERE owner_id=?",
+                (daily_date, float(daily_start_equity), float(peak_equity), now, owner_id),
+            )
+            if cursor.rowcount != 1:
+                raise LookupError("live execution profile not found")
+        return self.get_live_execution_profile(owner_id)
+
+    def get_live_execution_state(
+        self, owner_id: str, venue: str, symbol: str, timeframe: str
+    ) -> dict[str, Any]:
+        owner_id = _required_text(owner_id, "owner_id")
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM live_execution_states WHERE owner_id=? AND venue=? AND symbol=? AND timeframe=?",
+                (owner_id, venue, symbol, timeframe),
+            ).fetchone()
+        if row is None:
+            return {"owner_id": owner_id, "venue": venue, "symbol": symbol,
+                    "timeframe": timeframe, "last_processed_candle": None,
+                    "position_qty": 0.0, "entry_price": None, "daily_date": None,
+                    "daily_start_equity": 0.0, "peak_equity": 0.0}
+        return dict(row)
+
+    def apply_live_execution_state(
+        self, owner_id: str, venue: str, symbol: str, timeframe: str,
+        candle_at: str, state: dict[str, Any],
+    ) -> bool:
+        owner_id = _required_text(owner_id, "owner_id")
+        candle_at = _required_text(candle_at, "candle_at", 80)
+        required = ("position_qty", "entry_price", "daily_date", "daily_start_equity", "peak_equity")
+        if not isinstance(state, dict) or any(key not in state for key in required):
+            raise ValueError("live execution state is incomplete")
+        for key in ("position_qty", "daily_start_equity", "peak_equity"):
+            value = state[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                raise ValueError("live execution state contains invalid numeric values")
+        if state["entry_price"] is not None and (
+            isinstance(state["entry_price"], bool) or not isinstance(state["entry_price"], (int, float))
+            or not math.isfinite(state["entry_price"]) or state["entry_price"] <= 0
+        ):
+            raise ValueError("live execution entry price is invalid")
+        now = _utc_now()
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT last_processed_candle FROM live_execution_states WHERE owner_id=? AND venue=? AND symbol=? AND timeframe=?",
+                (owner_id, venue, symbol, timeframe),
+            ).fetchone()
+            if row and row["last_processed_candle"] and candle_at <= row["last_processed_candle"]:
+                return False
+            conn.execute(
+                """INSERT INTO live_execution_states
+                (owner_id,venue,symbol,timeframe,last_processed_candle,position_qty,entry_price,
+                 daily_date,daily_start_equity,peak_equity,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(owner_id,venue,symbol,timeframe) DO UPDATE SET
+                last_processed_candle=excluded.last_processed_candle,
+                position_qty=excluded.position_qty,entry_price=excluded.entry_price,
+                daily_date=excluded.daily_date,daily_start_equity=excluded.daily_start_equity,
+                peak_equity=excluded.peak_equity,updated_at=excluded.updated_at""",
+                (owner_id, venue, symbol, timeframe, candle_at, float(state["position_qty"]),
+                 state["entry_price"], state["daily_date"], float(state["daily_start_equity"]),
+                 float(state["peak_equity"]), now),
+            )
+        return True
+
+    def create_live_order_intent(
+        self, owner_id: str, venue: str, symbol: str, side: str,
+        amount: float, client_order_id: str,
+    ) -> tuple[dict[str, Any], bool]:
+        owner_id = _required_text(owner_id, "owner_id")
+        if venue not in {"binance", "mexc"} or side not in {"buy", "sell"}:
+            raise ValueError("invalid live order venue or side")
+        if (isinstance(amount, bool) or not isinstance(amount, (int, float))
+                or not math.isfinite(amount) or amount <= 0):
+            raise ValueError("live order amount must be positive and finite")
+        client_order_id = _required_text(client_order_id, "client_order_id", 40)
+        now, order_id = _utc_now(), str(uuid4())
+        created = False
+        with self._connection() as conn:
+            conn.execute(
+                """INSERT OR IGNORE INTO live_orders
+                (id,owner_id,venue,symbol,side,amount,client_order_id,exchange_order_id,status,
+                 filled,average,cost,result_json,created_at,updated_at)
+                VALUES(?,?,?,?,?,?,?,NULL,'submitting',0,NULL,NULL,'{}',?,?)""",
+                (order_id, owner_id, venue, symbol, side, float(amount), client_order_id, now, now),
+            )
+            row = conn.execute(
+                "SELECT * FROM live_orders WHERE owner_id=? AND client_order_id=?",
+                (owner_id, client_order_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("client order id collision")
+            created = row["id"] == order_id
+        return self._live_order_dict(row), created
+
+    @staticmethod
+    def _live_order_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"], "owner_id": row["owner_id"], "venue": row["venue"],
+            "symbol": row["symbol"], "side": row["side"], "amount": row["amount"],
+            "client_order_id": row["client_order_id"], "exchange_order_id": row["exchange_order_id"],
+            "status": row["status"], "filled": row["filled"], "average": row["average"],
+            "cost": row["cost"], "result": json.loads(row["result_json"]),
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+        }
+
+    def update_live_order(
+        self, owner_id: str, client_order_id: str, status: str,
+        exchange_order_id: str | None = None, filled: float = 0.0,
+        average: float | None = None, cost: float | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        owner_id = _required_text(owner_id, "owner_id")
+        client_order_id = _required_text(client_order_id, "client_order_id", 40)
+        if status not in {"submitting", "open", "closed", "canceled", "rejected", "unknown"}:
+            raise ValueError("invalid live order status")
+        for value in (filled, average, cost):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0):
+                raise ValueError("live order result contains invalid numeric values")
+        now = _utc_now()
+        with self._connection() as conn:
+            cursor = conn.execute(
+                """UPDATE live_orders SET status=?,exchange_order_id=COALESCE(?,exchange_order_id),
+                filled=?,average=?,cost=?,result_json=?,updated_at=?
+                WHERE owner_id=? AND client_order_id=?""",
+                (status, exchange_order_id, float(filled), average, cost,
+                 _encode_json(result or {}), now, owner_id, client_order_id),
+            )
+            if cursor.rowcount != 1:
+                raise LookupError("live order not found")
+            row = conn.execute(
+                "SELECT * FROM live_orders WHERE owner_id=? AND client_order_id=?",
+                (owner_id, client_order_id),
+            ).fetchone()
+        return self._live_order_dict(row)
+
+    def get_live_order(self, owner_id: str, client_order_id: str) -> dict[str, Any] | None:
+        owner_id = _required_text(owner_id, "owner_id")
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM live_orders WHERE owner_id=? AND client_order_id=?",
+                (owner_id, client_order_id),
+            ).fetchone()
+        return self._live_order_dict(row) if row else None
+
+    def list_live_orders(self, owner_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be between 1 and 500")
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM live_orders WHERE owner_id=? ORDER BY created_at DESC LIMIT ?",
+                (owner_id, limit),
+            ).fetchall()
+        return [self._live_order_dict(row) for row in rows]

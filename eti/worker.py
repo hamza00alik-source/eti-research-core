@@ -15,7 +15,9 @@ from typing import Any
 from uuid import uuid4
 
 from .agents import AgentCapabilityRegistry, default_capabilities
+from .artifacts import ModelArtifactStore
 from .paper import run_paper_tick
+from .execution import run_live_tick
 from .storage import MemoryStore
 
 
@@ -30,6 +32,8 @@ class AgentWorker:
         self.registry = registry or default_capabilities()
         if "paper.tick" not in self.registry.capabilities():
             self.registry.register("paper.tick", lambda payload: run_paper_tick(payload, self.store))
+        if "live.tick" not in self.registry.capabilities():
+            self.registry.register("live.tick", lambda payload: run_live_tick(payload, self.store))
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be an integer from 5 to 3600")
         self.lease_seconds = lease_seconds
@@ -99,7 +103,7 @@ class AgentWorker:
                          separators=(",", ":")), flush=True)
 
     def _register_model_candidate(self, result: dict[str, Any]) -> dict[str, Any]:
-        """Register a trained artifact as a candidate; never approve or promote it."""
+        """Register candidates and promote only after independent quality and artifact verification."""
         artifact = result.get("candidate_artifact") or {}
         schema = result.get("input_schema") or {}
         digest = artifact.get("artifact_sha256")
@@ -126,24 +130,39 @@ class AgentWorker:
             registered = self.store.get_model_version(model_id, version)
             if not registered or registered.get("artifact_sha256") != digest:
                 raise
+        auto_approved = False
+        if evaluation["passed"] and calibration_status == "calibrated" and registered["lifecycle"] == "candidate":
+            # The promotion authority is a deterministic server quality gate, not the model itself.
+            artifact_model = ModelArtifactStore().load_model(uri, digest)
+            trained_features = getattr(getattr(artifact_model, "estimator", None), "feature_names_in_", None)
+            expected_features = schema.get("features")
+            if (not isinstance(expected_features, list) or trained_features is None
+                    or [str(name) for name in trained_features] != expected_features
+                    or not artifact_model.has_valid_calibration()):
+                raise ValueError("candidate artifact failed independent feature-schema or calibration verification")
+            registered = self.store.approve_model_version(model_id, version, "eti.quality_gate")
+            auto_approved = True
         result["registry"] = {
             "model_id": registered["model_id"],
             "version": registered["version"],
             "lifecycle": registered["lifecycle"],
             "evaluation_passed": evaluation["passed"],
-            "approval_required": True,
+            "approval_required": registered["lifecycle"] != "approved",
+            "promotion_authority": "eti.quality_gate" if auto_approved else None,
         }
         result["lifecycle"] = registered["lifecycle"]
         return result
 
     def run_once(self) -> dict[str, Any] | None:
-        # The supervisor autonomously seeds owner-enabled research schedules.
-        # This only creates public-data research tasks; order execution is not registered.
+        # Seed public research, simulated paper and owner-authorized live spot tasks.
+        # Live orders are reachable only through the supervisor-gated live.tick capability.
         scheduled = self.store.enqueue_due_autonomy_tasks()
         paper_scheduled = self.store.enqueue_due_paper_tasks()
-        if scheduled or paper_scheduled:
+        live_scheduled = self.store.enqueue_due_live_execution_tasks()
+        if scheduled or paper_scheduled or live_scheduled:
             print(json.dumps({"event": "autonomy.tasks_scheduled",
-                              "research_tasks": scheduled, "paper_tasks": paper_scheduled},
+                              "research_tasks": scheduled, "paper_tasks": paper_scheduled,
+                              "live_tasks": live_scheduled},
                              separators=(",", ":")), flush=True)
         self.store.record_agent_worker_heartbeat(self.worker_id, self.registry.capabilities())
         task = self.store.claim_next_agent_task(lease_seconds=self.lease_seconds)
@@ -166,7 +185,14 @@ class AgentWorker:
         )
         error_type = None
         try:
-            result = self.registry.execute(capability, task["input"])
+            task_input = task["input"]
+            if capability == "live.tick":
+                if (task.get("requester") != "eti.live.supervisor"
+                        or not isinstance(task_input, dict)
+                        or task_input.get("scheduled_by") != "eti.live.supervisor"):
+                    raise ValueError("live execution tasks must be created by the owner-authorized supervisor")
+                task_input = {**task_input, "owner_id": task["owner_id"], "task_id": task["id"]}
+            result = self.registry.execute(capability, task_input)
             if capability == "model.train_research":
                 result = self._register_model_candidate(result)
             status, retryable = "completed", False

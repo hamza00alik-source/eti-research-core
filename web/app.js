@@ -210,6 +210,48 @@ async function loadExchangeCredentials(){
  }catch(error){list.textContent='Exchange connection list unavailable: '+error.message}
 }
 
+async function loadLiveExecution(){
+ const status=$('#live-execution-status'),form=$('#live-execution-form');
+ if(!form)return;
+ try{
+  const data=await api('/v1/execution/profile'),profile=data.profile;
+  if(profile){
+   form.elements.venue.value=profile.venue;
+   form.elements.timeframe.value=profile.timeframe;
+   form.elements.symbols.value=profile.symbols.join(', ');
+   form.elements.capital_allocation_usdt.value=profile.capital_allocation_usdt;
+   const risk=profile.risk_config;
+   form.elements.max_risk_per_trade.value=(risk.max_risk_per_trade*100).toFixed(1);
+   form.elements.max_position_fraction.value=(risk.max_position_fraction*100).toFixed(0);
+   form.elements.max_gross_exposure.value=(risk.max_gross_exposure*100).toFixed(0);
+   form.elements.max_daily_loss.value=(risk.max_daily_loss*100).toFixed(1);
+   form.elements.max_drawdown.value=(risk.max_drawdown*100).toFixed(1);
+   form.elements.confidence_threshold.value=(risk.confidence_threshold*100).toFixed(0);
+  }
+  const enabled=Boolean(profile&&profile.enabled);
+  status.textContent=enabled
+   ?'LIVE TRADING AUTHORIZED · ETI manages entries and exits automatically within your saved limits. No per-trade approval is required.'
+   :profile?'Settings saved · live trading is disabled until you authorize once.':'Live trading is disabled. Save your watchlist and risk limits to continue.';
+  form.querySelectorAll('input,select,button').forEach(el=>el.disabled=enabled);
+  $('#authorize-live-execution').disabled=!profile||enabled;
+  $('#live-kill-switch').hidden=!enabled;
+  ['confirm-live-trading','confirm-spot-permission','confirm-withdrawals-disabled','confirm-ip-restrictions'].forEach(id=>{
+   const input=$('#'+id);input.checked=false;input.disabled=enabled;input.parentElement.hidden=enabled;
+  });
+  const orders=await api('/v1/execution/orders');
+  const list=$('#live-order-list');list.replaceChildren();
+  if(!orders.items.length){list.textContent='No live orders recorded.'}
+  else{
+   for(const order of orders.items){
+    const row=document.createElement('div');row.className='exchange-credential-item';
+    const label=document.createElement('span');
+    label.textContent=order.symbol+' · '+order.side.toUpperCase()+' · '+order.status.toUpperCase()+' · filled '+Number(order.filled||0);
+    row.append(label);list.append(row);
+   }
+  }
+ }catch(error){status.textContent='Live execution controls unavailable: '+error.message}
+}
+
 async function loadWorkspaces(){
  await loadCapabilities();
  const data=await api('/v1/workspaces');
@@ -229,6 +271,7 @@ async function loadWorkspaces(){
  }
  await loadModels();
  await loadExchangeCredentials();
+ await loadLiveExecution();
 }
 async function loadWorkspaceData(){
  if(!activeWorkspace)return;
@@ -352,6 +395,53 @@ $('#model-retire-form').addEventListener('submit',async event=>{
   await loadModels();
  }catch(error){$('#model-message').textContent='Retirement failed: '+error.message}
 });
+$('#live-execution-form')?.addEventListener('submit',async event=>{
+ event.preventDefault();
+ const form=event.currentTarget,values=new FormData(form),button=form.querySelector('button[type="submit"]');
+ button.disabled=true;$('#live-execution-status').textContent='Saving live trading limits…';
+ try{
+  const symbols=String(values.get('symbols')).split(',').map(value=>value.trim()).filter(Boolean);
+  const result=await api('/v1/execution/profile',{method:'PUT',body:JSON.stringify({
+   venue:values.get('venue'),symbols,timeframe:values.get('timeframe'),
+   capital_allocation_usdt:Number(values.get('capital_allocation_usdt')),
+   max_risk_per_trade:Number(values.get('max_risk_per_trade'))/100,
+   max_position_fraction:Number(values.get('max_position_fraction'))/100,
+   max_gross_exposure:Number(values.get('max_gross_exposure'))/100,
+   max_daily_loss:Number(values.get('max_daily_loss'))/100,
+   max_drawdown:Number(values.get('max_drawdown'))/100,
+   confidence_threshold:Number(values.get('confidence_threshold'))/100
+  })});
+  $('#live-execution-status').textContent=result.note;await loadLiveExecution();
+ }catch(error){$('#live-execution-status').textContent='Could not save live settings: '+error.message}
+ finally{button.disabled=$('#live-execution-status').textContent.startsWith('LIVE TRADING AUTHORIZED')}
+});
+$('#authorize-live-execution')?.addEventListener('click',async()=>{
+ const confirmations={
+  confirm_live_trading:$('#confirm-live-trading').checked,
+  confirm_spot_trading_permission:$('#confirm-spot-permission').checked,
+  confirm_withdrawals_disabled:$('#confirm-withdrawals-disabled').checked,
+  confirm_ip_restrictions:$('#confirm-ip-restrictions').checked
+ };
+ if(!confirmations.confirm_live_trading||!confirmations.confirm_spot_trading_permission||!confirmations.confirm_withdrawals_disabled){
+  $('#live-execution-status').textContent='Complete all four one-time safety confirmations first.';return;
+ }
+ if(!window.confirm('Authorize ETI to place real Binance/MEXC spot orders automatically within your saved capital and risk limits? Individual trades will not require confirmation.'))return;
+ const button=$('#authorize-live-execution');button.disabled=true;
+ try{
+  const result=await api('/v1/execution/authorize',{method:'POST',body:JSON.stringify(confirmations)});
+  $('#live-execution-status').textContent=result.note;await loadLiveExecution();
+ }catch(error){$('#live-execution-status').textContent='Live authorization failed: '+error.message;button.disabled=false}
+});
+$('#live-kill-switch')?.addEventListener('click',async()=>{
+ if(!window.confirm('Stop all new ETI live trading tasks immediately? Open exchange orders may still need reconciliation at the exchange.'))return;
+ const button=$('#live-kill-switch');button.disabled=true;
+ try{
+  const result=await api('/v1/execution/kill-switch',{method:'POST'});
+  $('#live-execution-status').textContent=result.message;await loadLiveExecution();
+ }catch(error){$('#live-execution-status').textContent='Kill switch failed: '+error.message}
+ finally{button.disabled=false}
+});
+
 $('#exchange-credential-form')?.addEventListener('submit',async event=>{
  event.preventDefault();
  const formElement=event.currentTarget,form=new FormData(formElement);
