@@ -344,6 +344,48 @@ class MemoryStore:
                                  now_text),
                             )
                             queued += 1
+                training_enabled = bool(row["model_training_enabled"])
+                training_previous = row["last_model_training_at"]
+                training_due = training_enabled and (
+                    not training_previous or
+                    (current.astimezone(timezone.utc) - datetime.fromisoformat(
+                        training_previous.replace("Z", "+00:00")
+                    )).total_seconds() >= row["model_training_interval_seconds"]
+                )
+                if training_due:
+                    conn.execute(
+                        "UPDATE autonomy_profiles SET last_model_training_at=?, updated_at=? WHERE owner_id=?",
+                        (now_text, now_text, row["owner_id"]),
+                    )
+                    for venue in venues:
+                        for symbol in symbols:
+                            for timeframe in timeframes:
+                                task_id = str(uuid4())
+                                payload = {
+                                    "venue": venue, "symbol": symbol,
+                                    "timeframe": timeframe, "limit": 3000, "horizon": 6,
+                                    "scheduled_by": "eti.autonomy.model_training",
+                                }
+                                conn.execute(
+                                    """INSERT INTO agent_tasks
+                                    (id,owner_id,workspace_id,requester,target_capability,status,input_json,
+                                     max_attempts,created_at,updated_at)
+                                    VALUES(?,?,?,?,?,'queued',?,2,?,?)""",
+                                    (task_id, row["owner_id"], row["workspace_id"],
+                                     "eti.autonomy.model_training", "model.train_research",
+                                     _encode_json(payload), now_text, now_text),
+                                )
+                                conn.execute(
+                                    """INSERT INTO audit_events
+                                    (id,owner_id,workspace_id,event_type,payload_json,created_at)
+                                    VALUES(?,?,?,?,?,?)""",
+                                    (str(uuid4()), row["owner_id"], row["workspace_id"],
+                                     "autonomy.model_training.scheduled",
+                                     _encode_json({"task_id": task_id, "venue": venue,
+                                                   "symbol": symbol, "timeframe": timeframe}),
+                                     now_text),
+                                )
+                                queued += 1
         return queued
 
     def record_agent_worker_heartbeat(
