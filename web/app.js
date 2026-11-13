@@ -581,6 +581,48 @@ if('serviceWorker'in navigator){
  window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 }
 
+// Authenticated public market-universe discovery and research task queue.
+(()=>{
+ const button=$('#universe-discover');if(!button)return;
+ const status=$('#universe-status'),results=$('#universe-results');
+ const make=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
+ button.addEventListener('click',async()=>{
+  const venue=$('#universe-venue').value,marketType=$('#universe-market-type').value,limit=$('#universe-limit').value;
+  button.disabled=true;status.textContent='Loading public exchange market catalogue…';results.replaceChildren();
+  try{
+   const data=await api('/v1/markets/discover?'+new URLSearchParams({venue,market_type:marketType,limit}));
+   status.textContent=data.instrument_count+' instruments discovered · '+data.discovery_source;
+   data.instruments.forEach(item=>{
+    const card=make('article','task-item');
+    const title=make('strong','',item.symbol+' · '+(item.base||'')+'/'+(item.quote||''));
+    const meta=make('p','muted',[item.market_type,item.linear?'linear':'',item.expiry?'expiry '+new Date(item.expiry).toLocaleDateString():'',item.quote_volume===null?'volume unavailable':'quote volume '+Number(item.quote_volume).toLocaleString()].filter(Boolean).join(' · '));
+    const actions=make('div','chart-toolbar');
+    const queue=make('button','secondary-button','Queue research snapshot');
+    queue.type='button';queue.addEventListener('click',async()=>{
+     if(!activeWorkspace){status.textContent='Create or select a workspace before queuing research.';return}
+     queue.disabled=true;
+     try{const task=await api('/v1/workspaces/'+encodeURIComponent(activeWorkspace)+'/agents/tasks',{method:'POST',body:JSON.stringify({target_capability:'market.snapshot',input:{venue,asset_class:'crypto',market_type:marketType,symbol:item.symbol,timeframe:'1h',limit:200,scheduled_by:'manual.market.discovery'},max_attempts:2})});queue.textContent='Queued · '+task.id.slice(0,8)}
+     catch(error){queue.disabled=false;status.textContent='Could not queue '+item.symbol+': '+error.message}
+    });
+    actions.append(queue);
+    if(marketType==='swap'||marketType==='future'){
+     const context=make('button','secondary-button','Funding / OI data');context.type='button';
+     context.addEventListener('click',async()=>{
+      context.disabled=true;context.textContent='Loading…';
+      try{const report=await api('/v1/markets/derivatives/context?'+new URLSearchParams({venue,market_type:marketType,symbol:item.symbol,timeframe:'1h',limit:'100'}));
+       const pre=make('pre','task-result',JSON.stringify(report,null,2));card.append(pre);context.textContent='Refresh funding / OI';}
+      catch(error){context.textContent='Data unavailable';status.textContent=item.symbol+': '+error.message}
+      finally{context.disabled=false}
+     });actions.append(context);
+    }
+    card.append(title,meta,actions);results.append(card);
+   });
+   if(!data.instrument_count)status.textContent='No active matching instruments returned by this exchange.';
+  }catch(error){status.textContent='Market discovery failed: '+error.message}
+  finally{button.disabled=false}
+ });
+})();
+
 // Live public Binance spot chart. No API keys or trading permissions are used.
 (()=>{
  const canvas=$('#market-chart');
