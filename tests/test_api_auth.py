@@ -268,8 +268,10 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
     monkeypatch.setenv("ETI_ADMIN_USERNAMES", "trainer_admin,reviewer_admin")
 
     class StubModel:
+        probabilities = [0.2, 0.5, 0.3]
+
         def predict_proba(self, frame):
-            return np.array([[0.2, 0.5, 0.3]])
+            return np.array([self.probabilities])
 
     monkeypatch.setattr(
         ModelArtifactStore, "load_model",
@@ -326,3 +328,25 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
             json={"asset_class": "crypto_spot", "features": {"feature_a": 1.0}},
         )
         assert wrong_schema.status_code == 422
+
+        non_finite_input = client.post(
+            "/v1/inference/eti-inference-test/0.1.0",
+            headers=user_headers,
+            json={"asset_class": "crypto_spot",
+                  "features": {"feature_a": float("nan"), "feature_b": 0.7}},
+        )
+        assert non_finite_input.status_code == 422
+
+        StubModel.probabilities = [0.2, 0.2, 0.2]
+        invalid_distribution = client.post(
+            "/v1/inference/eti-inference-test/0.1.0",
+            headers=user_headers, json=body,
+        )
+        assert invalid_distribution.status_code == 503
+
+        StubModel.probabilities = [0.2, float("nan"), 0.8]
+        non_finite_output = client.post(
+            "/v1/inference/eti-inference-test/0.1.0",
+            headers=user_headers, json=body,
+        )
+        assert non_finite_output.status_code == 503
