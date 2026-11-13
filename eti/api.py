@@ -67,7 +67,6 @@ class AgentTaskPayload(BaseModel):
     input: Any
     deadline_at: str | None = Field(default=None, max_length=40)
     max_attempts: int = Field(default=3, ge=1, le=10)
-    max_attempts: int = Field(default=3, ge=1, le=10)
 
 
 class AgentTaskUpdatePayload(BaseModel):
