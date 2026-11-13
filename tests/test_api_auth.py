@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from eti.api import app
 
 
-def _register(client, username, invite="private-invite-code"):
+def _register(client, username, invite="private-invite-code-123456"):
     response = client.post("/v1/auth/register", json={
         "username": username,
         "password": "a-long-password-123",
