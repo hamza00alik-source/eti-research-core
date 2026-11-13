@@ -195,3 +195,42 @@ def test_model_retirement_is_guarded_and_registry_is_queryable(tmp_path):
     retired = store.retire_model_version("eti-core", "1.0")
     assert retired["lifecycle"] == "retired"
     assert store.list_model_versions("retired")[0]["version"] == "1.0"
+
+
+def test_agent_worker_leases_are_atomic_and_recover_after_expiry(tmp_path):
+    store = MemoryStore(tmp_path / "worker.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    task = store.create_agent_task(
+        "owner", workspace["id"], "user", "test.echo", {"value": 7}, max_attempts=2
+    )
+
+    first = store.claim_next_agent_task(lease_seconds=5, now=100)
+    assert first["id"] == task["id"]
+    assert first["status"] == "running"
+    assert first["attempt_count"] == 1
+    assert first["lease_expires_at"].startswith("1970-01-01T00:01:45")
+
+    second = store.claim_next_agent_task(lease_seconds=5, now=106)
+    assert second["id"] == task["id"]
+    assert second["attempt_count"] == 2
+    assert second["status"] == "running"
+
+    assert store.claim_next_agent_task(lease_seconds=5, now=112) is None
+    final = store.get_agent_task("owner", workspace["id"], task["id"])
+    assert final["status"] == "failed"
+    assert final["attempt_count"] == 2
+    assert final["result"]["error"] == "worker lease expired"
+
+
+def test_agent_task_claims_are_single_owner_under_concurrency(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = MemoryStore(tmp_path / "worker-concurrent.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    tasks = [
+        store.create_agent_task("owner", workspace["id"], "user", "test.echo", {"n": n})
+        for n in range(2)
+    ]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claimed = list(pool.map(lambda _: store.claim_next_agent_task(), range(2)))
+    assert {item["id"] for item in claimed if item is not None} == {t["id"] for t in tasks}
