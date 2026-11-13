@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from eti.agents import AgentCapabilityRegistry, default_capabilities
@@ -116,6 +118,31 @@ def test_exhausted_expired_lease_becomes_failed(tmp_path):
     current = store.get_agent_task("owner-1", workspace["id"], task["id"])
     assert current["status"] == "failed"
     assert current["result"]["error"] == "worker lease expired"
+
+
+def test_worker_renews_lease_during_long_running_capability(tmp_path):
+    store = MemoryStore(tmp_path / "long-running.sqlite3")
+    workspace = _workspace(store)
+    store.create_agent_task(
+        "owner-1", workspace["id"], "test.requester", "test.slow",
+        {"value": 9}, max_attempts=2,
+    )
+    registry = AgentCapabilityRegistry()
+
+    def slow(payload):
+        # Longer than the 5-second lease; the worker must renew it in flight.
+        time.sleep(6.2)
+        return {"value": payload["value"]}
+
+    registry.register("test.slow", slow)
+    worker = AgentWorker(store, registry=registry, lease_seconds=5)
+
+    result = worker.run_once()
+
+    assert result is not None
+    assert result["status"] == "completed"
+    assert result["attempt_count"] == 1
+    assert result["result"] == {"value": 9}
 
 
 def test_worker_registers_model_training_result_as_unapproved_candidate(tmp_path):
