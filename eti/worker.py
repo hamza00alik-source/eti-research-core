@@ -105,6 +105,54 @@ class AgentWorker:
                           "symbol": payload["symbol"], "timeframe": payload["timeframe"]},
                          separators=(",", ":")), flush=True)
 
+    def _enqueue_discovered_model_training(
+        self, task: dict[str, Any], result: dict[str, Any]
+    ) -> None:
+        """Queue one top-ranked instrument for training after scheduled discovery."""
+        task_input = task.get("input")
+        if (task.get("target_capability") != "market.discover"
+                or task.get("requester") != "eti.autonomy.model_training"
+                or not isinstance(task_input, dict)
+                or task_input.get("scheduled_by") != "eti.autonomy.model_training"):
+            return
+        instruments = result.get("instruments") if isinstance(result, dict) else None
+        if not isinstance(instruments, list) or not instruments:
+            self._log_event("autonomy.market_discovery.no_eligible_instruments",
+                            task_id=task["id"])
+            return
+        # Provider returns highest public quote-volume first where supported.
+        selected = instruments[0]
+        symbol = selected.get("symbol") if isinstance(selected, dict) else None
+        venue = selected.get("venue") if isinstance(selected, dict) else None
+        asset_class = selected.get("asset_class") if isinstance(selected, dict) else None
+        market_type = selected.get("market_type") if isinstance(selected, dict) else None
+        if not all(isinstance(value, str) and value for value in (symbol, venue, asset_class, market_type)):
+            raise ValueError("market discovery returned an incomplete instrument record")
+        existing = self.store.list_agent_tasks(
+            task["owner_id"], task["workspace_id"], limit=500
+        )
+        if any(
+            item.get("input", {}).get("source_discovery_task_id") == task["id"]
+            for item in existing
+        ):
+            return
+        payload = {
+            "venue": venue, "asset_class": asset_class, "market_type": market_type,
+            "symbol": symbol, "timeframe": task_input.get("timeframe", "1h"),
+            "limit": 3000, "horizon": 6,
+            "scheduled_by": "eti.autonomy.model_training",
+            "source_discovery_task_id": task["id"],
+        }
+        queued = self.store.create_agent_task(
+            task["owner_id"], task["workspace_id"], "eti.autonomy.model_training",
+            "model.train_research", payload, max_attempts=2,
+        )
+        self._log_event(
+            "autonomy.discovered_model_training_queued",
+            discovery_task_id=task["id"], training_task_id=queued["id"],
+            venue=venue, asset_class=asset_class, market_type=market_type, symbol=symbol,
+        )
+
     def _register_model_candidate(self, result: dict[str, Any]) -> dict[str, Any]:
         """Register candidates and promote only after independent quality and artifact verification."""
         artifact = result.get("candidate_artifact") or {}
@@ -266,6 +314,7 @@ class AgentWorker:
         if status == "completed":
             try:
                 self._enqueue_strategy_followup(task)
+                self._enqueue_discovered_model_training(task, result)
             except Exception:
                 print("ETI_STRATEGY_FOLLOWUP_ENQUEUE_FAILED", flush=True)
         return updated
