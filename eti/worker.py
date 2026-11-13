@@ -22,7 +22,7 @@ class AgentWorker:
         self,
         store: MemoryStore | None = None,
         registry: AgentCapabilityRegistry | None = None,
-        lease_seconds: int = 120,
+        lease_seconds: int = 3600,
     ):
         self.store = store or MemoryStore()
         self.registry = registry or default_capabilities()
@@ -169,7 +169,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the ETI durable agent worker")
     parser.add_argument("--once", action="store_true", help="claim and process at most one task")
     parser.add_argument("--poll-seconds", type=float, default=2.0)
-    parser.add_argument("--lease-seconds", type=int, default=120)
+    parser.add_argument("--lease-seconds", type=int, default=3600)
     args = parser.parse_args()
     worker = AgentWorker(lease_seconds=args.lease_seconds)
     if args.once:
