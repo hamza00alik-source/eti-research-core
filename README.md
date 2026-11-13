@@ -6,7 +6,7 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 
 - Live spot execution is available but disabled by default. It requires owner-managed credentials, saved capital/risk limits and explicit one-time owner authorization; no per-trade approval is required.
 - Live execution remains Binance/MEXC spot only and disabled by default. Research data now distinguishes crypto spot, perpetual swaps and dated futures where each exchange lists the requested contract. Derivative execution is not implemented.
-- Forex, equities, indices and commodities can be researched from validated user-supplied OHLCV CSV files; live providers for those asset classes are not yet connected.
+- Public Yahoo Finance OHLCV research adapter is available for forex, equities, indices and commodities (Yahoo ticker notation such as EURUSD=X, AAPL, ^GSPC and GC=F). This is public market-data access, not an authenticated broker feed; history and interval coverage vary. Validated CSV remains available as a fallback.
 - Derivative candidate training is exploratory: long/short price-only evaluation is available, but funding history, open interest, liquidation data and contract-specific margin/fee schedules are missing. A quality gate prevents derivative candidates from passing approval until funding history is supported.
 - Training is not automatic: model fitting is an explicit CLI action and is not part of startup or CI.
 - No profitability claim: backtests do not establish future performance.
@@ -36,7 +36,7 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 | Layer | Current state |
 |---|---|
 | Core | Modular configuration, provider interface and documented service boundaries |
-| Market data | Public OHLCV for Binance/MEXC spot, swaps and dated futures where listed; completed-candle filtering; validated CSV input for crypto, forex, equities, commodities and indices |
+| Market data | Public OHLCV for Binance/MEXC spot, swaps and dated futures where listed; Yahoo Finance public OHLCV for forex, equities, commodities and indices; validated CSV input |
 | Market catalog | Canonical venue-independent instrument specifications and filtered instrument catalog; live public OHLCV currently supports crypto spot/swaps/dated futures where listed |
 | Adapter registry | Venue adapters advertise asset-class/market-type capabilities; unsupported combinations fail closed |
 | Quantitative | Causal technical features, MA and momentum baselines |
@@ -83,7 +83,7 @@ Open `http://localhost:8000`; health check is `/health`.
 
 ## Existing research workflow
 
-Training remains an explicit CLI action and is not started by API startup or CI. No live order placement endpoints exist. Current live public crypto OHLCV discovery supports spot, swaps and dated futures on Binance/MEXC only where each venue lists the requested market. Forex, equities, commodities and indices are available through validated local CSV OHLCV data; live providers are not connected. Derivative research does not yet include funding-history, open-interest or liquidation datasets and derivative candidates are blocked from approval.
+Training remains an explicit CLI action and is not started by API startup or CI. No live order placement endpoints exist. Public crypto OHLCV supports spot, swaps and dated futures on Binance/MEXC only where each venue lists the requested market. Yahoo Finance public OHLCV supports forex, equities, commodities and indices with ticker and interval coverage limits; authenticated broker feeds are not connected. Derivative research does not yet include complete funding-history, open-interest, liquidation, financing, roll or contract-cost datasets, and unsupported-cost candidates are blocked from approval.
 
 The model registry stores immutable version metadata and checksums, not model binaries. A separate allowlisted worker can execute the first deterministic public-market research capability; this is not yet a general LLM agent network. The PWA remains an undeployed frontend shell until a backend and HTTPS host are configured.
 
