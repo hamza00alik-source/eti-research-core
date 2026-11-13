@@ -1830,7 +1830,7 @@ class MemoryStore:
                         """INSERT INTO agent_tasks
                         (id,owner_id,workspace_id,requester,target_capability,status,input_json,
                          max_attempts,created_at,updated_at)
-                        VALUES(?,?,(SELECT workspace_id FROM autonomy_profiles WHERE owner_id=?),
+                        VALUES(?,?,(SELECT id FROM workspaces WHERE owner_id=? ORDER BY created_at LIMIT 1),
                         'eti.live.supervisor','live.tick','queued',?,2,?,?)""",
                         (task_id, row["owner_id"], row["owner_id"], _encode_json(payload), now_text, now_text),
                     )
@@ -1922,8 +1922,11 @@ class MemoryStore:
                 (order_id, owner_id, venue, symbol, side, float(amount), client_order_id, now, now),
             )
             row = conn.execute(
-                "SELECT * FROM live_orders WHERE client_order_id=?", (client_order_id,)
+                "SELECT * FROM live_orders WHERE owner_id=? AND client_order_id=?",
+                (owner_id, client_order_id),
             ).fetchone()
+            if row is None:
+                raise ValueError("client order id collision")
             created = row["id"] == order_id
         return self._live_order_dict(row), created
 
