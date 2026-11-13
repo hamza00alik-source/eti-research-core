@@ -70,28 +70,43 @@ def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h")
 
 
 def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[BaselineModel, dict]:
-    """Fit one explicit export candidate on all completed labelled rows.
+    """Fit on earlier rows and calibrate only on a later, held-out time segment.
 
-    This function is called only when the CLI receives --save-model. Evaluation
-    has already completed; this final fit is intended for later paper inference.
+    The final export is opt-in. The calibration window is never used to fit the
+    classifier, preventing in-sample confidence estimates from being treated as
+    calibration evidence.
     """
     frame = validate_ohlcv(frame)
     features = build_features(frame)
     labels = make_labels(frame, horizon=horizon)
     dataset = features.join(labels.rename("label")).dropna()
-    if len(dataset) < 200:
-        raise ValueError(f"Need at least 200 usable rows to export a model; got {len(dataset)}")
-    x = dataset[FEATURE_COLUMNS]
-    y = dataset["label"].astype(int)
-    if len(np.unique(y)) < 2:
-        raise ValueError("Export dataset contains fewer than two classes")
-    model = BaselineModel().fit(x, y)
+    if len(dataset) < 250:
+        raise ValueError(
+            f"Need at least 250 usable rows for a 200-row fit and 30-row calibration; got {len(dataset)}"
+        )
+    split = int(len(dataset) * 0.8)
+    training = dataset.iloc[:split]
+    calibration = dataset.iloc[split:]
+    if len(training) < 200 or len(calibration) < 30:
+        raise ValueError("Export split must contain at least 200 training and 30 calibration rows")
+
+    x_train = training[FEATURE_COLUMNS]
+    y_train = training["label"].astype(int)
+    model = BaselineModel().fit(x_train, y_train)
+    calibration_report = model.fit_temperature_calibration(
+        calibration[FEATURE_COLUMNS], calibration["label"].astype(int)
+    )
     schema = {
         "features": list(FEATURE_COLUMNS),
         "feature_version": "eti.features.v1",
-        "training_rows": int(len(dataset)),
-        "training_end": dataset.index[-1].isoformat() if hasattr(dataset.index[-1], "isoformat") else str(dataset.index[-1]),
+        "training_rows": int(len(training)),
+        "calibration_rows": int(len(calibration)),
+        "training_end": training.index[-1].isoformat() if hasattr(training.index[-1], "isoformat") else str(training.index[-1]),
+        "calibration_start": calibration.index[0].isoformat() if hasattr(calibration.index[0], "isoformat") else str(calibration.index[0]),
+        "calibration_end": calibration.index[-1].isoformat() if hasattr(calibration.index[-1], "isoformat") else str(calibration.index[-1]),
         "label_horizon_bars": int(horizon),
+        "calibration_status": model.calibration_status,
+        "calibration_report": calibration_report,
     }
     return model, schema
 
@@ -110,8 +125,9 @@ def export_deployable_model(
         "input_schema": input_schema,
         "supported_classes": ["crypto_spot"],
         "training_data_ref": training_data_ref,
-        "calibration_status": "uncalibrated",
-        "note": "Uncalibrated candidate artifact only. Complete calibration, evaluation and independent approval before inference.",
+        "calibration_status": model.calibration_status,
+        "calibration_report": model.calibration_report,
+        "note": "Candidate artifact only. Review evaluation and calibration evidence, then obtain independent approval before inference.",
     }
 
 
