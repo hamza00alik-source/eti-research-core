@@ -503,10 +503,17 @@ $('#task-form').addEventListener('submit',async event=>{
   $('#task-list').textContent='Task input must be a JSON object.';return;
  }
  if(capability==='model.train_research'){
-  if(!['binance','mexc'].includes(input.venue)||!['spot','swap','future'].includes(input.market_type||'spot')||typeof input.symbol!=='string'||!input.symbol.includes('/')||
+  const assetClass=input.asset_class||'crypto';
+  const marketType=input.market_type||'spot';
+  const validAsset=['crypto','forex','equity','commodity','index'].includes(assetClass);
+  const validSymbol=typeof input.symbol==='string'&&input.symbol.trim().length>0&&input.symbol.length<=40&&
+   (assetClass!=='crypto'||input.symbol.includes('/'));
+  const validVenue=assetClass!=='crypto'||['binance','mexc'].includes(input.venue||'mexc');
+  const validMarketType=assetClass==='crypto'?['spot','swap','future'].includes(marketType):['spot','future'].includes(marketType);
+  if(!validAsset||!validSymbol||!validVenue||!validMarketType||
      !['1h','4h','1d'].includes(input.timeframe)||!Number.isInteger(input.limit)||input.limit<1500||input.limit>5000||
      !Number.isInteger(input.horizon)||input.horizon<2||input.horizon>24){
-   $('#task-list').textContent='Model training requires Binance/MEXC, market_type spot/swap/future, a valid CCXT symbol, timeframe 1h/4h/1d, 1500–5000 candles and horizon 2–24. For derivatives, use the exchange-specific unified contract symbol.';
+   $('#task-list').textContent='Training needs an asset_class (crypto/forex/equity/commodity/index), supported market_type, ticker or CCXT symbol, timeframe 1h/4h/1d, 1500–5000 candles and horizon 2–24. Crypto uses Binance/MEXC; other assets use Yahoo tickers such as AAPL, EURUSD=X, GC=F or ^GSPC.';
    return;
   }
  }
@@ -536,7 +543,7 @@ async function loadStatus(){
   ]);
   $('#health').textContent=h.status+' · '+h.mode;
   $('#execution').textContent=e.enabled?'Enabled':'Disabled';
-  $('#markets').textContent=m.asset_classes.join(', ')+' · '+m.venues.join(', ');
+  $('#markets').textContent='Research: '+m.asset_classes.join(', ')+' · execution: '+m.execution_market_types.join(', ');
   $('#providers').textContent=JSON.stringify(p,null,2);
  }catch(err){
   $('#health').textContent='API unavailable';
