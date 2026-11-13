@@ -147,3 +147,10 @@ The PWA also displays the authenticated account's audit trail alongside its work
 - `POST /v1/inference/{model_id}/{version}` serves approved versions only. Requests must specify a supported asset class and exactly the feature names in the registered schema; values and returned probabilities are validated. Requests are authenticated and rate-limited.
 - Inference returns short/flat/long probabilities only. It does not size a position, approve a trade, bypass the risk engine or place an order.
 - No production model is trained or promoted by this change. The training-to-artifact-to-registry workflow and model drift monitoring remain to be completed before paper autonomy.
+
+
+## Account data portability and workspace deletion
+
+- `GET /v1/account/export` returns a JSON export of the authenticated account's workspaces, memory, agent tasks, agent messages and audit history. It excludes password hashes, session signing secrets and other accounts' data.
+- `DELETE /v1/workspaces/{workspace_id}` permanently deletes an owned workspace and its dependent memory, tasks and messages. Audit events are retained with the workspace reference cleared and a `workspace.deleted` event appended.
+- These controls do not delete the account itself, shared model-registry records, or server backups. Account closure and backup-retention policy require a separately defined operational/legal process; do not promise complete erasure from backups until that process is configured.
