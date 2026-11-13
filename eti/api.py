@@ -353,6 +353,21 @@ def _model_admin_usernames() -> set[str]:
     }
 
 
+def _model_has_verified_calibration(model: Any) -> bool:
+    report = getattr(model, "calibration_report", None)
+    temperature = report.get("temperature") if isinstance(report, dict) else None
+    sample_count = report.get("sample_count", 0) if isinstance(report, dict) else 0
+    return (
+        getattr(model, "calibration_status", "uncalibrated") == "calibrated"
+        and isinstance(report, dict)
+        and report.get("passed") is True
+        and report.get("method") == "temperature_scaling"
+        and isinstance(sample_count, int) and sample_count >= 30
+        and isinstance(temperature, (int, float)) and math.isfinite(temperature)
+        and temperature > 0
+    )
+
+
 def _require_model_admin(account: dict[str, str]) -> None:
     if account["username"].lower() not in _model_admin_usernames():
         raise HTTPException(status_code=403, detail="model registry administrator access required")
@@ -422,6 +437,8 @@ def infer_model(model_id: str, version: str, payload: ModelInferencePayload,
         )
     except ModelArtifactError as exc:
         raise HTTPException(status_code=503, detail="approved model artifact is unavailable or invalid") from exc
+    if not _model_has_verified_calibration(model):
+        raise HTTPException(status_code=503, detail="approved model lacks a valid calibration report")
     frame = pd.DataFrame([values], columns=expected)
     try:
         probabilities = [float(value) for value in model.predict_proba(frame)[0]]
@@ -472,9 +489,14 @@ def approve_model(model_id: str, version: str,
     try:
         # Approval is allowed only when the server-owned artifact exists, matches
         # the registered digest and deserializes as a fitted ETI BaselineModel.
-        ModelArtifactStore().load_model(
+        artifact_model = ModelArtifactStore().load_model(
             candidate["artifact_uri"], candidate["artifact_sha256"]
         )
+        if not _model_has_verified_calibration(artifact_model):
+            raise HTTPException(
+                status_code=409,
+                detail="model artifact must contain a passing temperature-calibration report",
+            )
     except ModelArtifactError as exc:
         raise HTTPException(
             status_code=409,
