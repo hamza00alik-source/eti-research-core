@@ -4,11 +4,11 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 
 ## Safety status
 
-- Research-only: no live order placement routes or authenticated exchange actions exist.
+- Research-only: no live order placement routes exist. Owner-only Binance/MEXC credentials can be stored encrypted and tested for private read access; live trading permission and order execution are not enabled.
 - Training is not automatic: model fitting is an explicit CLI action and is not part of startup or CI.
 - No profitability claim: backtests do not establish future performance.
 - Independent risk: model decisions must pass deterministic risk and portfolio checks; defaults disable shorts and leverage above 1x.
-- No API secrets: market discovery uses public CCXT endpoints only.
+- Exchange credentials: owner-only Binance/MEXC keys are encrypted with AES-256-GCM using a server-side key; the API never returns plaintext credentials. Connection verification checks private read access only.
 
 ## Architecture implemented
 
