@@ -301,9 +301,62 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 
+
+def discover_market_universe(payload: dict[str, Any]) -> dict[str, Any]:
+    """Discover currently listed crypto instruments from public exchange metadata."""
+    venue = payload.get("venue", "binance")
+    market_type = payload.get("market_type", "spot")
+    limit = payload.get("limit", 100)
+    if venue not in {"binance", "mexc"}:
+        raise ValueError("venue must be binance or mexc")
+    if market_type not in {"spot", "swap", "future"}:
+        raise ValueError("market_type must be spot, swap, or future")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+        raise ValueError("limit must be an integer from 1 to 500")
+    provider = CcxtPublicProvider(venue, market_type)
+    instruments = provider.discover_markets(limit=limit)
+    return {
+        "kind": "market_universe_discovery",
+        "venue": venue, "asset_class": "crypto", "market_type": market_type,
+        "instrument_count": len(instruments), "instruments": instruments,
+        "discovery_source": "CCXT public exchange market metadata",
+        "limitations": [
+            "Discovery covers only instruments listed by the selected connected public exchange adapter.",
+            "Quote-volume ranking is used only when the venue supplies bulk public tickers; otherwise results are alphabetically ordered.",
+            "Listed instruments are not automatically eligible for training, approval or live execution.",
+        ],
+    }
+
+
+def derivatives_market_context(payload: dict[str, Any]) -> dict[str, Any]:
+    """Collect exchange-reported funding and open-interest data for one derivative."""
+    venue = payload.get("venue", "binance")
+    market_type = payload.get("market_type", "swap")
+    symbol = payload.get("symbol")
+    timeframe = payload.get("timeframe", "1h")
+    limit = payload.get("limit", 100)
+    if venue not in {"binance", "mexc"}:
+        raise ValueError("venue must be binance or mexc")
+    if market_type not in {"swap", "future"}:
+        raise ValueError("market_type must be swap or future")
+    if not isinstance(symbol, str) or not 1 <= len(symbol) <= 40 or "/" not in symbol:
+        raise ValueError("symbol must be a valid CCXT derivative symbol")
+    if timeframe not in {"1h", "4h", "1d"}:
+        raise ValueError("timeframe must be 1h, 4h, or 1d")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+        raise ValueError("limit must be an integer from 1 to 1000")
+    context = CcxtPublicProvider(venue, market_type).fetch_derivatives_context(
+        symbol, timeframe=timeframe, limit=limit
+    )
+    context["kind"] = "derivatives_market_context"
+    context["timeframe"] = timeframe
+    return context
+
 def default_capabilities() -> AgentCapabilityRegistry:
     registry = AgentCapabilityRegistry()
     registry.register("market.snapshot", market_snapshot)
+    registry.register("market.discover", discover_market_universe)
+    registry.register("derivatives.context", derivatives_market_context)
     registry.register("strategy.walk_forward", strategy_walk_forward)
     registry.register("model.train_research", model_training_research)
     return registry
