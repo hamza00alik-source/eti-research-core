@@ -279,3 +279,45 @@ def test_agent_worker_heartbeat_reports_online_and_offline_windows(tmp_path):
     assert online[0]["capabilities"] == ["market.snapshot"]
     offline = store.list_agent_workers(online_window_seconds=60, now=1061)
     assert offline[0]["online"] is False
+
+
+def test_autonomy_profile_schedules_owner_scoped_research_tasks_and_respects_interval(tmp_path):
+    from datetime import datetime, timezone
+    store = MemoryStore(tmp_path / "autonomy.sqlite3")
+    workspace = store.create_workspace("owner-a", "research")
+    profile = store.configure_autonomy(
+        "owner-a", workspace["id"], True,
+        venues=["mexc"], symbols=["BTC/USDT", "ETH/USDT"],
+        timeframes=["1h"], interval_seconds=900,
+    )
+    assert profile["enabled"] is True
+    first_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    assert store.enqueue_due_autonomy_tasks(first_time) == 2
+    assert store.enqueue_due_autonomy_tasks(first_time) == 0
+    assert len(store.list_agent_tasks("owner-a", workspace["id"], status="queued")) == 2
+    assert store.list_agent_tasks("owner-b", workspace["id"]) == []
+    assert store.enqueue_due_autonomy_tasks(
+        datetime(2026, 1, 1, 0, 14, tzinfo=timezone.utc)
+    ) == 0
+    assert store.enqueue_due_autonomy_tasks(
+        datetime(2026, 1, 1, 0, 15, tzinfo=timezone.utc)
+    ) == 2
+
+
+def test_autonomy_can_be_disabled_and_reconfigured(tmp_path):
+    from datetime import datetime, timezone
+    store = MemoryStore(tmp_path / "autonomy.sqlite3")
+    workspace = store.create_workspace("owner-a", "research")
+    store.configure_autonomy("owner-a", workspace["id"], True, symbols=["BTC/USDT"])
+    store.configure_autonomy("owner-a", workspace["id"], False, symbols=["BTC/USDT"])
+    assert store.enqueue_due_autonomy_tasks(datetime(2026, 1, 1, tzinfo=timezone.utc)) == 0
+    assert store.get_autonomy_profile("owner-a")["enabled"] is False
+
+
+def test_autonomy_profile_rejects_unsafe_or_invalid_scan_configuration(tmp_path):
+    store = MemoryStore(tmp_path / "autonomy.sqlite3")
+    workspace = store.create_workspace("owner-a", "research")
+    with pytest.raises(ValueError, match="venues"):
+        store.configure_autonomy("owner-a", workspace["id"], True, venues=["unknown"])
+    with pytest.raises(ValueError, match="interval_seconds"):
+        store.configure_autonomy("owner-a", workspace["id"], True, interval_seconds=10)

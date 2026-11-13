@@ -31,6 +31,12 @@ class AgentWorker:
         self.worker_id = str(uuid4())
 
     def run_once(self) -> dict[str, Any] | None:
+        # The supervisor autonomously seeds owner-enabled research schedules.
+        # This only creates public-data research tasks; order execution is not registered.
+        scheduled = self.store.enqueue_due_autonomy_tasks()
+        if scheduled:
+            print(json.dumps({"event": "autonomy.research_scheduled", "tasks": scheduled},
+                             separators=(",", ":")), flush=True)
         self.store.record_agent_worker_heartbeat(self.worker_id, self.registry.capabilities())
         task = self.store.claim_next_agent_task(lease_seconds=self.lease_seconds)
         if task is None:
