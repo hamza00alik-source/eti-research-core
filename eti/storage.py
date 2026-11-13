@@ -350,9 +350,9 @@ class MemoryStore:
         timeframes = timeframes or ["1h"]
         market_types = market_types or ["spot"]
         if not isinstance(market_types, list) or not market_types or any(
-            value not in {"spot", "swap"} for value in market_types
+            value not in {"spot", "swap", "future"} for value in market_types
         ):
-            raise ValueError("market_types must contain spot and/or swap; dated futures require an explicit contract symbol in a manual task")
+            raise ValueError("market_types must contain spot, swap and/or future; dated futures require an exact contract symbol")
         if not isinstance(venues, list) or not venues or any(v not in {"binance", "mexc"} for v in venues):
             raise ValueError("venues must contain binance and/or mexc")
         if not isinstance(symbols, list) or not 1 <= len(symbols) <= 20 or any(
