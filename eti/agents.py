@@ -193,6 +193,33 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     artifact = ModelArtifactStore().save_model(model)
 
     trading = evaluation.get("trading_performance", {})
+    trading_summary = trading.get("summary", {})
+    fold_count = int(evaluation.get("fold_count", 0))
+    selected_model_folds = sum(
+        fold.get("selected_candidate") == "hist_gradient_boosting"
+        for fold in evaluation.get("folds", [])
+    )
+    mean_score = evaluation.get("mean_test_balanced_accuracy")
+    score_ci = evaluation.get("test_balanced_accuracy_ci") or {}
+    calibration_ok = (
+        model.calibration_status == "calibrated"
+        and isinstance(model.calibration_report, dict)
+        and model.calibration_report.get("passed") is True
+    )
+    quality_checks = {
+        "at_least_three_test_folds": fold_count >= 3,
+        "balanced_accuracy_at_least_0_52": isinstance(mean_score, (int, float)) and mean_score >= 0.52,
+        "confidence_interval_lower_above_chance": isinstance(score_ci.get("lower"), (int, float)) and score_ci["lower"] > 0.50,
+        "model_selected_in_majority_of_folds": selected_model_folds > fold_count / 2 if fold_count else False,
+        "positive_mean_net_return": isinstance(trading_summary.get("mean_net_return"), (int, float)) and trading_summary["mean_net_return"] > 0,
+        "beats_no_trade_in_two_thirds_of_folds": int(trading_summary.get("folds_beating_no_trade", 0)) >= max(2, int(__import__("math").ceil(fold_count * 2 / 3))),
+        "calibration_passed": calibration_ok,
+    }
+    evaluation_passed = bool(quality_checks) and all(quality_checks.values())
+    training_data_ref = (
+        f"ccxt:{venue}:{symbol}:{timeframe}:{len(frame)}:"
+        f"{schema.get('dataset_sha256', 'unknown')}"
+    )
     trading_folds = {item.get("fold"): item for item in trading.get("folds", [])}
     fold_diagnostics = []
     for fold in evaluation.get("folds", []):
@@ -223,6 +250,8 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         "training_performed": True,
         "evaluation": {
             "fold_count": evaluation.get("fold_count", 0),
+            "passed": evaluation_passed,
+            "quality_checks": quality_checks,
             "mean_test_balanced_accuracy": evaluation.get("mean_test_balanced_accuracy"),
             "test_balanced_accuracy_ci": evaluation.get("test_balanced_accuracy_ci"),
             "trading_summary": trading.get("summary", {}),
@@ -232,10 +261,13 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         },
         "candidate_artifact": artifact,
         "input_schema": schema,
+        "training_data_ref": training_data_ref,
         "calibration_status": model.calibration_status,
         "calibration_report": model.calibration_report,
         "lifecycle": "unregistered_candidate",
         "approval_status": "not_approved",
+        "evaluation_passed": evaluation_passed,
+        "quality_checks": quality_checks,
         "limitations": [
             "This is a research candidate artifact; it is not registered, approved, or enabled for inference.",
             "Nested test folds are held out from candidate selection; final artifact calibration uses a separate chronological holdout.",
