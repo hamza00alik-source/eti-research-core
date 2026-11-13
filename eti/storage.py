@@ -801,6 +801,87 @@ class MemoryStore:
         ]
 
 
+    def delete_workspace(self, owner_id: str, workspace_id: str) -> bool:
+        """Delete one owned workspace and its dependent memory/tasks/messages.
+
+        Audit records are retained with workspace_id cleared by the FK's
+        ON DELETE SET NULL policy, preserving an account-level deletion record.
+        """
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        now = _utc_now()
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM workspaces WHERE id = ? AND owner_id = ?",
+                (workspace_id, owner_id),
+            )
+            if cursor.rowcount != 1:
+                return False
+            conn.execute(
+                "INSERT INTO audit_events(id, owner_id, workspace_id, event_type, payload_json, created_at) "
+                "VALUES (?, ?, NULL, 'workspace.deleted', ?, ?)",
+                (str(uuid4()), owner_id, _encode_json({"workspace_id": workspace_id}), now),
+            )
+        return True
+
+    def export_account_data(self, owner_id: str) -> dict[str, Any]:
+        """Return an account-scoped portable export without authentication secrets."""
+        owner_id = _required_text(owner_id, "owner_id")
+        with self._connection() as conn:
+            workspaces = conn.execute(
+                "SELECT id, name, created_at FROM workspaces WHERE owner_id = ? ORDER BY created_at, id",
+                (owner_id,),
+            ).fetchall()
+            workspace_ids = [row["id"] for row in workspaces]
+            memory, tasks, messages = [], [], []
+            for workspace_id in workspace_ids:
+                for row in conn.execute(
+                    "SELECT id, workspace_id, namespace, item_key, value_json, created_at, updated_at "
+                    "FROM memory_items WHERE owner_id = ? AND workspace_id = ? ORDER BY namespace, item_key",
+                    (owner_id, workspace_id),
+                ).fetchall():
+                    memory.append({"id": row["id"], "workspace_id": row["workspace_id"],
+                                   "namespace": row["namespace"], "key": row["item_key"],
+                                   "value": json.loads(row["value_json"]),
+                                   "created_at": row["created_at"], "updated_at": row["updated_at"]})
+                for row in conn.execute(
+                    "SELECT id, workspace_id, requester, target_capability, status, input_json, "
+                    "result_json, deadline_at, attempt_count, max_attempts, created_at, updated_at "
+                    "FROM agent_tasks WHERE owner_id = ? AND workspace_id = ? ORDER BY created_at, id",
+                    (owner_id, workspace_id),
+                ).fetchall():
+                    tasks.append({"id": row["id"], "workspace_id": row["workspace_id"],
+                                  "requester": row["requester"], "target_capability": row["target_capability"],
+                                  "status": row["status"], "input": json.loads(row["input_json"]),
+                                  "result": json.loads(row["result_json"]) if row["result_json"] else None,
+                                  "deadline_at": row["deadline_at"], "attempt_count": row["attempt_count"],
+                                  "max_attempts": row["max_attempts"], "created_at": row["created_at"],
+                                  "updated_at": row["updated_at"]})
+                for row in conn.execute(
+                    "SELECT id, workspace_id, task_id, sender, recipient, message_type, payload_json, created_at "
+                    "FROM agent_messages WHERE owner_id = ? AND workspace_id = ? ORDER BY created_at, id",
+                    (owner_id, workspace_id),
+                ).fetchall():
+                    messages.append({"id": row["id"], "workspace_id": row["workspace_id"],
+                                     "task_id": row["task_id"], "sender": row["sender"],
+                                     "recipient": row["recipient"], "message_type": row["message_type"],
+                                     "payload": json.loads(row["payload_json"]), "created_at": row["created_at"]})
+            audit = conn.execute(
+                "SELECT id, workspace_id, event_type, payload_json, created_at FROM audit_events "
+                "WHERE owner_id = ? ORDER BY created_at, id", (owner_id,)
+            ).fetchall()
+        return {
+            "format": "eti-account-export-v1",
+            "account_id": owner_id,
+            "workspaces": [dict(row) for row in workspaces],
+            "memory": memory,
+            "agent_tasks": tasks,
+            "agent_messages": messages,
+            "audit_events": [{"id": row["id"], "workspace_id": row["workspace_id"],
+                              "event_type": row["event_type"], "payload": json.loads(row["payload_json"]),
+                              "created_at": row["created_at"]} for row in audit],
+        }
+
     def register_model_version(
         self, model_id: str, version: str, artifact_uri: str, artifact_sha256: str,
         input_schema: Any, supported_classes: list[str], training_data_ref: str,
