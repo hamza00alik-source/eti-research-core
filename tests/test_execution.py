@@ -252,3 +252,19 @@ def test_live_settings_cannot_orphan_an_open_position(tmp_path):
         store.save_live_execution_profile(
             "owner", "binance", ["ETH/USDT"], "1h", 1000.0, {},
         )
+
+
+def test_live_settings_cannot_orphan_pending_exchange_order(tmp_path):
+    import pytest
+    store = _live_store(tmp_path)
+    order, created = store.create_live_order_intent(
+        "owner", "binance", "BTC/USDT", "buy", 0.01, "eti-pending-order-001"
+    )
+    assert created is True
+    store.update_live_order("owner", order["client_order_id"], "open",
+                            exchange_order_id="exchange-open-1")
+    store.disable_live_execution("owner")
+    with pytest.raises(ValueError, match="reconcile pending live orders"):
+        store.save_live_execution_profile(
+            "owner", "binance", ["BTC/USDT", "ETH/USDT"], "4h", 1000.0, {},
+        )
