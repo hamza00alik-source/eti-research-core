@@ -1,6 +1,7 @@
 """Research API and PWA host. No exchange order routes exist."""
 from __future__ import annotations
 from pathlib import Path
+import os
 import sqlite3
 from typing import Any
 
@@ -269,6 +270,102 @@ def create_agent_message(workspace_id: str, payload: AgentMessagePayload,
         raise HTTPException(status_code=404, detail="workspace or task not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+class ModelVersionPayload(BaseModel):
+    model_id: str = Field(min_length=1, max_length=120)
+    version: str = Field(min_length=1, max_length=80)
+    artifact_uri: str = Field(min_length=1, max_length=500)
+    artifact_sha256: str = Field(min_length=64, max_length=64)
+    input_schema: dict[str, Any]
+    supported_classes: list[str] = Field(min_length=1, max_length=20)
+    training_data_ref: str = Field(min_length=1, max_length=300)
+    evaluation_report: dict[str, Any]
+    calibration_status: str = Field(min_length=1, max_length=20)
+
+
+def _require_model_admin(account: dict[str, str]) -> None:
+    admins = {
+        item.strip().lower()
+        for item in os.environ.get("ETI_ADMIN_USERNAMES", "").split(",")
+        if item.strip()
+    }
+    if account["username"].lower() not in admins:
+        raise HTTPException(status_code=403, detail="model registry administrator access required")
+
+
+@app.get("/v1/models")
+def list_models(lifecycle: str | None = None,
+                account: dict[str, str] = Depends(current_account)):
+    admins = {
+        item.strip().lower()
+        for item in os.environ.get("ETI_ADMIN_USERNAMES", "").split(",")
+        if item.strip()
+    }
+    is_admin = account["username"].lower() in admins
+    selected_lifecycle = lifecycle if is_admin else "approved"
+    if not is_admin and lifecycle not in (None, "approved"):
+        raise HTTPException(status_code=404, detail="model version not found")
+    try:
+        return {"items": _memory_store().list_model_versions(selected_lifecycle)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/v1/models/{model_id}/{version}")
+def get_model(model_id: str, version: str,
+              account: dict[str, str] = Depends(current_account)):
+    model = _memory_store().get_model_version(model_id, version)
+    if model is None or (
+        model["lifecycle"] != "approved"
+        and account["username"].lower() not in {
+            item.strip().lower()
+            for item in os.environ.get("ETI_ADMIN_USERNAMES", "").split(",")
+            if item.strip()
+        }
+    ):
+        raise HTTPException(status_code=404, detail="model version not found")
+    return model
+
+
+@app.post("/v1/models", status_code=201)
+def register_model(payload: ModelVersionPayload,
+                   account: dict[str, str] = Depends(current_account)):
+    _require_model_admin(account)
+    try:
+        return _memory_store().register_model_version(
+            payload.model_id, payload.version, payload.artifact_uri,
+            payload.artifact_sha256, payload.input_schema, payload.supported_classes,
+            payload.training_data_ref, payload.evaluation_report,
+            payload.calibration_status, account["username"])
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="model version already exists") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/models/{model_id}/{version}/approve")
+def approve_model(model_id: str, version: str,
+                  account: dict[str, str] = Depends(current_account)):
+    _require_model_admin(account)
+    try:
+        return _memory_store().approve_model_version(model_id, version, account["username"])
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="model version not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/v1/models/{model_id}/{version}/retire")
+def retire_model(model_id: str, version: str,
+                 account: dict[str, str] = Depends(current_account)):
+    _require_model_admin(account)
+    try:
+        return _memory_store().retire_model_version(model_id, version)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="model version not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 class PortfolioPayload(BaseModel):
