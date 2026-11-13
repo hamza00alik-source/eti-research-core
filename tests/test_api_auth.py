@@ -1,6 +1,9 @@
+import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 from eti.api import app
+from eti.artifacts import ModelArtifactStore
 from eti.storage import MemoryStore
 
 
@@ -256,3 +259,70 @@ def test_agent_worker_status_is_authenticated_and_reports_heartbeat(tmp_path, mo
         assert response.status_code == 200
         assert response.json()["online_count"] == 1
         assert response.json()["items"][0]["capabilities"] == ["market.snapshot"]
+
+
+def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "inference.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    monkeypatch.setenv("ETI_ADMIN_USERNAMES", "trainer_admin,reviewer_admin")
+
+    class StubModel:
+        def predict_proba(self, frame):
+            return np.array([[0.2, 0.5, 0.3]])
+
+    monkeypatch.setattr(
+        ModelArtifactStore, "load_model",
+        lambda self, uri, checksum: StubModel(),
+    )
+    digest = "a" * 64
+    uri = "artifact://sha256/" + digest
+
+    with TestClient(app) as client:
+        trainer = _register(client, "trainer_admin")
+        reviewer = _register(client, "reviewer_admin")
+        user = _register(client, "ordinary_user")
+        trainer_headers = {"Authorization": f"Bearer {trainer['access_token']}"}
+        reviewer_headers = {"Authorization": f"Bearer {reviewer['access_token']}"}
+        user_headers = {"Authorization": f"Bearer {user['access_token']}"}
+
+        registered = client.post("/v1/models", headers=trainer_headers, json={
+            "model_id": "eti-inference-test", "version": "0.1.0",
+            "artifact_uri": uri, "artifact_sha256": digest,
+            "input_schema": {"features": ["feature_a", "feature_b"]},
+            "supported_classes": ["crypto_spot"],
+            "training_data_ref": "synthetic-fixture",
+            "evaluation_report": {"passed": True},
+            "calibration_status": "calibrated",
+        })
+        assert registered.status_code == 201, registered.text
+        approved = client.post(
+            "/v1/models/eti-inference-test/0.1.0/approve",
+            headers=reviewer_headers,
+        )
+        assert approved.status_code == 200
+
+        body = {"asset_class": "crypto_spot",
+                "features": {"feature_a": 0.15, "feature_b": 0.7}}
+        response = client.post(
+            "/v1/inference/eti-inference-test/0.1.0",
+            headers=user_headers, json=body,
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["prediction"] == "flat"
+        assert response.json()["probabilities"] == {
+            "short": 0.2, "flat": 0.5, "long": 0.3
+        }
+
+        unsupported = client.post(
+            "/v1/inference/eti-inference-test/0.1.0",
+            headers=user_headers,
+            json={"asset_class": "forex", "features": body["features"]},
+        )
+        assert unsupported.status_code == 422
+        wrong_schema = client.post(
+            "/v1/inference/eti-inference-test/0.1.0",
+            headers=user_headers,
+            json={"asset_class": "crypto_spot", "features": {"feature_a": 1.0}},
+        )
+        assert wrong_schema.status_code == 422
