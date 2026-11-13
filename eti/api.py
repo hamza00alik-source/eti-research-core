@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from .runtime import runtime_lifespan
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -21,7 +22,7 @@ from .portfolio import assess_portfolio
 from .risk import RiskEngine, RiskRequest
 from .storage import MemoryStore
 
-app = FastAPI(title=AppConfig().app_name, version=AppConfig().version)
+app = FastAPI(title=AppConfig().app_name, version=AppConfig().version, lifespan=runtime_lifespan)
 risk_engine = RiskEngine()
 
 
