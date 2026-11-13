@@ -58,5 +58,5 @@ def test_backup_configuration_rejects_invalid_retention(monkeypatch):
     monkeypatch.setenv("ETI_BACKUP_S3_SECRET_ACCESS_KEY", "test-secret")
     monkeypatch.setenv("ETI_BACKUP_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"x" * 32).decode())
     monkeypatch.setenv("ETI_BACKUP_RETENTION_DAYS", "2")
-    with pytest.raises(ValueError, match="retention"):
+    with pytest.raises(ValueError, match="RETENTION"):
         validate_backup_configuration()
