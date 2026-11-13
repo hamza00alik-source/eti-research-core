@@ -9,10 +9,12 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from .features import build_features
 from .providers import CcxtPublicProvider
 from .opportunities import rank_spot_opportunity
+from .strategy_evaluation import run_strategy_walk_forward
 
 
 AgentHandler = Callable[[dict[str, Any]], dict[str, Any]]
@@ -109,4 +111,5 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
 def default_capabilities() -> AgentCapabilityRegistry:
     registry = AgentCapabilityRegistry()
     registry.register("market.snapshot", market_snapshot)
+    registry.register("strategy.walk_forward", strategy_walk_forward)
     return registry
