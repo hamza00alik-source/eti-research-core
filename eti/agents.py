@@ -105,6 +105,13 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     trend = "bullish" if short_gap > 0 and long_gap > 0 else (
         "bearish" if short_gap < 0 and long_gap < 0 else "mixed"
     )
+    limitations = [
+        "Descriptive market research and a transparent heuristic ranking only; not a forecast or trade signal.",
+        "Public market OHLCV only. Source coverage, latency and history limits vary by instrument and provider.",
+        "The ranking is not a trained AI model; model training is performed separately.",
+    ]
+    if asset_class == "crypto" and market_type in {"swap", "future"}:
+        limitations.append("Funding history, open interest, liquidation and contract-specific costs are not yet included.")
     return {
         "kind": "public_market_snapshot",
         "venue": venue,
@@ -118,11 +125,7 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         "trend_context": trend,
         "indicators": indicators,
         "research_ranking": rank_spot_opportunity(indicators) if asset_class == "crypto" and market_type == "spot" else None,
-        "limitations": [
-            "Descriptive market research and a transparent heuristic ranking only; not a forecast or trade signal.",
-            "Public market OHLCV only. Source coverage, latency and history limits vary by instrument and provider.",
-            "The ranking is not a trained AI model; model training is performed separately.",
-        ],
+        "limitations": limitations,
     }
 
 
