@@ -1,31 +1,47 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#101827"><link rel="manifest" href="/manifest.webmanifest">
-<title>ETI Research Intelligence</title><link rel="stylesheet" href="/style.css"></head>
-<body><main>
-<header><div class="eyebrow">ETI · RESEARCH CORE</div><h1>Evolutionary Trading Intelligence</h1><p>Research dashboard · No live trading</p></header>
-<section class="grid">
-<article><h2>System status</h2><div id="health" class="value">Checking…</div><p>Backend health and mode</p></article>
-<article><h2>Execution</h2><div id="execution" class="value">Disabled</div><p>Live order placement unavailable</p></article>
-<article><h2>Supported universe</h2><div id="markets" class="value">Crypto spot</div><p>Binance · MEXC public data</p></article>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101827">
+<meta name="description" content="ETI market research and risk intelligence dashboard">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/eti-icon.svg" type="image/svg+xml">
+<title>ETI · Trading Intelligence</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app-shell">
+<header class="topbar"><a class="brand" href="#home" aria-label="ETI home"><img src="/eti-icon.svg" alt=""><span>ETI</span></a><span class="mode-pill">RESEARCH MODE</span></header>
+<main id="home">
+<section class="hero"><div class="eyebrow">EVOLUTIONARY TRADING INTELLIGENCE</div><h1>Market intelligence.<br><span>Risk before execution.</span></h1><p>One research workspace for markets, models and portfolio risk.</p></section>
+<section class="grid status-grid" aria-label="System overview">
+<article><h2>System</h2><div id="health" class="value">Connecting…</div><p>Backend status</p></article>
+<article><h2>Execution</h2><div id="execution" class="value">Disabled</div><p>Live orders unavailable</p></article>
+<article><h2>Market data</h2><div id="markets" class="value">Crypto spot</div><p>Currently connected public feeds</p></article>
 </section>
-<section class="panel"><h2>Combined decision gate</h2>
-<p>Illustrative model probabilities are user-entered. Both trade risk and portfolio limits must approve. This does not place orders.</p>
+<section class="panel" id="decision"><div class="section-heading"><div><div class="eyebrow">RESEARCH TOOL</div><h2>Decision gate simulator</h2></div><span class="tag">PAPER ONLY</span></div>
+<p>Enter hypothetical model probabilities and portfolio context. ETI applies independent trade-risk and portfolio checks. This tool does not place orders.</p>
 <form id="decision-form">
-<label>Symbol<input name="symbol" value="BTC/USDT" required></label>
+<label>Instrument symbol<input name="symbol" value="BTC/USDT" required autocomplete="off"></label>
 <label>Account equity (USD)<input name="equity" type="number" value="1000" min="1" step="any"></label>
 <label>Entry price<input name="entry_price" type="number" value="100" min="0.000001" step="any"></label>
 <label>Stop price<input name="stop_price" type="number" value="98" min="0.000001" step="any"></label>
 <label>Requested notional<input name="requested_notional" type="number" value="100" min="0.01" step="any"></label>
 <label>Gross exposure already in use<input name="gross_exposure" type="number" value="0" min="0" step="any"></label>
-<label>Existing portfolio positions as JSON<input name="positions" value="{}" required></label>
+<label>Existing positions (JSON)<input name="positions" value="{}" required spellcheck="false"></label>
 <label>Correlated-group exposure<input name="correlated_group_exposure" type="number" value="0" min="0" step="any"></label>
 <label>Short probability<input name="short" type="number" value="0.1" min="0" max="1" step="0.01"></label>
 <label>Flat probability<input name="flat" type="number" value="0.1" min="0" max="1" step="0.01"></label>
 <label>Long probability<input name="long" type="number" value="0.8" min="0" max="1" step="0.01"></label>
-<button>Assess decision</button></form>
-<pre id="decision-result">Enter probabilities and portfolio context to assess a research decision.</pre></section>
-<section class="panel"><h2>Provider capabilities</h2><pre id="providers">Loading…</pre></section>
-<footer>ETI v0.2 · Research and paper simulation only · Not financial advice</footer>
-</main><script src="/app.js"></script></body></html>
+<button type="submit">Assess hypothetical decision</button>
+</form>
+<pre id="decision-result" role="status" aria-live="polite">Waiting for inputs…</pre></section>
+<section class="panel" id="capabilities"><div class="eyebrow">CONNECTIVITY</div><h2>Provider capabilities</h2><p>ETI only reports a market as connected when an implemented provider supports it.</p><pre id="providers">Loading provider capabilities…</pre></section>
+<section class="panel" id="safety"><div class="eyebrow">SAFETY STATUS</div><h2>Research only</h2><ul><li>No authenticated exchange order execution.</li><li>Model outputs cannot override deterministic risk limits.</li><li>New instruments require data-quality and out-of-sample validation.</li></ul></section>
+<footer>ETI v0.3 · Research and paper simulation only · Not financial advice</footer>
+</main>
+<nav class="bottom-nav" aria-label="Main navigation"><a href="#home" class="active"><span>⌂</span>Home</a><a href="#decision"><span>⌁</span>Decision</a><a href="#capabilities"><span>◫</span>Markets</a><a href="#safety"><span>盾</span>Safety</a></nav>
+</div>
+<script src="/app.js" defer></script>
+</body></html>
