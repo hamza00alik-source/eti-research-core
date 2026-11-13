@@ -1716,7 +1716,7 @@ class MemoryStore:
         now = _utc_now()
         with self._connection() as conn:
             existing = conn.execute(
-                "SELECT enabled FROM live_execution_profiles WHERE owner_id=?", (owner_id,)
+                "SELECT enabled,venue,timeframe FROM live_execution_profiles WHERE owner_id=?", (owner_id,)
             ).fetchone()
             if existing and existing["enabled"]:
                 raise ValueError("pause live execution before changing its settings")
@@ -1727,6 +1727,14 @@ class MemoryStore:
             if any(item["venue"] != venue or item["timeframe"] != timeframe or item["symbol"] not in normalized
                    for item in open_positions):
                 raise ValueError("close ETI-managed positions before changing venue, timeframe or watchlist")
+            pending_orders = conn.execute(
+                "SELECT venue,symbol FROM live_orders WHERE owner_id=? AND status IN ('submitting','open','unknown')",
+                (owner_id,),
+            ).fetchall()
+            if any(item["venue"] != venue or item["symbol"] not in normalized
+                   or (existing and existing["timeframe"] != timeframe)
+                   for item in pending_orders):
+                raise ValueError("reconcile pending live orders before changing venue, timeframe or watchlist")
             conn.execute(
                 """INSERT INTO live_execution_profiles
                 (owner_id,venue,symbols_json,timeframe,capital_allocation_usdt,risk_config_json,
