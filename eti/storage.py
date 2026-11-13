@@ -1267,8 +1267,8 @@ class MemoryStore:
         model_version = _required_text(model_version, "model_version", 80)
         if venue not in {"binance", "mexc"}:
             raise ValueError("venue must be binance or mexc")
-        if not isinstance(symbol, str) or "/" not in symbol or len(symbol) > 40:
-            raise ValueError("symbol must be a valid spot pair")
+        if not isinstance(symbol, str) or not symbol.endswith("/USDT") or len(symbol) > 40:
+            raise ValueError("paper trading currently supports USDT-quoted spot pairs only")
         if timeframe not in {"1h", "4h", "1d"}:
             raise ValueError("paper trading supports 1h, 4h, or 1d candles")
         if isinstance(initial_cash, bool) or not isinstance(initial_cash, (int, float)) or not math.isfinite(initial_cash) or initial_cash <= 0:
