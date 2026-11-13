@@ -154,7 +154,8 @@ async function loadPaperSessions(){
     ' · Equity '+Number(session.equity).toFixed(2)+' · Cash '+Number(session.cash).toFixed(2)+
     ' · Realized P/L '+Number(session.realized_pnl).toFixed(2)+
     ' · Max drawdown '+(Number(session.max_drawdown)*100).toFixed(2)+'%';
-   card.append(title,details);
+   const historyView=document.createElement('pre');historyView.textContent='Trade history not loaded.';
+   card.append(title,details,historyView);
    if(session.status!=='stopped'){
     const button=document.createElement('button');
     button.type='button';button.className='secondary-button';
@@ -174,7 +175,7 @@ async function loadPaperSessions(){
    trades.addEventListener('click',async()=>{
     try{
      const history=await api('/v1/paper/sessions/'+encodeURIComponent(session.id)+'/trades');
-     details.textContent=details.textContent+' · Trades '+history.items.length;
+     historyView.textContent=JSON.stringify(history.items,null,2);
      trades.textContent='Trade history refreshed';
     }catch(error){$('#paper-message').textContent=error.message}
    });
