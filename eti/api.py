@@ -918,6 +918,7 @@ def supported_markets():
 
 @app.get("/v1/markets/discover")
 def discover_markets(
+    asset_class: str = Query(default="crypto", pattern="^(crypto|forex|equity|commodity|index)$"),
     venue: str = Query(default="binance", pattern="^(binance|mexc)$"),
     market_type: str = Query(default="spot", pattern="^(spot|swap|future)$"),
     limit: int = Query(default=100, ge=1, le=500),
@@ -925,7 +926,7 @@ def discover_markets(
 ):
     try:
         return discover_market_universe({
-            "venue": venue, "market_type": market_type, "limit": limit,
+            "asset_class": asset_class, "venue": venue, "market_type": market_type, "limit": limit,
         })
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -971,7 +972,7 @@ def provider_capabilities():
         "daily_model_training_budget": 8,
         "not_connected": ["authenticated forex broker feeds", "authenticated equity broker feeds", "authenticated commodity broker feeds", "authenticated index broker feeds"],
         "data_quality_notes": ["Yahoo Finance coverage and history vary by instrument and interval", "derivatives funding and open-interest history are queried where CCXT reports support", "liquidation history is not yet incorporated into model features", "exchange-specific margin tiers and side-aware funding settlement remain incomplete"],
-        "discovery": "Authenticated live catalogue discovery is available for Binance and MEXC spot, swap and dated-future markets",
+        "discovery": "Authenticated discovery covers active Binance/MEXC crypto spot, swap and dated-future listings plus curated Yahoo Finance forex, equity, commodity and index reference universes",
         "derivatives_research": ["historical funding rate features", "open-interest percentage-change features", "conservative absolute funding drag in nested evaluation"],
         "live_execution": "spot only; derivatives execution is not implemented",
     }
