@@ -189,6 +189,57 @@ class MemoryStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_model_versions_lifecycle
                     ON model_versions(model_id, lifecycle);
+
+                CREATE TABLE IF NOT EXISTS paper_sessions (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    model_id TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    venue TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    initial_cash REAL NOT NULL CHECK(initial_cash > 0),
+                    cash REAL NOT NULL,
+                    position_qty REAL NOT NULL DEFAULT 0 CHECK(position_qty >= 0),
+                    entry_price REAL,
+                    position_cost REAL NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL CHECK(status IN ('paused','running','stopped')),
+                    risk_config_json TEXT NOT NULL,
+                    equity REAL NOT NULL,
+                    peak_equity REAL NOT NULL,
+                    realized_pnl REAL NOT NULL DEFAULT 0,
+                    max_drawdown REAL NOT NULL DEFAULT 0,
+                    daily_date TEXT,
+                    daily_start_equity REAL NOT NULL,
+                    last_processed_candle TEXT,
+                    last_scheduled_at TEXT,
+                    last_tick_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_paper_sessions_owner
+                    ON paper_sessions(owner_id, workspace_id, status);
+
+                CREATE TABLE IF NOT EXISTS paper_trades (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES paper_sessions(id) ON DELETE CASCADE,
+                    owner_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL CHECK(event_type IN ('entry','exit','risk_stop')),
+                    quantity REAL NOT NULL,
+                    price REAL NOT NULL,
+                    notional REAL NOT NULL,
+                    fee REAL NOT NULL,
+                    slippage_bps REAL NOT NULL,
+                    realized_pnl REAL NOT NULL DEFAULT 0,
+                    prediction INTEGER NOT NULL,
+                    confidence REAL NOT NULL,
+                    risk_decision_json TEXT NOT NULL,
+                    candle_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_paper_trades_session
+                    ON paper_trades(owner_id, session_id, created_at);
                 """
             )
             autonomy_columns = {
