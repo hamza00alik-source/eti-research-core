@@ -513,3 +513,17 @@ def test_derivative_context_reports_unavailable_history_without_fabricating(monk
     assert result["current_funding"] is None
     assert result["current_open_interest"] is None
     assert result["history_coverage"]["has_historical_funding"] is False
+
+
+def test_yahoo_reference_discovery_covers_all_noncrypto_asset_classes():
+    from eti.agents import discover_market_universe
+    expected = {
+        "forex": "EURUSD=X", "equity": "AAPL",
+        "commodity": "GC=F", "index": "^GSPC",
+    }
+    for asset_class, symbol in expected.items():
+        market_type = "future" if asset_class == "commodity" else "spot"
+        result = discover_market_universe({"asset_class": asset_class, "market_type": market_type})
+        assert result["venue"] == "yahoo"
+        assert result["instrument_count"] > 0
+        assert symbol in {item["symbol"] for item in result["instruments"]}
