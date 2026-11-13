@@ -33,8 +33,11 @@ def test_tokens_are_signed_expiring_and_bound_to_account(tmp_path):
     assert auth.verify_token(token, now=1001) == account
     with pytest.raises(AuthenticationError, match="invalid or expired"):
         auth.verify_token(token, now=1300)
+    parts = token.split(".")
+    signature = parts[2]
+    parts[2] = ("A" if signature[0] != "A" else "B") + signature[1:]
     with pytest.raises(AuthenticationError):
-        parts = token.split(".")\n        signature = parts[2]\n        parts[2] = ("A" if signature[0] != "A" else "B") + signature[1:]\n        auth.verify_token(".".join(parts), now=1001)
+        auth.verify_token(".".join(parts), now=1001)
     other = AuthManager(tmp_path / "auth.sqlite3", secret="x" * 40,
                         registration_key="invite-key-123456")
     with pytest.raises(AuthenticationError):
