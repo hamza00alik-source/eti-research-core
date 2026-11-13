@@ -11,7 +11,7 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, balanced_accuracy_score
 
 from .data import drop_incomplete_candles, fetch_ohlcv, validate_ohlcv
-from .features import FEATURE_COLUMNS, build_features, make_labels
+from .features import FEATURE_COLUMNS, build_features, feature_columns_for_frame, make_labels
 from .model import BaselineModel
 from .artifacts import ModelArtifactStore
 from .simulator import simulate_long_flat
@@ -22,11 +22,12 @@ from .regimes import classify_market_regime
 def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h") -> dict:
     frame = validate_ohlcv(frame)
     features = build_features(frame)
+    feature_columns = feature_columns_for_frame(frame)
     labels = make_labels(frame, horizon=horizon)
-    dataset = features.join(labels.rename("label")).dropna()
+    dataset = features.join(labels.rename("label")).dropna(subset=feature_columns + ["label"])
     if len(dataset) < 200:
         raise ValueError(f"Need at least 200 usable rows; got {len(dataset)}")
-    x, y = dataset[FEATURE_COLUMNS], dataset["label"].astype(int)
+    x, y = dataset[feature_columns], dataset["label"].astype(int)
     n = len(dataset)
     train_end, valid_end = int(n * 0.70), int(n * 0.85)
     train_stop = max(0, train_end - horizon)
@@ -80,8 +81,9 @@ def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[Baselin
     """
     frame = validate_ohlcv(frame)
     features = build_features(frame)
+    feature_columns = feature_columns_for_frame(frame)
     labels = make_labels(frame, horizon=horizon)
-    dataset = features.join(labels.rename("label")).dropna()
+    dataset = features.join(labels.rename("label")).dropna(subset=feature_columns + ["label"])
     if len(dataset) < 250:
         raise ValueError(
             f"Need at least 250 usable rows for a 200-row fit and 30-row calibration; got {len(dataset)}"
@@ -97,17 +99,17 @@ def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[Baselin
             "after purging the label horizon"
         )
 
-    x_train = training[FEATURE_COLUMNS]
+    x_train = training[feature_columns]
     y_train = training["label"].astype(int)
     model = BaselineModel().fit(x_train, y_train)
     calibration_report = model.fit_temperature_calibration(
-        calibration[FEATURE_COLUMNS], calibration["label"].astype(int)
+        calibration[feature_columns], calibration["label"].astype(int)
     )
     dataset_sha256 = hashlib.sha256(
         pd.util.hash_pandas_object(dataset, index=True).values.tobytes()
     ).hexdigest()
     schema = {
-        "features": list(FEATURE_COLUMNS),
+        "features": list(feature_columns),
         "dataset_sha256": dataset_sha256,
         "feature_version": "eti.features.v1",
         "training_rows": int(len(training)),
@@ -154,8 +156,9 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
     from .evaluation import run_nested_walk_forward
     frame = validate_ohlcv(frame)
     features = build_features(frame)
+    feature_columns = feature_columns_for_frame(frame)
     labels = make_labels(frame, horizon=horizon)
-    dataset = features.join(labels.rename("label")).dropna()
+    dataset = features.join(labels.rename("label")).dropna(subset=feature_columns + ["label"])
     dataset["close"] = frame.loc[dataset.index, "close"].astype(float)
     if len(dataset) < min_train + validation_size + test_size + 2 * horizon:
         raise ValueError("Insufficient completed data for nested walk-forward training")
@@ -164,7 +167,7 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
     def fit_majority(train_x, train_y, eval_x):
         return DummyClassifier(strategy="most_frequent").fit(train_x, train_y).predict(eval_x)
     report = run_nested_walk_forward(
-        dataset, FEATURE_COLUMNS, "label",
+        dataset, feature_columns, "label",
         {"hist_gradient_boosting": fit_baseline, "majority_class": fit_majority},
         min_train=min_train, validation_size=validation_size,
         test_size=test_size, step_size=step_size, purge_bars=horizon)
