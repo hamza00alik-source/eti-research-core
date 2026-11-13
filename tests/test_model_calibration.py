@@ -48,3 +48,24 @@ def test_uncalibrated_baseline_keeps_raw_probabilities():
     model.classes_ = np.array([0, 1, 2])
     probabilities = model.predict_proba(pd.DataFrame({"x": [1.0]}))[0]
     np.testing.assert_allclose(probabilities, [0.1, 0.8, 0.1])
+
+
+def test_refitting_model_resets_previous_calibration_state():
+    class RefitEstimator:
+        def fit(self, features, labels):
+            self.classes_ = np.array([0, 1, 2])
+            return self
+
+    model = BaselineModel()
+    model.estimator = RefitEstimator()
+    model.calibration_status = "calibrated"
+    model.calibration_report = {
+        "passed": True, "method": "temperature_scaling",
+        "sample_count": 50, "temperature": 1.5,
+    }
+
+    model.fit(pd.DataFrame({"x": [1.0, 2.0, 3.0]}), np.array([0, 1, 2]))
+
+    assert model.calibration_status == "uncalibrated"
+    assert model.calibration_report is None
+    assert not model.has_valid_calibration()
