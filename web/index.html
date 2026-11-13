@@ -46,6 +46,15 @@
  <p class="muted">ETI will automatically scan BTC, ETH, SOL and XRP spot markets on MEXC every 15 minutes. Research only: no private exchange keys, no orders and no live trading.</p></div>
  <div class="workspace-actions"><button id="autonomy-toggle" type="button">Enable autonomous research</button><span id="autonomy-status" class="muted" role="status" aria-live="polite">Checking status…</span></div>
 </div>
+<div class="autonomy-card" aria-labelledby="training-heading">
+ <div><div class="eyebrow">AUTONOMOUS MODEL TRAINING</div><h3 id="training-heading">Train research candidates automatically</h3>
+ <p class="muted">Optional daily training on public spot candles. ETI evaluates models and saves candidates for review. Training is bounded to eight market combinations and never approves a model or places orders.</p></div>
+ <div class="workspace-actions">
+  <button id="model-training-toggle" type="button" class="secondary-button">Enable daily model training</button>
+  <label>Training cadence<select id="model-training-interval"><option value="86400">Daily</option><option value="172800">Every 2 days</option><option value="604800">Weekly</option></select></label>
+  <span id="model-training-status" class="muted" role="status" aria-live="polite">Checking status…</span>
+ </div>
+</div>
 <div class="workspace-actions"><button id="delete-workspace" type="button" class="secondary-button">Delete selected workspace</button></div>
 <div id="workspace-tools" hidden>
 <h3>Persistent memory</h3>

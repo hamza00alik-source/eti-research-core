@@ -321,3 +321,49 @@ def test_autonomy_profile_rejects_unsafe_or_invalid_scan_configuration(tmp_path)
         store.configure_autonomy("owner-a", workspace["id"], True, venues=["unknown"])
     with pytest.raises(ValueError, match="interval_seconds"):
         store.configure_autonomy("owner-a", workspace["id"], True, interval_seconds=10)
+
+
+def test_autonomy_schedules_separate_daily_model_training_tasks(tmp_path):
+    from datetime import datetime, timezone
+    store = MemoryStore(tmp_path / "training-schedule.sqlite3")
+    workspace = store.create_workspace("owner-a", "research")
+    profile = store.configure_autonomy(
+        "owner-a", workspace["id"], True,
+        venues=["mexc"], symbols=["BTC/USDT"], timeframes=["1h"],
+        interval_seconds=900, model_training_enabled=True,
+        model_training_interval_seconds=86400,
+    )
+    assert profile["model_training_enabled"] is True
+    assert profile["model_training_interval_seconds"] == 86400
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    assert store.enqueue_due_autonomy_tasks(start) == 2
+    tasks = store.list_agent_tasks("owner-a", workspace["id"], status="queued")
+    assert {task["target_capability"] for task in tasks} == {
+        "market.snapshot", "model.train_research"
+    }
+    training = next(task for task in tasks if task["target_capability"] == "model.train_research")
+    assert training["input"]["limit"] == 3000
+    assert training["input"]["scheduled_by"] == "eti.autonomy.model_training"
+    assert store.enqueue_due_autonomy_tasks(start) == 0
+    assert store.enqueue_due_autonomy_tasks(
+        datetime(2026, 1, 1, 0, 15, tzinfo=timezone.utc)
+    ) == 1
+    assert store.enqueue_due_autonomy_tasks(
+        datetime(2026, 1, 2, tzinfo=timezone.utc)
+    ) == 2
+    all_tasks = store.list_agent_tasks("owner-a", workspace["id"])
+    assert sum(t["target_capability"] == "model.train_research" for t in all_tasks) == 2
+
+
+def test_model_training_schedule_is_bounded_and_disabled_by_default(tmp_path):
+    store = MemoryStore(tmp_path / "training-bounds.sqlite3")
+    workspace = store.create_workspace("owner-a", "research")
+    profile = store.configure_autonomy("owner-a", workspace["id"], True)
+    assert profile["model_training_enabled"] is False
+    with pytest.raises(ValueError, match="at most 8"):
+        store.configure_autonomy(
+            "owner-a", workspace["id"], True,
+            venues=["binance", "mexc"],
+            symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT"],
+            timeframes=["1h"], model_training_enabled=True,
+        )

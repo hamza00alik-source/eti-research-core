@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import time
 from typing import Any
 from uuid import uuid4
@@ -53,6 +54,44 @@ class AgentWorker:
                           "symbol": payload["symbol"], "timeframe": payload["timeframe"]},
                          separators=(",", ":")), flush=True)
 
+    def _register_model_candidate(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Register a trained artifact as a candidate; never approve or promote it."""
+        artifact = result.get("candidate_artifact") or {}
+        schema = result.get("input_schema") or {}
+        digest = artifact.get("artifact_sha256")
+        uri = artifact.get("artifact_uri")
+        required = ("venue", "symbol", "timeframe", "training_data_ref")
+        if not digest or not uri or not isinstance(schema, dict) or any(not result.get(k) for k in required):
+            raise ValueError("trained candidate is missing registry metadata")
+        safe_symbol = result["symbol"].replace("/", "-").replace(":", "-")
+        model_id = f"eti-{result['venue']}-{safe_symbol}-{result['timeframe']}".lower()
+        version = "research-" + digest[:16]
+        evaluation = dict(result.get("evaluation") or {})
+        evaluation["passed"] = bool(result.get("evaluation_passed", False))
+        evaluation["quality_checks"] = result.get("quality_checks", {})
+        evaluation["candidate_only"] = True
+        calibration_status = (
+            "calibrated" if result.get("calibration_status") == "calibrated" else "failed"
+        )
+        try:
+            registered = self.store.register_model_version(
+                model_id, version, uri, digest, schema, ["crypto_spot"],
+                result["training_data_ref"], evaluation, calibration_status, "eti.worker",
+            )
+        except sqlite3.IntegrityError:
+            registered = self.store.get_model_version(model_id, version)
+            if not registered or registered.get("artifact_sha256") != digest:
+                raise
+        result["registry"] = {
+            "model_id": registered["model_id"],
+            "version": registered["version"],
+            "lifecycle": registered["lifecycle"],
+            "evaluation_passed": evaluation["passed"],
+            "approval_required": True,
+        }
+        result["lifecycle"] = registered["lifecycle"]
+        return result
+
     def run_once(self) -> dict[str, Any] | None:
         # The supervisor autonomously seeds owner-enabled research schedules.
         # This only creates public-data research tasks; order execution is not registered.
@@ -67,6 +106,8 @@ class AgentWorker:
         lease_token = task["lease_token"]
         try:
             result = self.registry.execute(task["target_capability"], task["input"])
+            if task["target_capability"] == "model.train_research":
+                result = self._register_model_candidate(result)
             status, retryable = "completed", False
         except LookupError as exc:
             result = {"error": {"type": type(exc).__name__, "message": "unsupported agent capability"}}
