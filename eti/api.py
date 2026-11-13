@@ -360,15 +360,28 @@ def _model_has_verified_calibration(model: Any) -> bool:
     report = getattr(model, "calibration_report", None)
     temperature = report.get("temperature") if isinstance(report, dict) else None
     sample_count = report.get("sample_count", 0) if isinstance(report, dict) else 0
+    class_counts = report.get("class_counts") if isinstance(report, dict) else None
+    nll_before = report.get("nll_before") if isinstance(report, dict) else None
+    nll_after = report.get("nll_after") if isinstance(report, dict) else None
     return (
         getattr(model, "calibration_status", "uncalibrated") == "calibrated"
         and isinstance(report, dict)
         and report.get("passed") is True
         and report.get("method") == "temperature_scaling"
-        and isinstance(sample_count, int) and sample_count >= 30
+        and isinstance(sample_count, int) and not isinstance(sample_count, bool) and sample_count >= 30
+        and isinstance(class_counts, dict)
+        and all(
+            isinstance(class_counts.get(str(class_id)), int)
+            and not isinstance(class_counts.get(str(class_id)), bool)
+            and class_counts.get(str(class_id)) >= 5
+            for class_id in (0, 1, 2)
+        )
         and not isinstance(temperature, bool)
         and isinstance(temperature, (int, float)) and math.isfinite(temperature)
         and temperature > 0
+        and not isinstance(nll_before, bool) and isinstance(nll_before, (int, float)) and math.isfinite(nll_before)
+        and not isinstance(nll_after, bool) and isinstance(nll_after, (int, float)) and math.isfinite(nll_after)
+        and nll_after <= nll_before + 1e-9
     )
 
 
