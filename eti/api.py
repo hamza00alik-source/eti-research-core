@@ -70,6 +70,8 @@ class AutonomyConfigPayload(BaseModel):
     symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"], min_length=1, max_length=20)
     timeframes: list[str] = Field(default_factory=lambda: ["1h"], min_length=1, max_length=6)
     interval_seconds: int = Field(default=900, ge=300, le=86400)
+    model_training_enabled: bool = False
+    model_training_interval_seconds: int = Field(default=86400, ge=86400, le=604800)
 
 
 class MemoryPayload(BaseModel):
@@ -207,7 +209,8 @@ def set_autonomy_config(payload: AutonomyConfigPayload,
     try:
         profile = store.configure_autonomy(
             account["id"], workspace_id, payload.enabled, payload.venues,
-            payload.symbols, payload.timeframes, payload.interval_seconds
+            payload.symbols, payload.timeframes, payload.interval_seconds,
+            payload.model_training_enabled, payload.model_training_interval_seconds
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
@@ -215,7 +218,7 @@ def set_autonomy_config(payload: AutonomyConfigPayload,
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"profile": profile, "mode": "research_only",
             "live_execution_enabled": False,
-            "note": "The worker will schedule research scans automatically. No exchange credentials or orders are used."}
+            "note": "The worker schedules public research scans and, when explicitly enabled, bounded daily model training. Training artifacts remain unapproved candidates. No exchange credentials or orders are used."}
 
 
 @app.get("/v1/workspaces")
