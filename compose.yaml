@@ -1,0 +1,46 @@
+services:
+  api:
+    build: .
+    image: eti-research-core:local
+    restart: unless-stopped
+    environment:
+      ETI_DATABASE_PATH: /app/data/eti.sqlite3
+      ETI_AUTH_SECRET: ${ETI_AUTH_SECRET:?Set ETI_AUTH_SECRET in .env}
+      ETI_REGISTRATION_KEY: ${ETI_REGISTRATION_KEY:?Set ETI_REGISTRATION_KEY in .env}
+      ETI_ADMIN_USERNAMES: ${ETI_ADMIN_USERNAMES:-}
+    ports:
+      - "${ETI_BIND_ADDRESS:-127.0.0.1}:${ETI_PORT:-8000}:8000"
+    volumes:
+      - eti-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  worker:
+    image: eti-research-core:local
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "eti.worker", "--poll-seconds", "2"]
+    environment:
+      ETI_DATABASE_PATH: /app/data/eti.sqlite3
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - eti-data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+volumes:
+  eti-data:
