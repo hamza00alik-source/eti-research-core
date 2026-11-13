@@ -182,3 +182,8 @@ python -m eti.pipeline --exchange mexc --symbol BTC/USDT \
 ```
 
 If the calibration window has fewer than 30 rows, fewer than five examples of any class, or temperature scaling does not improve calibration-window log loss, the artifact remains `uncalibrated` and cannot be approved. A passing calibration report is not evidence of profitability and must be reviewed alongside out-of-sample trading metrics. The export does not register or approve the model; an independent evaluation report and reviewer approval are still required before inference. The export flag is explicit; API startup, CI and worker startup never train or export models.
+
+
+## Autonomous model training lifecycle
+
+ETI can optionally schedule bounded model-training research independently from its public-market scan interval. The training schedule is owner-controlled, disabled by default, and supports daily through weekly cadence. Training consumes public spot OHLCV only and stores content-addressed candidate artifacts. A worker registers each completed artifact as an unapproved model-registry candidate with evaluation, calibration, and training provenance. Candidate approval remains a separate administrator action requiring an independent reviewer; training never enables inference or order execution.
