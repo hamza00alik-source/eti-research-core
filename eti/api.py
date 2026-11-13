@@ -8,7 +8,8 @@ from typing import Any
 
 import pandas as pd
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response\nfrom .runtime import runtime_lifespan
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from .runtime import runtime_lifespan
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
