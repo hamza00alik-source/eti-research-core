@@ -56,19 +56,22 @@ class AgentCapabilityRegistry:
 def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     """Fetch completed public crypto spot candles and summarize causal indicators."""
     venue = payload.get("venue", "mexc")
+    market_type = payload.get("market_type", "spot")
     symbol = payload.get("symbol")
     timeframe = payload.get("timeframe", "1h")
     limit = payload.get("limit", 200)
     if not isinstance(venue, str) or venue not in {"binance", "mexc"}:
         raise ValueError("venue must be binance or mexc")
+    if market_type not in {"spot", "swap", "future"}:
+        raise ValueError("market_type must be spot, swap, or future")
     if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
-        raise ValueError("symbol must be a valid spot pair such as BTC/USDT")
+        raise ValueError("symbol must be a valid CCXT market symbol such as BTC/USDT or BTC/USDT:USDT")
     if not isinstance(timeframe, str) or timeframe not in {"1m", "5m", "15m", "30m", "1h", "4h", "1d"}:
         raise ValueError("unsupported timeframe")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 50 <= limit <= 500:
         raise ValueError("limit must be an integer from 50 to 500")
 
-    frame = CcxtPublicProvider(venue).fetch_ohlcv(symbol, timeframe, limit)
+    frame = CcxtPublicProvider(venue, market_type).fetch_ohlcv(symbol, timeframe, limit)
     if len(frame) < 40:
         raise ValueError("provider returned too few completed candles for indicator calculation")
     features = build_features(frame)
@@ -91,7 +94,7 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         "kind": "public_market_snapshot",
         "venue": venue,
         "asset_class": "crypto",
-        "market_type": "spot",
+        "market_type": market_type,
         "symbol": symbol,
         "timeframe": timeframe,
         "completed_candles": len(frame),
@@ -99,10 +102,10 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         "last_close": round(float(frame.iloc[-1]["close"]), 10),
         "trend_context": trend,
         "indicators": indicators,
-        "research_ranking": rank_spot_opportunity(indicators),
+        "research_ranking": rank_spot_opportunity(indicators) if market_type == "spot" else None,
         "limitations": [
             "Descriptive market research and a transparent heuristic ranking only; not a forecast or trade signal.",
-            "Public spot OHLCV only; no private account data or order execution.",
+            "Public crypto OHLCV only; derivative funding, open interest and contract costs are not yet included.",
             "The ranking is not a trained AI model; model training is performed separately.",
         ],
     }
@@ -111,13 +114,16 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
 def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
     """Evaluate fixed rule candidates on public candles; report is stored as task result."""
     venue = payload.get("venue", "mexc")
+    market_type = payload.get("market_type", "spot")
     symbol = payload.get("symbol")
     timeframe = payload.get("timeframe", "1h")
     limit = payload.get("limit", 500)
     if not isinstance(venue, str) or venue not in {"binance", "mexc"}:
         raise ValueError("venue must be binance or mexc")
+    if market_type not in {"spot", "swap", "future"}:
+        raise ValueError("market_type must be spot, swap, or future")
     if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
-        raise ValueError("symbol must be a valid spot pair such as BTC/USDT")
+        raise ValueError("symbol must be a valid CCXT market symbol such as BTC/USDT or BTC/USDT:USDT")
     if not isinstance(timeframe, str) or timeframe not in {"1m", "5m", "15m", "30m", "1h", "4h", "1d"}:
         raise ValueError("unsupported timeframe")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 300 <= limit <= 500:
@@ -134,7 +140,7 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
             raise ValueError(f"{name} has an invalid value")
     fee_bps, slippage_bps = payload.get("fee_bps", 6.0), payload.get("slippage_bps", 2.0)
-    frame = CcxtPublicProvider(venue).fetch_ohlcv(symbol, timeframe, limit)
+    frame = CcxtPublicProvider(venue, market_type).fetch_ohlcv(symbol, timeframe, limit)
     if len(frame) < options["min_history"] + options["validation_size"] + options["test_size"] + 2 * options["purge_bars"]:
         raise ValueError("provider returned insufficient completed candles for walk-forward evaluation")
     timestamps = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
@@ -145,7 +151,7 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
     report = run_strategy_walk_forward(close, **options, fee_bps=fee_bps, slippage_bps=slippage_bps)
     return {
         "kind": "strategy_walk_forward_report", "venue": venue, "asset_class": "crypto",
-        "market_type": "spot", "symbol": symbol, "timeframe": timeframe,
+        "market_type": market_type, "symbol": symbol, "timeframe": timeframe,
         "requested_candles": limit, "available_candles": len(frame),
         "data_start": timestamps.iloc[0].isoformat(), "data_end": timestamps.iloc[-1].isoformat(),
         **report,
@@ -153,7 +159,7 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
             "Fixed rule-based moving-average and momentum candidates; not a trained AI model.",
             "Validation data selects candidates; test windows are held out from candidate selection.",
             "Historical results do not establish future profitability and are not trade signals.",
-            "Public spot data only; no credentials, balances, orders, or live execution.",
+            "Public crypto OHLCV only; derivative funding, open interest and contract costs are not yet included.",
         ],
     }
 
@@ -161,14 +167,17 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
 def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     """Train and evaluate a bounded research candidate from public spot candles."""
     venue = payload.get("venue", "mexc")
+    market_type = payload.get("market_type", "spot")
     symbol = payload.get("symbol")
     timeframe = payload.get("timeframe", "1h")
     limit = payload.get("limit", 3000)
     horizon = payload.get("horizon", 6)
     if not isinstance(venue, str) or venue not in {"binance", "mexc"}:
         raise ValueError("venue must be binance or mexc")
+    if market_type not in {"spot", "swap", "future"}:
+        raise ValueError("market_type must be spot, swap, or future")
     if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
-        raise ValueError("symbol must be a valid spot pair such as BTC/USDT")
+        raise ValueError("symbol must be a valid CCXT market symbol such as BTC/USDT or BTC/USDT:USDT")
     if not isinstance(timeframe, str) or timeframe not in {"1h", "4h", "1d"}:
         raise ValueError("timeframe must be one of: 1h, 4h, or 1d")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1500 <= limit <= 5000:
@@ -176,7 +185,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(horizon, bool) or not isinstance(horizon, int) or not 2 <= horizon <= 24:
         raise ValueError("horizon must be an integer from 2 to 24")
 
-    frame = CcxtPublicProvider(venue).fetch_ohlcv(symbol, timeframe, limit)
+    frame = CcxtPublicProvider(venue, market_type).fetch_ohlcv(symbol, timeframe, limit)
     timestamps = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
     if timestamps.isna().any() or timestamps.duplicated().any() or not timestamps.is_monotonic_increasing:
         raise ValueError("provider timestamps must be valid, unique, and chronological")
@@ -238,7 +247,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         "kind": "trained_model_candidate",
         "venue": venue,
         "asset_class": "crypto",
-        "market_type": "spot",
+        "market_type": market_type,
         "symbol": symbol,
         "timeframe": timeframe,
         "requested_candles": limit,
@@ -273,7 +282,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
             "Nested test folds are held out from candidate selection; final artifact calibration uses a separate chronological holdout.",
             "Calibration failure blocks approval; no automatic promotion occurs.",
             "Single-market evaluation is not a portfolio backtest and does not establish future profitability.",
-            "Public spot candles only; no credentials, balances, orders, leverage, or live execution.",
+            "Public crypto OHLCV only; derivative funding, open interest, liquidation and contract-specific costs are not yet included in candidate evaluation.",
         ],
     }
 
