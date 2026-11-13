@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
+import math
 import os
 from pathlib import Path
 import sqlite3
@@ -189,6 +190,57 @@ class MemoryStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_model_versions_lifecycle
                     ON model_versions(model_id, lifecycle);
+
+                CREATE TABLE IF NOT EXISTS paper_sessions (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    model_id TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    venue TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    initial_cash REAL NOT NULL CHECK(initial_cash > 0),
+                    cash REAL NOT NULL,
+                    position_qty REAL NOT NULL DEFAULT 0 CHECK(position_qty >= 0),
+                    entry_price REAL,
+                    position_cost REAL NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL CHECK(status IN ('paused','running','stopped')),
+                    risk_config_json TEXT NOT NULL,
+                    equity REAL NOT NULL,
+                    peak_equity REAL NOT NULL,
+                    realized_pnl REAL NOT NULL DEFAULT 0,
+                    max_drawdown REAL NOT NULL DEFAULT 0,
+                    daily_date TEXT,
+                    daily_start_equity REAL NOT NULL,
+                    last_processed_candle TEXT,
+                    last_scheduled_at TEXT,
+                    last_tick_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_paper_sessions_owner
+                    ON paper_sessions(owner_id, workspace_id, status);
+
+                CREATE TABLE IF NOT EXISTS paper_trades (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES paper_sessions(id) ON DELETE CASCADE,
+                    owner_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL CHECK(event_type IN ('entry','exit','risk_stop')),
+                    quantity REAL NOT NULL,
+                    price REAL NOT NULL,
+                    notional REAL NOT NULL,
+                    fee REAL NOT NULL,
+                    slippage_bps REAL NOT NULL,
+                    realized_pnl REAL NOT NULL DEFAULT 0,
+                    prediction INTEGER NOT NULL,
+                    confidence REAL NOT NULL,
+                    risk_decision_json TEXT NOT NULL,
+                    candle_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_paper_trades_session
+                    ON paper_trades(owner_id, session_id, created_at);
                 """
             )
             autonomy_columns = {
@@ -1202,3 +1254,267 @@ class MemoryStore:
         with self._connection() as conn:
             rows = conn.execute(query, params).fetchall()
         return [self.get_model_version(row["model_id"], row["version"]) for row in rows]
+
+
+    def create_paper_session(
+        self, owner_id: str, workspace_id: str, model_id: str, model_version: str,
+        venue: str, symbol: str, timeframe: str, initial_cash: float,
+        risk_config: dict[str, Any],
+    ) -> dict[str, Any]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        model_id = _required_text(model_id, "model_id", 120)
+        model_version = _required_text(model_version, "model_version", 80)
+        if venue not in {"binance", "mexc"}:
+            raise ValueError("venue must be binance or mexc")
+        if not isinstance(symbol, str) or not symbol.endswith("/USDT") or len(symbol) > 40:
+            raise ValueError("paper trading currently supports USDT-quoted spot pairs only")
+        if timeframe not in {"1h", "4h", "1d"}:
+            raise ValueError("paper trading supports 1h, 4h, or 1d candles")
+        if isinstance(initial_cash, bool) or not isinstance(initial_cash, (int, float)) or not math.isfinite(initial_cash) or initial_cash <= 0:
+            raise ValueError("initial_cash must be a finite positive amount")
+        if not isinstance(risk_config, dict):
+            raise ValueError("risk_config must be an object")
+        risk_config = {
+            "max_risk_per_trade": 0.005, "max_position_fraction": 0.10,
+            "max_gross_exposure": 0.25, "max_daily_loss": 0.02,
+            "max_drawdown": 0.08, "fee_bps": 6.0, "slippage_bps": 8.0,
+            "confidence_threshold": 0.55, **risk_config,
+        }
+        safe_caps = {
+            "max_risk_per_trade": 0.005, "max_position_fraction": 0.10,
+            "max_gross_exposure": 0.25, "max_daily_loss": 0.02,
+            "max_drawdown": 0.08,
+        }
+        for key, maximum in safe_caps.items():
+            value = risk_config.get(key)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or not 0 < value <= maximum):
+                raise ValueError(f"{key} exceeds the allowed paper risk limit")
+        for key in ("fee_bps", "slippage_bps"):
+            value = risk_config.get(key)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or not 0 <= value <= 100):
+                raise ValueError(f"{key} must be between 0 and 100")
+        threshold = risk_config.get("confidence_threshold")
+        if (isinstance(threshold, bool) or not isinstance(threshold, (int, float))
+                or not math.isfinite(threshold) or not 0.50 <= threshold <= 0.95):
+            raise ValueError("confidence_threshold must be between 0.50 and 0.95")
+        risk_config["allow_short"] = False
+        risk_config["allow_live_orders"] = False
+        model = self.get_model_version(model_id, model_version)
+        if model is None or model["lifecycle"] != "approved":
+            raise ValueError("paper trading requires an approved model version")
+        if "crypto_spot" not in model["supported_classes"]:
+            raise ValueError("approved model does not support crypto spot")
+        session_id, now = str(uuid4()), _utc_now()
+        cash = float(initial_cash)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            conn.execute(
+                """INSERT INTO paper_sessions
+                (id,owner_id,workspace_id,model_id,model_version,venue,symbol,timeframe,
+                 initial_cash,cash,position_qty,entry_price,position_cost,status,risk_config_json,
+                 equity,peak_equity,realized_pnl,max_drawdown,daily_date,daily_start_equity,
+                 last_processed_candle,last_scheduled_at,last_tick_at,created_at,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,0,NULL,0,'paused',?,?,?,0,0,NULL,?,NULL,NULL,NULL,?,?)""",
+                (session_id, owner_id, workspace_id, model_id, model_version, venue, symbol,
+                 timeframe, cash, cash, _encode_json(risk_config), cash, cash, cash, now, now),
+            )
+        return self.get_paper_session(owner_id, session_id)
+
+    @staticmethod
+    def _paper_session_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"], "owner_id": row["owner_id"], "workspace_id": row["workspace_id"],
+            "model_id": row["model_id"], "model_version": row["model_version"],
+            "venue": row["venue"], "symbol": row["symbol"], "timeframe": row["timeframe"],
+            "initial_cash": row["initial_cash"], "cash": row["cash"],
+            "position_qty": row["position_qty"], "entry_price": row["entry_price"],
+            "position_cost": row["position_cost"], "status": row["status"],
+            "risk_config": json.loads(row["risk_config_json"]), "equity": row["equity"],
+            "peak_equity": row["peak_equity"], "realized_pnl": row["realized_pnl"],
+            "max_drawdown": row["max_drawdown"], "daily_date": row["daily_date"],
+            "daily_start_equity": row["daily_start_equity"],
+            "last_processed_candle": row["last_processed_candle"],
+            "last_tick_at": row["last_tick_at"], "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def get_paper_session(self, owner_id: str, session_id: str) -> dict[str, Any] | None:
+        owner_id = _required_text(owner_id, "owner_id")
+        session_id = _required_text(session_id, "session_id", 128)
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM paper_sessions WHERE owner_id=? AND id=?",
+                (owner_id, session_id),
+            ).fetchone()
+        return self._paper_session_dict(row) if row else None
+
+    def list_paper_sessions(self, owner_id: str, workspace_id: str) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM paper_sessions WHERE owner_id=? AND workspace_id=? ORDER BY created_at DESC",
+                (owner_id, workspace_id),
+            ).fetchall()
+        return [self._paper_session_dict(row) for row in rows]
+
+    def list_paper_trades(self, owner_id: str, session_id: str, limit: int = 200) -> list[dict[str, Any]]:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        with self._connection() as conn:
+            rows = conn.execute(
+                """SELECT * FROM paper_trades WHERE owner_id=? AND session_id=?
+                ORDER BY created_at DESC LIMIT ?""",
+                (_required_text(owner_id, "owner_id"), _required_text(session_id, "session_id", 128), limit),
+            ).fetchall()
+        return [{
+            "id": row["id"], "event_type": row["event_type"], "quantity": row["quantity"],
+            "price": row["price"], "notional": row["notional"], "fee": row["fee"],
+            "slippage_bps": row["slippage_bps"], "realized_pnl": row["realized_pnl"],
+            "prediction": row["prediction"], "confidence": row["confidence"],
+            "risk_decision": json.loads(row["risk_decision_json"]),
+            "candle_at": row["candle_at"], "created_at": row["created_at"],
+        } for row in rows]
+
+    def set_paper_session_status(self, owner_id: str, session_id: str, status: str) -> dict[str, Any]:
+        if status not in {"running", "paused", "stopped"}:
+            raise ValueError("invalid paper session status")
+        owner_id = _required_text(owner_id, "owner_id")
+        session_id = _required_text(session_id, "session_id", 128)
+        now = _utc_now()
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT status FROM paper_sessions WHERE owner_id=? AND id=?",
+                (owner_id, session_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("paper session not found")
+            current = row["status"]
+            allowed = {
+                "paused": {"running", "stopped"},
+                "running": {"paused", "stopped"},
+                "stopped": set(),
+            }
+            if status != current and status not in allowed[current]:
+                raise ValueError("invalid paper session state transition")
+            conn.execute(
+                "UPDATE paper_sessions SET status=?, last_scheduled_at=NULL, updated_at=? WHERE owner_id=? AND id=?",
+                (status, now, owner_id, session_id),
+            )
+        return self.get_paper_session(owner_id, session_id)
+
+    def enqueue_due_paper_tasks(self, now: datetime | None = None) -> int:
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            raise ValueError("now must be timezone-aware")
+        now_text = current.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+        intervals = {"1h": 3600, "4h": 14400, "1d": 86400}
+        queued = 0
+        with self._connection() as conn:
+            rows = conn.execute("SELECT * FROM paper_sessions WHERE status='running'").fetchall()
+            for row in rows:
+                previous = row["last_scheduled_at"]
+                if previous:
+                    last = datetime.fromisoformat(previous.replace("Z", "+00:00"))
+                    if (current.astimezone(timezone.utc) - last).total_seconds() < intervals[row["timeframe"]]:
+                        continue
+                conn.execute(
+                    "UPDATE paper_sessions SET last_scheduled_at=?, updated_at=? WHERE id=?",
+                    (now_text, now_text, row["id"]),
+                )
+                task_id = str(uuid4())
+                payload = {"owner_id": row["owner_id"], "session_id": row["id"]}
+                conn.execute(
+                    """INSERT INTO agent_tasks
+                    (id,owner_id,workspace_id,requester,target_capability,status,input_json,
+                     max_attempts,created_at,updated_at)
+                    VALUES(?,?,?,?,?,'queued',?,2,?,?)""",
+                    (task_id, row["owner_id"], row["workspace_id"], "eti.paper.supervisor",
+                     "paper.tick", _encode_json(payload), now_text, now_text),
+                )
+                conn.execute(
+                    """INSERT INTO audit_events
+                    (id,owner_id,workspace_id,event_type,payload_json,created_at)
+                    VALUES(?,?,?,?,?,?)""",
+                    (str(uuid4()), row["owner_id"], row["workspace_id"], "paper.tick.scheduled",
+                     _encode_json({"task_id": task_id, "session_id": row["id"]}), now_text),
+                )
+                queued += 1
+        return queued
+
+    def apply_paper_tick(
+        self, owner_id: str, session_id: str, candle_at: str,
+        state: dict[str, Any], trade_events: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        owner_id = _required_text(owner_id, "owner_id")
+        session_id = _required_text(session_id, "session_id", 128)
+        candle_at = _required_text(candle_at, "candle_at", 80)
+        if not isinstance(state, dict) or not isinstance(trade_events, list):
+            raise ValueError("paper tick state and events are invalid")
+        required = (
+            "cash", "position_qty", "entry_price", "position_cost", "status",
+            "equity", "peak_equity", "realized_pnl", "max_drawdown",
+            "daily_date", "daily_start_equity",
+        )
+        if any(key not in state for key in required):
+            raise ValueError("paper tick state is incomplete")
+        numeric_keys = (
+            "cash", "position_qty", "position_cost", "equity", "peak_equity",
+            "realized_pnl", "max_drawdown", "daily_start_equity",
+        )
+        if any(isinstance(state[key], bool) or not isinstance(state[key], (int, float))
+               or not math.isfinite(state[key]) for key in numeric_keys):
+            raise ValueError("paper tick contains invalid numeric state")
+        if (state["cash"] < -1e-8 or state["position_qty"] < 0
+                or state["position_cost"] < 0 or state["equity"] <= 0
+                or state["peak_equity"] < state["equity"]
+                or state["status"] not in {"running", "stopped"}):
+            raise ValueError("paper tick state violates account invariants")
+        if state["entry_price"] is not None and (
+            isinstance(state["entry_price"], bool)
+            or not isinstance(state["entry_price"], (int, float))
+            or not math.isfinite(state["entry_price"]) or state["entry_price"] <= 0
+        ):
+            raise ValueError("paper tick entry price is invalid")
+        if any(not isinstance(event, dict)
+               or event.get("event_type") not in {"entry", "exit", "risk_stop"}
+               for event in trade_events):
+            raise ValueError("paper tick trade event is invalid")
+        now = _utc_now()
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT status,last_processed_candle FROM paper_sessions WHERE owner_id=? AND id=?",
+                (owner_id, session_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("paper session not found")
+            if row["status"] != "running":
+                return self.get_paper_session(owner_id, session_id)
+            if row["last_processed_candle"] and candle_at <= row["last_processed_candle"]:
+                return self.get_paper_session(owner_id, session_id)
+            conn.execute(
+                """UPDATE paper_sessions SET cash=?,position_qty=?,entry_price=?,position_cost=?,
+                status=?,equity=?,peak_equity=?,realized_pnl=?,max_drawdown=?,daily_date=?,
+                daily_start_equity=?,last_processed_candle=?,last_tick_at=?,updated_at=?
+                WHERE owner_id=? AND id=?""",
+                (state["cash"], state["position_qty"], state["entry_price"], state["position_cost"],
+                 state["status"], state["equity"], state["peak_equity"], state["realized_pnl"],
+                 state["max_drawdown"], state["daily_date"], state["daily_start_equity"],
+                 candle_at, now, now, owner_id, session_id),
+            )
+            for event in trade_events:
+                conn.execute(
+                    """INSERT INTO paper_trades
+                    (id,session_id,owner_id,event_type,quantity,price,notional,fee,slippage_bps,
+                     realized_pnl,prediction,confidence,risk_decision_json,candle_at,created_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (str(uuid4()), session_id, owner_id, event["event_type"], event["quantity"],
+                     event["price"], event["notional"], event["fee"], event["slippage_bps"],
+                     event["realized_pnl"], event["prediction"], event["confidence"],
+                     _encode_json(event["risk_decision"]), candle_at, now),
+                )
+        return self.get_paper_session(owner_id, session_id)

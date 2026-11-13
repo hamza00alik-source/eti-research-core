@@ -139,6 +139,50 @@ async function loadModels(){
   $('#model-list').textContent='Model registry unavailable: '+error.message;
  }
 }
+async function loadPaperSessions(){
+ const list=$('#paper-session-list');
+ if(!list||!activeWorkspace)return;
+ try{
+  const data=await api('/v1/paper/sessions?workspace_id='+encodeURIComponent(activeWorkspace));
+  list.replaceChildren();
+  if(!data.items.length){list.textContent='No paper sessions yet.';return}
+  for(const session of data.items){
+   const card=document.createElement('section');card.className='paper-session';
+   const title=document.createElement('h4');title.textContent=session.symbol+' · '+session.timeframe+' · '+session.status.toUpperCase();
+   const details=document.createElement('p');
+   details.textContent='Model '+session.model_id+' '+session.model_version+
+    ' · Equity '+Number(session.equity).toFixed(2)+' · Cash '+Number(session.cash).toFixed(2)+
+    ' · Realized P/L '+Number(session.realized_pnl).toFixed(2)+
+    ' · Max drawdown '+(Number(session.max_drawdown)*100).toFixed(2)+'%';
+   const historyView=document.createElement('pre');historyView.textContent='Trade history not loaded.';
+   card.append(title,details,historyView);
+   if(session.status!=='stopped'){
+    const button=document.createElement('button');
+    button.type='button';button.className='secondary-button';
+    button.textContent=session.status==='running'?'Pause paper session':'Start paper session';
+    button.addEventListener('click',async()=>{
+     button.disabled=true;
+     try{
+      await api('/v1/paper/sessions/'+encodeURIComponent(session.id)+'/'+(session.status==='running'?'pause':'start'),{method:'POST'});
+      await loadPaperSessions();
+     }catch(error){$('#paper-message').textContent='Could not update paper session: '+error.message}
+     finally{button.disabled=false}
+    });
+    card.append(button);
+   }
+   const trades=document.createElement('button');trades.type='button';trades.className='secondary-button';
+   trades.textContent='Refresh trade history';
+   trades.addEventListener('click',async()=>{
+    try{
+     const history=await api('/v1/paper/sessions/'+encodeURIComponent(session.id)+'/trades');
+     historyView.textContent=JSON.stringify(history.items,null,2);
+     trades.textContent='Trade history refreshed';
+    }catch(error){$('#paper-message').textContent=error.message}
+   });
+   card.append(trades);list.append(card);
+  }
+ }catch(error){list.textContent='Paper sessions unavailable: '+error.message}
+}
 async function loadWorkspaces(){
  await loadCapabilities();
  const data=await api('/v1/workspaces');
@@ -173,6 +217,7 @@ async function loadWorkspaceData(){
  $('#worker-status').textContent=workerStatus.online_count
   ? JSON.stringify(workerStatus.items.filter(item=>item.online),null,2)
   : 'No active worker heartbeat. Start the separate worker process on the ETI backend.';
+ await loadPaperSessions();
 }
 $('#login-form').addEventListener('submit',async event=>{
  event.preventDefault();const formElement=event.currentTarget;const form=new FormData(formElement);
@@ -278,6 +323,21 @@ $('#model-retire-form').addEventListener('submit',async event=>{
   $('#model-message').textContent='Model retired: '+result.model_id+' '+result.version+'.';
   await loadModels();
  }catch(error){$('#model-message').textContent='Retirement failed: '+error.message}
+});
+$('#paper-session-form')?.addEventListener('submit',async event=>{
+ event.preventDefault();
+ const form=new FormData(event.currentTarget);
+ const payload={
+  model_id:form.get('model_id'),model_version:form.get('model_version'),
+  venue:form.get('venue'),symbol:form.get('symbol'),timeframe:form.get('timeframe'),
+  initial_cash:Number(form.get('initial_cash')),workspace_id:activeWorkspace||null
+ };
+ const message=$('#paper-message');message.textContent='Creating paused paper session…';
+ try{
+  const result=await api('/v1/paper/sessions',{method:'POST',body:JSON.stringify(payload)});
+  message.textContent='Paper session created in PAUSED mode. Review it, then start it when ready.';
+  await loadPaperSessions();
+ }catch(error){message.textContent='Paper session creation failed: '+error.message}
 });
 $('#task-form').addEventListener('submit',async event=>{
  event.preventDefault();if(!activeWorkspace)return;

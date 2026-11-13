@@ -105,6 +105,19 @@
 <button type="submit" class="secondary-button">Retire model</button>
 </form>
 <p id="model-message" class="form-message" role="status" aria-live="polite">Do not mark evaluation as passed unless you have reviewed the out-of-sample report.</p>
+<h3>Paper trading</h3>
+<p class="muted">Simulated funds only. Create a session using an approved model version, then start it to let ETI process completed public candles. No exchange account, API key, or live order is used. Default risk limits are conservative and cannot be relaxed here.</p>
+<form id="paper-session-form" class="registry-form">
+ <label>Approved model ID<input name="model_id" placeholder="eti-mexc-btc-usdt-1h" required maxlength="120"></label>
+ <label>Model version<input name="model_version" placeholder="research-…" required maxlength="80"></label>
+ <label>Venue<select name="venue"><option value="mexc">MEXC spot</option><option value="binance">Binance spot</option></select></label>
+ <label>Symbol<input name="symbol" value="BTC/USDT" required maxlength="40"></label>
+ <label>Timeframe<select name="timeframe"><option value="1h">1 hour</option><option value="4h">4 hours</option><option value="1d">1 day</option></select></label>
+ <label>Virtual starting balance (USDT)<input name="initial_cash" type="number" min="1" max="1000000000" step="any" value="10000" required></label>
+ <button type="submit">Create paused paper session</button>
+</form>
+<p id="paper-message" class="form-message" role="status" aria-live="polite">Paper sessions start paused. Review the model and session before starting.</p>
+<div id="paper-session-list" aria-live="polite">No paper sessions loaded.</div>
 <h3>Audit trail</h3>
 <pre id="audit-list" aria-live="polite">No events loaded.</pre>
 </div>

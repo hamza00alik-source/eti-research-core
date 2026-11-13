@@ -4,3 +4,5 @@ select,textarea{width:100%;min-width:0;padding:12px;border-radius:10px;border:1p
 .workspace-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin:-8px 0 18px}.workspace-actions button:disabled,.account-row button:disabled{opacity:.55;cursor:wait}.account-row{flex-wrap:wrap}
 
 .registry-form{display:grid;gap:12px;margin:16px 0}.registry-form textarea{min-height:190px;font-family:ui-monospace,SFMono-Regular,monospace;font-size:.78rem;line-height:1.45}.registry-form button,.inline-form button{min-height:42px}.registry-form button{justify-self:start}.model-message{overflow-wrap:anywhere}
+
+.paper-session{background:#0c1726;border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0}.paper-session h4{margin:0 0 8px}.paper-session p{color:var(--muted);font-size:.82rem;line-height:1.5}.paper-session pre{max-height:220px}.paper-session button{margin:6px 8px 0 0}
