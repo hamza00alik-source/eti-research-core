@@ -114,7 +114,7 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         "The ranking is not a trained AI model; model training is performed separately.",
     ]
     if asset_class == "crypto" and market_type in {"swap", "future"}:
-        limitations.append("Funding history, open interest, liquidation and contract-specific costs are not yet included.")
+        limitations.append("Current funding and open-interest availability is summarized below; historical funding/open-interest features enter derivative model training only when observations are supplied. Liquidations and validated contract-specific execution costs remain incomplete.")
     return {
         "kind": "public_market_snapshot",
         "venue": venue,
