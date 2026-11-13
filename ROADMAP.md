@@ -1,5 +1,18 @@
 # ETI roadmap
 
+## Product direction — owner-controlled autonomy
+
+See [AUTONOMY.md](AUTONOMY.md) for the product contract. The owner handles login, exchange/broker connection, account permissions, capital allocation, risk limits and the kill switch. ETI should autonomously handle research, market/instrument selection, strategy/model selection, training/evaluation, portfolio management, monitoring and (after explicit opt-in) order execution. The agent layer cannot access raw credentials or modify owner policy.
+
+Delivery order:
+1. Owner control plane: encrypted provider credential vault, connection verification, account/permission controls, immutable risk policy and owner kill switch.
+2. Autonomous research supervisor: scheduled discovery and orchestration; no manual task creation or per-market setup.
+3. Paper autonomy: portfolio construction, simulated order lifecycle, monitoring and restart-safe reconciliation.
+4. Execution adapters: provider-specific sandbox/testnet order lifecycle and reconciliation.
+5. Live execution: separate owner opt-in after paper validation, security review and operational monitoring.
+
+Current reality: ETI is not autonomous yet. The current worker runs an allowlisted public market snapshot only; model training is explicit CLI work, and there are no authenticated exchange connections or live order routes. Do not mark an autonomy milestone complete until implementation and tests exist.
+
 ## v0.2 — architecture foundation
 - [x] Modular configuration and public market-data provider interface
 - [x] Binance/MEXC public crypto spot discovery
