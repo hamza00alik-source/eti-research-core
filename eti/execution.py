@@ -106,6 +106,7 @@ def _reconcile_pending_orders(exchange, store, owner_id: str, state_for):
                 filled=float(remote.get("filled") or 0.0),
                 average=remote.get("average"), cost=remote.get("cost"),
                 result={"candle_at": item["result"].get("candle_at"),
+                        "timeframe": item["result"].get("timeframe", "1h"),
                         "price": item["result"].get("price")},
             )
             return {"blocked": True, "reason": "order_still_open", "order_id": item["id"]}
@@ -116,6 +117,7 @@ def _reconcile_pending_orders(exchange, store, owner_id: str, state_for):
             filled=float(remote.get("filled") or 0.0),
             average=remote.get("average"), cost=remote.get("cost"),
             result={"candle_at": item["result"].get("candle_at"),
+                    "timeframe": item["result"].get("timeframe", "1h"),
                     "price": item["result"].get("price")},
         )
         candle_at = item["result"].get("candle_at")
