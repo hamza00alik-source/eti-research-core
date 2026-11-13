@@ -1720,6 +1720,13 @@ class MemoryStore:
             ).fetchone()
             if existing and existing["enabled"]:
                 raise ValueError("pause live execution before changing its settings")
+            open_positions = conn.execute(
+                "SELECT venue,symbol,timeframe FROM live_execution_states WHERE owner_id=? AND position_qty>0",
+                (owner_id,),
+            ).fetchall()
+            if any(item["venue"] != venue or item["timeframe"] != timeframe or item["symbol"] not in normalized
+                   for item in open_positions):
+                raise ValueError("close ETI-managed positions before changing venue, timeframe or watchlist")
             conn.execute(
                 """INSERT INTO live_execution_profiles
                 (owner_id,venue,symbols_json,timeframe,capital_allocation_usdt,risk_config_json,
