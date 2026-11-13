@@ -34,3 +34,9 @@ def test_task_form_defaults_to_registered_mexc_snapshot_capability():
     assert 'name="capability" value="market.snapshot"' not in html
     assert 'id="capability-select" name="capability"' in html
     assert '"venue":"mexc"' in html
+
+
+def test_capability_picker_is_populated_from_server_allowlist():
+    script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+    assert "async function loadCapabilities()" in script
+    assert "select.add(new Option(capability,capability))" in script
