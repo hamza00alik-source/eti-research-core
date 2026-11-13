@@ -155,3 +155,19 @@ The PWA also displays the authenticated account's audit trail alongside its work
 - `DELETE /v1/workspaces/{workspace_id}` permanently deletes an owned workspace and its dependent memory, tasks and messages. Audit events are retained with the workspace reference cleared and a `workspace.deleted` event appended.
 - The mobile PWA exposes a signed-in JSON export download and a confirmation-gated delete button for the selected workspace.
 - These controls do not delete the account itself, shared model-registry records, or server backups. Account closure and backup-retention policy require a separately defined operational/legal process; do not promise complete erasure from backups until that process is configured.
+
+
+## Explicit model artifact export from the training CLI
+
+The normal research command does not export a deployable model. The opt-in `--save-model` flag runs only after the requested evaluation completes, fits one final model on all completed labelled rows, and writes it to the private `ETI_ARTIFACT_DIR` content-addressed store. The metrics report includes the artifact URI, SHA-256, feature schema, supported class and dataset reference.
+
+Example command shape (do not run until the project is ready for the planned training phase):
+
+```bash
+ETI_ARTIFACT_DIR=/srv/eti-private-artifacts \
+python -m eti.pipeline --exchange mexc --symbol BTC/USDT \
+  --timeframe 1h --evaluation nested --save-model \
+  --model-id eti-crypto-core --model-version 0.1.0
+```
+
+This does not register or approve the model. Export metadata is explicitly marked `uncalibrated`; do not change that status manually. A calibration pipeline, passing evaluation report and independent approval are still required before inference. The export flag is explicit; API startup, CI and worker startup never train or export models.

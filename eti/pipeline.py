@@ -12,6 +12,7 @@ from sklearn.metrics import accuracy_score, balanced_accuracy_score
 from .data import drop_incomplete_candles, fetch_ohlcv, validate_ohlcv
 from .features import FEATURE_COLUMNS, build_features, make_labels
 from .model import BaselineModel
+from .artifacts import ModelArtifactStore
 from .simulator import simulate_long_flat
 from .performance import evaluate_predictions
 
@@ -66,6 +67,52 @@ def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h")
         "warning": "Single chronological holdout baseline with horizon purging. Not evidence of profitability or future performance.",
     }
 
+
+
+def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[BaselineModel, dict]:
+    """Fit one explicit export candidate on all completed labelled rows.
+
+    This function is called only when the CLI receives --save-model. Evaluation
+    has already completed; this final fit is intended for later paper inference.
+    """
+    frame = validate_ohlcv(frame)
+    features = build_features(frame)
+    labels = make_labels(frame, horizon=horizon)
+    dataset = features.join(labels.rename("label")).dropna()
+    if len(dataset) < 200:
+        raise ValueError(f"Need at least 200 usable rows to export a model; got {len(dataset)}")
+    x = dataset[FEATURE_COLUMNS]
+    y = dataset["label"].astype(int)
+    if len(np.unique(y)) < 2:
+        raise ValueError("Export dataset contains fewer than two classes")
+    model = BaselineModel().fit(x, y)
+    schema = {
+        "features": list(FEATURE_COLUMNS),
+        "feature_version": "eti.features.v1",
+        "training_rows": int(len(dataset)),
+        "training_end": dataset.index[-1].isoformat() if hasattr(dataset.index[-1], "isoformat") else str(dataset.index[-1]),
+        "label_horizon_bars": int(horizon),
+    }
+    return model, schema
+
+
+def export_deployable_model(
+    frame: pd.DataFrame, model_id: str, version: str, training_data_ref: str,
+    horizon: int = 6,
+) -> dict:
+    """Explicitly fit and store an immutable artifact; never called at import/startup."""
+    model, input_schema = fit_deployable_model(frame, horizon=horizon)
+    artifact = ModelArtifactStore().save_model(model)
+    return {
+        "model_id": model_id,
+        "version": version,
+        **artifact,
+        "input_schema": input_schema,
+        "supported_classes": ["crypto_spot"],
+        "training_data_ref": training_data_ref,
+        "calibration_status": "uncalibrated",
+        "note": "Uncalibrated candidate artifact only. Complete calibration, evaluation and independent approval before inference.",
+    }
 
 
 def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
