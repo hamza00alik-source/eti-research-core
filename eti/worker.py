@@ -129,12 +129,25 @@ class AgentWorker:
             registered = self.store.get_model_version(model_id, version)
             if not registered or registered.get("artifact_sha256") != digest:
                 raise
+        auto_approved = False
+        if evaluation["passed"] and calibration_status == "calibrated" and registered["lifecycle"] == "candidate":
+            # The promotion authority is a deterministic server quality gate, not the model itself.
+            artifact_model = ModelArtifactStore().load_model(uri, digest)
+            trained_features = getattr(getattr(artifact_model, "estimator", None), "feature_names_in_", None)
+            expected_features = schema.get("features")
+            if (not isinstance(expected_features, list) or trained_features is None
+                    or [str(name) for name in trained_features] != expected_features
+                    or not artifact_model.has_valid_calibration()):
+                raise ValueError("candidate artifact failed independent feature-schema or calibration verification")
+            registered = self.store.approve_model_version(model_id, version, "eti.quality_gate")
+            auto_approved = True
         result["registry"] = {
             "model_id": registered["model_id"],
             "version": registered["version"],
             "lifecycle": registered["lifecycle"],
             "evaluation_passed": evaluation["passed"],
-            "approval_required": True,
+            "approval_required": registered["lifecycle"] != "approved",
+            "promotion_authority": "eti.quality_gate" if auto_approved else None,
         }
         result["lifecycle"] = registered["lifecycle"]
         return result
