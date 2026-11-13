@@ -36,6 +36,14 @@ class RegistrationDisabled(RuntimeError):
     """Required server-side registration configuration is absent."""
 
 
+class RateLimitExceeded(RuntimeError):
+    """Raised when a persistent request bucket has reached its limit."""
+
+    def __init__(self, retry_after: int):
+        self.retry_after = max(1, int(retry_after))
+        super().__init__("rate limit exceeded")
+
+
 def _b64encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
@@ -83,6 +91,59 @@ class AuthManager:
                     created_at INTEGER NOT NULL
                 )"""
             )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS auth_rate_limits (
+                    event_id TEXT PRIMARY KEY,
+                    bucket_key TEXT NOT NULL,
+                    occurred_at INTEGER NOT NULL
+                )"""
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_auth_rate_limits_bucket_time "
+                "ON auth_rate_limits(bucket_key, occurred_at)"
+            )
+
+    def consume_rate_limit(
+        self, scope: str, subject: str, *, limit: int, window_seconds: int,
+        now: int | None = None
+    ) -> None:
+        """Atomically consume one request slot without storing the raw subject."""
+        if not isinstance(scope, str) or not scope.strip() or len(scope) > 80:
+            raise ValueError("scope must contain 1-80 characters")
+        if not isinstance(subject, str) or not subject.strip() or len(subject) > 512:
+            raise ValueError("subject must contain 1-512 characters")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise ValueError("limit must be a positive integer")
+        if (isinstance(window_seconds, bool) or not isinstance(window_seconds, int)
+                or window_seconds < 1):
+            raise ValueError("window_seconds must be a positive integer")
+        current = int(time.time()) if now is None else int(now)
+        bucket_key = hmac.new(
+            self.secret.encode("utf-8"),
+            ("eti-rate-limit:" + scope.strip() + ":" + subject.strip()).encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        with sqlite3.connect(self.database_path, timeout=10) as conn:
+            conn.execute("PRAGMA busy_timeout = 10000")
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "DELETE FROM auth_rate_limits WHERE occurred_at <= ?",
+                (current - window_seconds,),
+            )
+            row = conn.execute(
+                "SELECT COUNT(*), MIN(occurred_at) FROM auth_rate_limits WHERE bucket_key = ?",
+                (bucket_key,),
+            ).fetchone()
+            count, oldest = row
+            if count >= limit:
+                retry_after = max(1, int(oldest) + window_seconds - current)
+                conn.rollback()
+                raise RateLimitExceeded(retry_after)
+            conn.execute(
+                "INSERT INTO auth_rate_limits(event_id, bucket_key, occurred_at) VALUES (?, ?, ?)",
+                (str(uuid4()), bucket_key, current),
+            )
+            conn.commit()
 
     @staticmethod
     def _validate_username(username: str) -> str:
