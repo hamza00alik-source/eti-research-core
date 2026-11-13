@@ -60,7 +60,36 @@
 <button type="submit">Queue research task</button>
 </form>
 <pre id="task-list" aria-live="polite">No tasks loaded.</pre>
-<p class="muted">Tasks are recorded for orchestration; the agent worker is not yet running.</p>
+<p class="muted">Tasks are processed only while an authorized worker is online. Check the worker status above.</p>
+<h3>Model registry</h3>
+<div class="workspace-actions"><button id="refresh-models" type="button" class="secondary-button">Refresh models</button></div>
+<pre id="model-list" aria-live="polite">Sign in to load registered model versions.</pre>
+<p class="muted">Registry controls are administrator-only. A different reviewer account must approve a candidate created by another administrator.</p>
+<form id="model-register-form" class="registry-form">
+<label class="wide-field">Candidate registration payload (JSON)<textarea name="payload" rows="8" spellcheck="false" required>{
+  "model_id": "eti-core",
+  "version": "0.1.0",
+  "artifact_uri": "artifact://sha256/REPLACE",
+  "artifact_sha256": "REPLACE_WITH_64_HEX_SHA256",
+  "input_schema": {"features": ["feature_1", "feature_2"]},
+  "supported_classes": ["crypto_spot"],
+  "training_data_ref": "REPLACE_WITH_DATASET_REFERENCE",
+  "evaluation_report": {"passed": false},
+  "calibration_status": "uncalibrated"
+}</textarea></label>
+<button type="submit">Register candidate</button>
+</form>
+<form id="model-approve-form" class="inline-form">
+<label>Model ID<input name="model_id" required maxlength="120"></label>
+<label>Version<input name="version" required maxlength="80"></label>
+<button type="submit">Approve with this reviewer account</button>
+</form>
+<form id="model-retire-form" class="inline-form">
+<label>Model ID<input name="model_id" required maxlength="120"></label>
+<label>Version<input name="version" required maxlength="80"></label>
+<button type="submit" class="secondary-button">Retire model</button>
+</form>
+<p id="model-message" class="form-message" role="status" aria-live="polite">Do not mark evaluation as passed unless you have reviewed the out-of-sample report.</p>
 <h3>Audit trail</h3>
 <pre id="audit-list" aria-live="polite">No events loaded.</pre>
 </div>
