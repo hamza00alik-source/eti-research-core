@@ -37,6 +37,148 @@ class CcxtPublicProvider:
     def fetch_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 1500) -> pd.DataFrame:
         return fetch_ohlcv(self.venue, symbol, timeframe, limit, market_type=self.market_type)
 
+    def discover_markets(
+        self, limit: int = 100, quote_currencies: tuple[str, ...] = ("USDT", "USDC", "USD")
+    ) -> list[dict]:
+        """Discover active, linear, quote-filtered instruments from exchange metadata.
+
+        Ranking uses public quote volume when the venue exposes bulk tickers;
+        metadata-only deterministic ordering is used when it does not.
+        """
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("limit must be an integer from 1 to 1000")
+        import ccxt
+        exchange_class = getattr(ccxt, self.venue)
+        exchange = exchange_class({
+            "enableRateLimit": True,
+            "options": {"defaultType": self.market_type},
+        })
+        markets = exchange.load_markets()
+        selected = []
+        for symbol, market in markets.items():
+            if not market.get("active", True):
+                continue
+            if not market.get(self.market_type, False):
+                continue
+            quote = market.get("quote")
+            if quote not in quote_currencies:
+                continue
+            if self.market_type in {"swap", "future"} and market.get("inverse", False):
+                continue
+            selected.append({
+                "symbol": symbol, "venue": self.venue, "asset_class": "crypto",
+                "market_type": self.market_type, "base": market.get("base"),
+                "quote": quote, "settle": market.get("settle"),
+                "linear": bool(market.get("linear", False)),
+                "expiry": market.get("expiry"),
+                "contract_size": market.get("contractSize"),
+                "active": True, "quote_volume": None,
+            })
+        if not selected:
+            return []
+        if exchange.has.get("fetchTickers"):
+            try:
+                tickers = exchange.fetch_tickers([item["symbol"] for item in selected])
+                for item in selected:
+                    ticker = tickers.get(item["symbol"], {})
+                    value = ticker.get("quoteVolume")
+                    if isinstance(value, (int, float)) and value >= 0:
+                        item["quote_volume"] = float(value)
+                selected.sort(
+                    key=lambda item: (
+                        item["quote_volume"] is not None,
+                        item["quote_volume"] or 0.0,
+                        item["symbol"],
+                    ), reverse=True,
+                )
+            except Exception:
+                selected.sort(key=lambda item: item["symbol"])
+        else:
+            selected.sort(key=lambda item: item["symbol"])
+        return selected[:limit]
+
+    def fetch_derivatives_context(
+        self, symbol: str, timeframe: str = "1h", limit: int = 100
+    ) -> dict:
+        """Fetch funding and open-interest history when supported; never fabricate missing data."""
+        if self.market_type not in {"swap", "future"}:
+            raise ValueError("derivatives context is available only for swap and future markets")
+        import ccxt
+        exchange = getattr(ccxt, self.venue)({
+            "enableRateLimit": True, "options": {"defaultType": self.market_type},
+        })
+        markets = exchange.load_markets()
+        market = markets.get(symbol)
+        if not market or not market.get(self.market_type, False):
+            raise ValueError(f"Unknown {self.market_type} market for {self.venue}: {symbol}")
+        since = exchange.milliseconds() - exchange.parse_timeframe(timeframe) * 1000 * limit
+        result = {
+            "venue": self.venue, "symbol": symbol, "market_type": self.market_type,
+            "funding_history": [], "open_interest_history": [],
+            "current_funding": None, "current_open_interest": None,
+            "availability": {
+                "funding_history": bool(exchange.has.get("fetchFundingRateHistory")),
+                "current_funding": bool(exchange.has.get("fetchFundingRate")),
+                "open_interest_history": bool(exchange.has.get("fetchOpenInterestHistory")),
+                "current_open_interest": bool(exchange.has.get("fetchOpenInterest")),
+            },
+        }
+        if result["availability"]["funding_history"]:
+            try:
+                rows = exchange.fetch_funding_rate_history(symbol, since=since, limit=limit)
+                result["funding_history"] = [
+                    {"timestamp": int(row["timestamp"]), "funding_rate": float(row["fundingRate"])}
+                    for row in rows if row.get("timestamp") is not None and row.get("fundingRate") is not None
+                ]
+            except Exception as exc:
+                result["availability"]["funding_history_error"] = type(exc).__name__
+        if result["availability"]["current_funding"]:
+            try:
+                row = exchange.fetch_funding_rate(symbol)
+                value = row.get("fundingRate")
+                if value is not None:
+                    result["current_funding"] = {
+                        "funding_rate": float(value), "timestamp": row.get("timestamp"),
+                        "next_funding_timestamp": row.get("nextFundingTimestamp"),
+                    }
+            except Exception as exc:
+                result["availability"]["current_funding_error"] = type(exc).__name__
+        if result["availability"]["open_interest_history"]:
+            try:
+                rows = exchange.fetch_open_interest_history(symbol, timeframe=timeframe, since=since, limit=limit)
+                result["open_interest_history"] = [
+                    {"timestamp": int(row["timestamp"]),
+                     "open_interest": float(row.get("openInterestAmount") or row.get("openInterestValue"))}
+                    for row in rows
+                    if row.get("timestamp") is not None
+                    and (row.get("openInterestAmount") is not None or row.get("openInterestValue") is not None)
+                ]
+            except Exception as exc:
+                result["availability"]["open_interest_history_error"] = type(exc).__name__
+        if result["availability"]["current_open_interest"]:
+            try:
+                row = exchange.fetch_open_interest(symbol)
+                value = row.get("openInterestAmount") or row.get("openInterestValue")
+                if value is not None:
+                    result["current_open_interest"] = {
+                        "value": float(value), "timestamp": row.get("timestamp"),
+                        "unit": "contracts_or_quote_value_as_reported_by_venue",
+                    }
+            except Exception as exc:
+                result["availability"]["current_open_interest_error"] = type(exc).__name__
+        result["history_coverage"] = {
+            "funding_observations": len(result["funding_history"]),
+            "open_interest_observations": len(result["open_interest_history"]),
+            "has_historical_funding": bool(result["funding_history"]),
+            "has_historical_open_interest": bool(result["open_interest_history"]),
+        }
+        result["limitations"] = [
+            "Funding and open-interest endpoint support varies by exchange, contract and history window.",
+            "Open-interest units are venue-reported and must not be compared across contracts without normalization.",
+            "Missing observations are not imputed; this response is research context, not an execution signal.",
+        ]
+        return result
+
 class CsvOHLCVProvider:
     """Local OHLCV adapter; the caller labels the instrument's asset class."""
     provider_name = "csv"
