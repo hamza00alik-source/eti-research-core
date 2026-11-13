@@ -210,6 +210,9 @@ class MemoryStore:
                     capital_allocation_usdt REAL NOT NULL CHECK(capital_allocation_usdt >= 20),
                     risk_config_json TEXT NOT NULL,
                     enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+                    daily_date TEXT,
+                    daily_start_equity REAL NOT NULL DEFAULT 0,
+                    peak_equity REAL NOT NULL DEFAULT 0,
                     authorized_at TEXT,
                     kill_switch_at TEXT,
                     last_scheduled_at TEXT,
@@ -1659,7 +1662,9 @@ class MemoryStore:
             "symbols": json.loads(row["symbols_json"]), "timeframe": row["timeframe"],
             "capital_allocation_usdt": row["capital_allocation_usdt"],
             "risk_config": json.loads(row["risk_config_json"]),
-            "enabled": bool(row["enabled"]), "authorized_at": row["authorized_at"],
+            "enabled": bool(row["enabled"]), "daily_date": row["daily_date"],
+            "daily_start_equity": row["daily_start_equity"], "peak_equity": row["peak_equity"],
+            "authorized_at": row["authorized_at"],
             "kill_switch_at": row["kill_switch_at"],
             "last_scheduled_at": row["last_scheduled_at"], "updated_at": row["updated_at"],
         }
@@ -1843,6 +1848,35 @@ class MemoryStore:
                     )
                     queued += 1
         return queued
+
+
+    def list_live_execution_states(self, owner_id: str, venue: str, timeframe: str) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM live_execution_states WHERE owner_id=? AND venue=? AND timeframe=?",
+                (owner_id, venue, timeframe),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_live_execution_account_state(
+        self, owner_id: str, daily_date: str, daily_start_equity: float, peak_equity: float,
+    ) -> dict[str, Any]:
+        owner_id = _required_text(owner_id, "owner_id")
+        daily_date = _required_text(daily_date, "daily_date", 10)
+        for value in (daily_start_equity, peak_equity):
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value <= 0):
+                raise ValueError("live account risk state must contain positive finite equity values")
+        now = _utc_now()
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE live_execution_profiles SET daily_date=?,daily_start_equity=?,peak_equity=?,updated_at=? WHERE owner_id=?",
+                (daily_date, float(daily_start_equity), float(peak_equity), now, owner_id),
+            )
+            if cursor.rowcount != 1:
+                raise LookupError("live execution profile not found")
+        return self.get_live_execution_profile(owner_id)
 
     def get_live_execution_state(
         self, owner_id: str, venue: str, symbol: str, timeframe: str
