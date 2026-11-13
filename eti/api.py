@@ -969,7 +969,7 @@ def provider_capabilities():
             "commodity": ["GC=F"], "index": ["^GSPC"],
             "crypto": "Owner-configured Binance/MEXC spot and perpetual-swap watchlist",
         },
-        "daily_model_training_budget": 8,
+        "daily_model_training_budget": 10,
         "not_connected": ["authenticated forex broker feeds", "authenticated equity broker feeds", "authenticated commodity broker feeds", "authenticated index broker feeds"],
         "data_quality_notes": ["Yahoo Finance coverage and history vary by instrument and interval", "derivatives funding and open-interest history are queried where CCXT reports support", "liquidation history is not yet incorporated into model features", "exchange-specific margin tiers and side-aware funding settlement remain incomplete"],
         "discovery": "Authenticated discovery covers active Binance/MEXC crypto spot, swap and dated-future listings plus curated Yahoo Finance forex, equity, commodity and index reference universes",
