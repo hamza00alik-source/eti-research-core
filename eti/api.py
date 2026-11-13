@@ -451,8 +451,23 @@ def register_model(payload: ModelVersionPayload,
 def approve_model(model_id: str, version: str,
                   account: dict[str, str] = Depends(current_account)):
     _require_model_admin(account)
+    store = _memory_store()
+    candidate = store.get_model_version(model_id, version)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="model version not found")
     try:
-        return _memory_store().approve_model_version(model_id, version, account["username"])
+        # Approval is allowed only when the server-owned artifact exists, matches
+        # the registered digest and deserializes as a fitted ETI BaselineModel.
+        ModelArtifactStore().load_model(
+            candidate["artifact_uri"], candidate["artifact_sha256"]
+        )
+    except ModelArtifactError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="model artifact must exist and pass integrity checks before approval",
+        ) from exc
+    try:
+        return store.approve_model_version(model_id, version, account["username"])
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="model version not found") from exc
     except ValueError as exc:
