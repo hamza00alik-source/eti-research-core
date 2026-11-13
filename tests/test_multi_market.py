@@ -50,7 +50,17 @@ def test_yahoo_provider_normalizes_public_ohlcv(monkeypatch):
     monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(
         download=lambda *args, **kwargs: source
     ))
+    import eti.providers as providers
+    original_drop = providers.drop_incomplete_candles
+    captured = {}
+    def checked_drop(frame, timeframe_ms, now_ms):
+        captured["timeframe_ms"] = timeframe_ms
+        captured["now_ms"] = now_ms
+        return original_drop(frame, timeframe_ms, now_ms)
+    monkeypatch.setattr(providers, "drop_incomplete_candles", checked_drop)
     frame = YahooFinanceProvider("equity").fetch_ohlcv("AAPL", "1h", 50)
+    assert captured["timeframe_ms"] == 3_600_000
+    assert captured["now_ms"] > 0
     assert len(frame) == 50
     assert list(frame.columns) == ["timestamp", "open", "high", "low", "close", "volume"]
     assert frame.iloc[-1]["close"] == pytest.approx(101.0)
