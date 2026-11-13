@@ -144,3 +144,41 @@ def test_worker_registers_model_training_result_as_unapproved_candidate(tmp_path
     assert model["evaluation_report"]["passed"] is True
     assert registered["registry"]["approval_required"] is True
     assert registered["lifecycle"] == "candidate"
+
+
+
+def test_model_training_extends_lease_before_long_running_fit(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    store = MemoryStore(tmp_path / "training-lease.sqlite3")
+    workspace = _workspace(store)
+    task = store.create_agent_task(
+        "owner-1", workspace["id"], "eti.autonomy.model_training",
+        "model.train_research", {"venue": "mexc", "symbol": "BTC/USDT"},
+    )
+    observed = {}
+
+    def train(payload):
+        running = store.get_agent_task("owner-1", workspace["id"], task["id"])
+        expiry = datetime.fromisoformat(running["lease_expires_at"].replace("Z", "+00:00"))
+        observed["remaining"] = (expiry - datetime.now(timezone.utc)).total_seconds()
+        return {
+            "venue": "mexc", "symbol": "BTC/USDT", "timeframe": "1h",
+            "training_data_ref": "ccxt:mexc:BTC/USDT:1h:3000:lease-test",
+            "candidate_artifact": {
+                "artifact_uri": "artifact://sha256/" + "f" * 64,
+                "artifact_sha256": "f" * 64,
+            },
+            "input_schema": {"features": ["close"]},
+            "evaluation": {"fold_count": 3},
+            "evaluation_passed": False,
+            "quality_checks": {"calibration_passed": False},
+            "calibration_status": "failed",
+        }
+
+    registry = AgentCapabilityRegistry()
+    registry.register("model.train_research", train)
+    result = AgentWorker(store, registry=registry).run_once()
+
+    assert result["status"] == "completed"
+    assert observed["remaining"] > 3000
