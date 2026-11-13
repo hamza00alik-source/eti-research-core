@@ -55,6 +55,18 @@
   <span id="model-training-status" class="muted" role="status" aria-live="polite">Checking status…</span>
  </div>
 </div>
+<div class="autonomy-card exchange-connect-card" aria-labelledby="exchange-connect-heading">
+ <div><div class="eyebrow">OWNER-MANAGED EXCHANGE ACCESS</div><h3 id="exchange-connect-heading">Connect an exchange account</h3>
+ <p class="muted">Only the account administrator can add or remove keys. ETI verifies private read access and encrypts credentials at rest. Create an API key with withdrawals disabled and IP restrictions enabled. Trading permission is not yet verified and live orders remain unavailable.</p></div>
+ <form id="exchange-credential-form" class="registry-form">
+  <label>Exchange<select name="venue"><option value="binance">Binance</option><option value="mexc">MEXC</option></select></label>
+  <label>API key<input name="api_key" type="password" autocomplete="off" minlength="8" maxlength="256" required></label>
+  <label class="wide-field">API secret<input name="api_secret" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
+  <button type="submit">Verify and securely save</button>
+ </form>
+ <p id="exchange-credential-message" class="form-message" role="status" aria-live="polite">Never paste exchange API keys into chat. Enter them only in this signed-in ETI form.</p>
+ <div id="exchange-credential-list" aria-live="polite">Exchange connections not loaded.</div>
+</div>
 <div class="workspace-actions"><button id="delete-workspace" type="button" class="secondary-button">Delete selected workspace</button></div>
 <div id="workspace-tools" hidden>
 <h3>Persistent memory</h3>
