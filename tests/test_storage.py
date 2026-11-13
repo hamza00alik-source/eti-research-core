@@ -74,3 +74,7 @@ def test_store_validates_limits_and_identity(tmp_path):
         store.list_audit_events("owner", limit=0)
     with pytest.raises(ValueError):
         store.create_workspace("", "default")
+
+def test_store_requires_file_backed_database():
+    with pytest.raises(ValueError, match="file-backed"):
+        MemoryStore(":memory:")
