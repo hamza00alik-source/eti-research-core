@@ -385,6 +385,16 @@ def _model_has_verified_calibration(model: Any) -> bool:
     )
 
 
+def _model_feature_schema_matches(model: Any, registered_features: Any) -> bool:
+    if not isinstance(registered_features, list) or not registered_features:
+        return False
+    estimator = getattr(model, "estimator", None)
+    trained_features = getattr(estimator, "feature_names_in_", None)
+    if trained_features is None:
+        return False
+    return [str(name) for name in trained_features] == registered_features
+
+
 def _require_model_admin(account: dict[str, str]) -> None:
     if account["username"].lower() not in _model_admin_usernames():
         raise HTTPException(status_code=403, detail="model registry administrator access required")
@@ -454,6 +464,8 @@ def infer_model(model_id: str, version: str, payload: ModelInferencePayload,
         )
     except ModelArtifactError as exc:
         raise HTTPException(status_code=503, detail="approved model artifact is unavailable or invalid") from exc
+    if not _model_feature_schema_matches(model, expected):
+        raise HTTPException(status_code=503, detail="approved model feature schema does not match its artifact")
     if not _model_has_verified_calibration(model):
         raise HTTPException(status_code=503, detail="approved model lacks a valid calibration report")
     frame = pd.DataFrame([values], columns=expected)
@@ -509,6 +521,13 @@ def approve_model(model_id: str, version: str,
         artifact_model = ModelArtifactStore().load_model(
             candidate["artifact_uri"], candidate["artifact_sha256"]
         )
+        if not _model_feature_schema_matches(
+            artifact_model, candidate["input_schema"].get("features")
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="registered feature schema must exactly match the trained model",
+            )
         if not _model_has_verified_calibration(artifact_model):
             raise HTTPException(
                 status_code=409,
