@@ -99,7 +99,7 @@ The default binding is localhost intentionally. Configure a domain and HTTPS rev
 
 ## PWA account workspace
 
-The PWA now includes sign-in, invite-only account creation, workspace selection, JSON memory editing and task queue visibility. The bearer token is held in browser `sessionStorage` for the current tab session and is not written into the service-worker cache. Sign out clears the token from the current session.
+The PWA now includes sign-in, invite-only account creation, workspace selection, JSON memory editing, task queue and worker status, account export/deletion controls, and a model registry panel. Administrators can register candidate metadata, inspect versions, request approval and retire models; the API remains the authority for permissions and lifecycle checks. The bearer token is held in browser `sessionStorage` for the current tab session and is not written into the service-worker cache. Sign out clears the token from the current session.
 
 The service worker caches only the static app shell. It bypasses all `/v1/` endpoints, and the API sends `Cache-Control: no-store` for authenticated and dynamic routes. Security headers include a restrictive same-origin Content Security Policy, frame protection and MIME sniffing protection.
 
