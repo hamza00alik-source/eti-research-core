@@ -1,15 +1,19 @@
 """Research API and PWA host. No exchange order routes exist."""
 from __future__ import annotations
 from pathlib import Path
+import math
 import os
 import sqlite3
 from typing import Any
+
+import pandas as pd
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .agents import default_capabilities
+from .artifacts import ModelArtifactError, ModelArtifactStore
 from .auth import AuthManager, AuthenticationError, RateLimitExceeded, RegistrationDisabled
 from .config import AppConfig
 from .decision import build_research_decision
@@ -310,6 +314,11 @@ def create_agent_message(workspace_id: str, payload: AgentMessagePayload,
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+class ModelInferencePayload(BaseModel):
+    asset_class: str = Field(min_length=1, max_length=40)
+    features: dict[str, float] = Field(min_length=1, max_length=128)
+
+
 class ModelVersionPayload(BaseModel):
     model_id: str = Field(min_length=1, max_length=120)
     version: str = Field(min_length=1, max_length=80)
@@ -358,6 +367,68 @@ def get_model(model_id: str, version: str,
     ):
         raise HTTPException(status_code=404, detail="model version not found")
     return model
+
+
+@app.post("/v1/inference/{model_id}/{version}")
+def infer_model(model_id: str, version: str, payload: ModelInferencePayload,
+                account: dict[str, str] = Depends(current_account)):
+    manager = _auth_manager()
+    try:
+        manager.consume_rate_limit(
+            "inference", account["id"], limit=60, window_seconds=60
+        )
+    except RateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=429, detail="Inference request limit reached",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+
+    metadata = _memory_store().get_model_version(model_id, version)
+    if metadata is None or metadata["lifecycle"] != "approved":
+        raise HTTPException(status_code=404, detail="approved model version not found")
+    if payload.asset_class not in metadata["supported_classes"]:
+        raise HTTPException(status_code=422, detail="model does not support this asset class")
+    expected = metadata["input_schema"].get("features")
+    if (not isinstance(expected, list) or not expected
+            or any(not isinstance(name, str) or not name for name in expected)
+            or len(expected) != len(set(expected))):
+        raise HTTPException(status_code=503, detail="registered model input schema is invalid")
+    if set(payload.features) != set(expected):
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "feature names must exactly match the registered schema",
+                    "expected": expected},
+        )
+    values = [float(payload.features[name]) for name in expected]
+    if not all(math.isfinite(value) for value in values):
+        raise HTTPException(status_code=422, detail="all model features must be finite numbers")
+    try:
+        model = ModelArtifactStore().load_model(
+            metadata["artifact_uri"], metadata["artifact_sha256"]
+        )
+    except ModelArtifactError as exc:
+        raise HTTPException(status_code=503, detail="approved model artifact is unavailable or invalid") from exc
+    frame = pd.DataFrame([values], columns=expected)
+    try:
+        probabilities = [float(value) for value in model.predict_proba(frame)[0]]
+        probability_total = math.fsum(probabilities)
+        if (len(probabilities) != 3 or not all(math.isfinite(value) and value >= 0 for value in probabilities)
+                or not math.isclose(probability_total, 1.0, rel_tol=1e-5, abs_tol=1e-6)):
+            raise ValueError("model returned invalid class probabilities")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="approved model returned invalid inference output") from exc
+    class_names = {0: "short", 1: "flat", 2: "long"}
+    scores = {class_names[index]: probabilities[index] for index in range(3)}
+    predicted = max(scores, key=scores.get)
+    return {
+        "model_id": model_id,
+        "version": version,
+        "artifact_sha256": metadata["artifact_sha256"],
+        "asset_class": payload.asset_class,
+        "prediction": predicted,
+        "probabilities": scores,
+        "warning": "Model inference only. This is not a trade recommendation or order instruction.",
+    }
 
 
 @app.post("/v1/models", status_code=201)
