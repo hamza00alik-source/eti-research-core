@@ -247,3 +247,21 @@ def test_queued_task_cancellation_is_atomic_and_cannot_cancel_running_work(tmp_p
     store.claim_next_agent_task(lease_seconds=60)
     with pytest.raises(ValueError, match="only queued tasks"):
         store.cancel_agent_task("owner", workspace["id"], running["id"])
+
+
+def test_agent_task_completion_requires_current_unexpired_lease_token(tmp_path):
+    store = MemoryStore(tmp_path / "lease-token.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    task = store.create_agent_task("owner", workspace["id"], "user", "test.echo", {})
+    first = store.claim_next_agent_task(lease_seconds=5, now=100)
+    with pytest.raises(ValueError, match="lease is invalid"):
+        store.complete_claimed_agent_task(task["id"], "not-the-token", {"ok": True}, now=101)
+    with pytest.raises(ValueError, match="lease is invalid"):
+        store.complete_claimed_agent_task(task["id"], first["lease_token"], {"ok": True}, now=106)
+
+    second = store.claim_next_agent_task(lease_seconds=5, now=106)
+    assert second["attempt_count"] == 2
+    with pytest.raises(ValueError, match="lease is invalid"):
+        store.complete_claimed_agent_task(task["id"], first["lease_token"], {"ok": False}, now=107)
+    done = store.complete_claimed_agent_task(task["id"], second["lease_token"], {"ok": True}, now=107)
+    assert done["status"] == "completed"
