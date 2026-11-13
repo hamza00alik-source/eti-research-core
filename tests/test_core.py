@@ -113,6 +113,8 @@ def test_fetch_ohlcv_continues_after_exchange_returns_short_page(monkeypatch):
             return 3600
         def milliseconds(self):
             return now_ms
+        def load_markets(self):
+            return {"BTC/USDT": {"spot": True, "swap": False, "future": False}}
         def fetch_ohlcv(self, symbol, timeframe, since, limit):
             self.calls.append((since, limit))
             eligible = [row for row in all_rows if row[0] >= since]
