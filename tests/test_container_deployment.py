@@ -7,7 +7,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_container_runs_as_non_root_and_has_healthcheck():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "useradd --system" in dockerfile
-    assert "USER eti" in dockerfile
+    entrypoint = (ROOT / "docker-entrypoint.sh").read_text(encoding="utf-8")
+    assert "chown -R eti:eti /app/data" in entrypoint
+    assert "exec gosu eti" in entrypoint
     assert "HEALTHCHECK" in dockerfile
     assert 'CMD ["uvicorn", "eti.api:app"' in dockerfile
 
