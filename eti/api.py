@@ -334,8 +334,11 @@ def authorize_live_execution(payload: LiveExecutionAuthorizationPayload,
                              account: dict[str, str] = Depends(current_account)):
     _require_model_admin(account)
     if not all((payload.confirm_live_trading, payload.confirm_spot_trading_permission,
-                payload.confirm_withdrawals_disabled)):
-        raise HTTPException(status_code=422, detail="All one-time live trading and API-key safety confirmations are required")
+                payload.confirm_withdrawals_disabled, payload.confirm_ip_restrictions)):
+        raise HTTPException(
+            status_code=422,
+            detail="All four one-time live trading, spot permission, disabled-withdrawal and IP-restriction confirmations are required",
+        )
     try:
         profile = _memory_store().authorize_live_execution(account["id"])
     except LookupError as exc:
@@ -352,7 +355,14 @@ def live_execution_kill_switch(account: dict[str, str] = Depends(current_account
     profile = _memory_store().disable_live_execution(account["id"], "owner_kill_switch")
     if profile is None:
         raise HTTPException(status_code=404, detail="live execution profile not found")
-    return {"profile": profile, "mode": "disabled", "message": "Live order scheduling is disabled."}
+    return {
+        "profile": profile,
+        "mode": "disabled",
+        "message": (
+            "New live order scheduling is disabled. Existing exchange orders and open positions "
+            "are not automatically canceled or liquidated; check the exchange account."
+        ),
+    }
 
 
 @app.get("/v1/execution/orders")
@@ -950,8 +960,17 @@ def decision_assess(payload: DecisionPayload):
 
 @app.get("/execution/status")
 def execution_status():
-    return {"enabled": False, "live_orders_implemented": False,
-            "message": "ETI is research-only. No order execution endpoints are available."}
+    return {
+        "enabled": False,
+        "live_orders_implemented": True,
+        "live_execution_default": "disabled",
+        "owner_authorization_required": True,
+        "message": (
+            "Live spot execution is implemented but disabled by default. It requires owner-only "
+            "credentials, saved risk limits and explicit one-time authorization. No public order "
+            "submission endpoint is exposed."
+        ),
+    }
 
 
 web_dir = Path(__file__).resolve().parent.parent / "web"

@@ -84,6 +84,7 @@
   <button type="submit">Save risk limits and watchlist</button>
  </form>
  <div id="live-execution-status" class="form-message" role="status" aria-live="polite">Live trading is disabled.</div>
+  <p class="muted">Kill switch safety: disabling ETI prevents new order scheduling. It does not automatically cancel orders already at the exchange or liquidate open positions. Check and manage those directly in your exchange account.</p>
  <div id="live-authorization-controls" class="live-authorization-controls">
   <p><strong>One-time live authorization</strong></p>
   <label class="confirm-line"><input id="confirm-live-trading" type="checkbox"> I authorize ETI to place real spot market orders automatically. I understand trades can lose money.</label>
@@ -91,7 +92,7 @@
   <label class="confirm-line"><input id="confirm-withdrawals-disabled" type="checkbox"> Withdrawals are disabled on this API key.</label>
   <label class="confirm-line"><input id="confirm-ip-restrictions" type="checkbox"> I have enabled exchange IP restrictions where supported (recommended).</label>
   <button id="authorize-live-execution" type="button">Authorize autonomous live trading</button>
-  <button id="live-kill-switch" type="button" class="danger-button" hidden>Stop all live trading (kill switch)</button>
+  <button id="live-kill-switch" type="button" class="danger-button" hidden>Disable new live orders (kill switch)</button>
  </div>
  <h4>Live order activity</h4><div id="live-order-list" aria-live="polite">No live orders loaded.</div>
 </div>

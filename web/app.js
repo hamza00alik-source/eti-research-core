@@ -422,7 +422,7 @@ $('#authorize-live-execution')?.addEventListener('click',async()=>{
   confirm_withdrawals_disabled:$('#confirm-withdrawals-disabled').checked,
   confirm_ip_restrictions:$('#confirm-ip-restrictions').checked
  };
- if(!confirmations.confirm_live_trading||!confirmations.confirm_spot_trading_permission||!confirmations.confirm_withdrawals_disabled){
+ if(!confirmations.confirm_live_trading||!confirmations.confirm_spot_trading_permission||!confirmations.confirm_withdrawals_disabled||!confirmations.confirm_ip_restrictions){
   $('#live-execution-status').textContent='Complete all four one-time safety confirmations first.';return;
  }
  if(!window.confirm('Authorize ETI to place real Binance/MEXC spot orders automatically within your saved capital and risk limits? Individual trades will not require confirmation.'))return;
@@ -433,7 +433,7 @@ $('#authorize-live-execution')?.addEventListener('click',async()=>{
  }catch(error){$('#live-execution-status').textContent='Live authorization failed: '+error.message;button.disabled=false}
 });
 $('#live-kill-switch')?.addEventListener('click',async()=>{
- if(!window.confirm('Stop all new ETI live trading tasks immediately? Open exchange orders may still need reconciliation at the exchange.'))return;
+ if(!window.confirm('Disable all new ETI live order scheduling? Existing exchange orders and open positions will NOT be automatically canceled or liquidated. You must check them directly at the exchange.'))return;
  const button=$('#live-kill-switch');button.disabled=true;
  try{
   const result=await api('/v1/execution/kill-switch',{method:'POST'});
