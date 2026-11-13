@@ -179,6 +179,45 @@ class CcxtPublicProvider:
         ]
         return result
 
+def enrich_ohlcv_with_derivatives(
+    frame: pd.DataFrame, context: dict, timeframe: str
+) -> pd.DataFrame:
+    """As-of join exchange funding/OI observations without forward-looking leakage."""
+    base = frame.copy()
+    base["timestamp"] = pd.to_datetime(base["timestamp"], utc=True)
+    timeframe_ms = int(pd.Timedelta(timeframe).total_seconds() * 1000)
+    funding = context.get("funding_history") or []
+    if funding:
+        funding_frame = pd.DataFrame(funding)
+        funding_frame["timestamp"] = pd.to_datetime(
+            pd.to_numeric(funding_frame["timestamp"], errors="coerce"), unit="ms", utc=True
+        )
+        funding_frame["funding_rate"] = pd.to_numeric(
+            funding_frame["funding_rate"], errors="coerce"
+        )
+        funding_frame = funding_frame.dropna().sort_values("timestamp").drop_duplicates("timestamp")
+        base = pd.merge_asof(
+            base.sort_values("timestamp"), funding_frame[["timestamp", "funding_rate"]],
+            on="timestamp", direction="backward", tolerance=pd.Timedelta(hours=12),
+        )
+    oi = context.get("open_interest_history") or []
+    if oi:
+        oi_frame = pd.DataFrame(oi)
+        oi_frame["timestamp"] = pd.to_datetime(
+            pd.to_numeric(oi_frame["timestamp"], errors="coerce"), unit="ms", utc=True
+        )
+        oi_frame["open_interest"] = pd.to_numeric(
+            oi_frame["open_interest"], errors="coerce"
+        )
+        oi_frame = oi_frame.dropna().sort_values("timestamp").drop_duplicates("timestamp")
+        base = pd.merge_asof(
+            base.sort_values("timestamp"), oi_frame[["timestamp", "open_interest"]],
+            on="timestamp", direction="backward",
+            tolerance=pd.Timedelta(milliseconds=max(timeframe_ms * 4, 60 * 60 * 1000)),
+        )
+    return base.reset_index(drop=True)
+
+
 class CsvOHLCVProvider:
     """Local OHLCV adapter; the caller labels the instrument's asset class."""
     provider_name = "csv"
