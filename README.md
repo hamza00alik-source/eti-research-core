@@ -16,7 +16,8 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 |---|---|
 | Core | Modular configuration, provider interface and documented service boundaries |
 | Market data | Public OHLCV for Binance/MEXC, completed-candle filtering, CSV input |
-| Market catalog | Public crypto spot market discovery and normalized instrument descriptors |
+| Market catalog | Canonical venue-independent instrument specifications and filtered instrument catalog; current live discovery is crypto spot only |
+| Adapter registry | Venue adapters advertise asset-class/market-type capabilities; unsupported combinations fail closed |
 | Quantitative | Causal technical features, MA and momentum baselines |
 | AI | From-scratch HistGradientBoosting baseline; nested CLI evaluation compares it with a majority-class baseline; no model trained on startup or in CI |
 | Evolution | Constrained candidate search on caller-supplied validation data |
@@ -54,6 +55,12 @@ python -m eti.pipeline --exchange binance --symbol BTC/USDT --timeframe 1h --lim
 ```
 
 There is no API endpoint to start training or place live orders. Nested reports include out-of-sample trading-performance diagnostics; default illustrative costs are 6 bps fee and 2 bps slippage per unit turnover, with zero funding cost unless explicitly changed in code. These are not exchange fee quotes. Spot metrics are long-only; the separate long/short simulation is hypothetical and omits borrow, margin and liquidation mechanics.
+
+## Instrument-agnostic architecture
+
+ETI is organized around asset classes and instrument types rather than broker names. The shared intelligence core is reusable; specialist market heads are introduced only when out-of-sample evidence supports them; broker-specific adapters normalize data and contract metadata. Adding a broker does not automatically require retraining the shared core. See [ARCHITECTURE.md](ARCHITECTURE.md) for the canonical instrument and adapter contracts.
+
+A tokenized gold spot pair, an XAU/USD CFD and a COMEX gold future are distinct instruments with different pricing, contract and risk mechanics. The instrument catalog records those differences. Current Binance/MEXC connectivity remains public crypto spot only; the new registry is an extension point, not evidence that a particular gold or futures product is currently listed or accessible.
 
 ## Provider and device scope
 
