@@ -1,7 +1,8 @@
 """Autonomous rule-based strategy selection with untouched walk-forward tests.
 
 Candidate choice is made exclusively on each chronological validation window.
-The subsequent test window is evaluated once, after selection is frozen.
+Inactive candidates are not misrepresented as trading strategies: if no candidate
+meets minimum activity requirements, the evaluator explicitly selects cash.
 This is research tooling, not a live-trading signal or profitability claim.
 """
 from __future__ import annotations
@@ -17,12 +18,17 @@ from .evaluation import walk_forward_folds
 from .evolution import candidate_set, evaluate_candidate
 from .strategies import moving_average_signal, momentum_signal
 
+MIN_VALIDATION_EXPOSURE = 0.10
+MIN_VALIDATION_POSITION_CHANGES = 2
+
 
 def _signal(close: pd.Series, name: str, parameters: dict[str, int]) -> pd.Series:
     if name == "ma":
         return moving_average_signal(close, **parameters)
     if name == "momentum":
         return momentum_signal(close, **parameters)
+    if name == "cash":
+        return pd.Series(0.0, index=close.index)
     raise ValueError(f"Unsupported strategy candidate: {name}")
 
 
@@ -37,10 +43,11 @@ def run_strategy_walk_forward(
     fee_bps: float = 6.0,
     slippage_bps: float = 2.0,
 ) -> dict[str, Any]:
-    """Select among fixed MA/momentum candidates on validation, then test out of sample.
+    """Select active MA/momentum candidates on validation, otherwise select cash.
 
     The first test position starts flat. Signals are causal and shifted one bar by
     the backtester, so a close-time decision cannot earn the same bar's return.
+    Validation and test use identical configured transaction-cost assumptions.
     """
     if not isinstance(close, pd.Series):
         raise ValueError("close must be a pandas Series")
@@ -63,26 +70,41 @@ def run_strategy_walk_forward(
         validation = close.iloc[fold.validation_start:fold.validation_end]
         validation_scores = []
         for candidate in candidates:
-            result = evaluate_candidate(validation, candidate)
+            result = evaluate_candidate(
+                validation, candidate, fee_bps=float(fee_bps),
+                slippage_bps=float(slippage_bps),
+            )
+            active = (
+                result["exposure"] >= MIN_VALIDATION_EXPOSURE
+                and result["position_changes"] >= MIN_VALIDATION_POSITION_CHANGES
+            )
             validation_scores.append({
                 "name": candidate.name,
                 "parameters": candidate.parameters,
                 "selection_score": float(result["selection_score"]),
                 "validation_return": float(result["total_return"]),
                 "validation_max_drawdown": float(result["max_drawdown"]),
+                "validation_exposure": float(result["exposure"]),
+                "validation_position_changes": int(result["position_changes"]),
+                "eligible": bool(active),
             })
-        selected_index = max(
-            range(len(validation_scores)),
-            key=lambda i: (validation_scores[i]["selection_score"],
-                           validation_scores[i]["name"],
-                           str(sorted(validation_scores[i]["parameters"].items()))),
-        )
-        selected = candidates[selected_index]
 
-        # Include pre-test history to warm up rolling indicators. Only the test
-        # slice is passed to the backtester and reported as out-of-sample.
+        eligible_indices = [i for i, item in enumerate(validation_scores) if item["eligible"]]
+        if eligible_indices:
+            selected_index = max(
+                eligible_indices,
+                key=lambda i: (validation_scores[i]["selection_score"],
+                               validation_scores[i]["name"],
+                               str(sorted(validation_scores[i]["parameters"].items()))),
+            )
+            selected = candidates[selected_index]
+            selected_name, selected_parameters = selected.name, selected.parameters
+        else:
+            # Explicit no-position fallback: do not call an inactive MA rule a strategy.
+            selected_name, selected_parameters = "cash", {}
+        
         through_test = close.iloc[:fold.test_end]
-        test_signal = _signal(through_test, selected.name, selected.parameters).iloc[fold.test_start:fold.test_end]
+        test_signal = _signal(through_test, selected_name, selected_parameters).iloc[fold.test_start:fold.test_end]
         test_close = close.iloc[fold.test_start:fold.test_end]
         tested = backtest_positions(
             test_close, test_signal, fee_bps=float(fee_bps),
@@ -95,7 +117,8 @@ def run_strategy_walk_forward(
         )
         reports.append({
             "fold": number,
-            "selected_candidate": {"name": selected.name, "parameters": selected.parameters},
+            "selected_candidate": {"name": selected_name, "parameters": selected_parameters},
+            "selection_status": "cash_fallback_no_active_candidate" if selected_name == "cash" else "active_candidate_selected",
             "validation_candidates": validation_scores,
             "test": {
                 "bars": tested["bars"],
@@ -107,6 +130,7 @@ def run_strategy_walk_forward(
                 "trading_cost_total": tested["trading_cost_total"],
                 "buy_and_hold_net_return": benchmark["total_return"],
                 "beats_buy_and_hold": tested["total_return"] > benchmark["total_return"],
+                "no_trade": tested["exposure"] == 0.0,
             },
             "boundaries": {
                 "validation_start": fold.validation_start,
@@ -119,7 +143,7 @@ def run_strategy_walk_forward(
     returns = [item["test"]["net_return"] for item in reports]
     drawdowns = [item["test"]["max_drawdown"] for item in reports]
     return {
-        "method": "validation_selected_rule_based_walk_forward_v1",
+        "method": "validation_selected_rule_based_walk_forward_v2",
         "candidate_count": len(candidates),
         "fold_count": len(reports),
         "folds": reports,
@@ -128,13 +152,23 @@ def run_strategy_walk_forward(
             "median_test_net_return": float(np.median(returns)),
             "mean_test_max_drawdown": float(np.mean(drawdowns)),
             "folds_beating_buy_and_hold": int(sum(item["test"]["beats_buy_and_hold"] for item in reports)),
+            "cash_fallback_folds": int(sum(item["selected_candidate"]["name"] == "cash" for item in reports)),
+            "active_candidate_folds": int(sum(item["selected_candidate"]["name"] != "cash" for item in reports)),
         },
         "cost_assumptions_bps": {"fee": float(fee_bps), "slippage": float(slippage_bps)},
-        "selection_rule": "Highest validation net return plus 0.5 times validation max drawdown; deterministic tie-break.",
+        "selection_rule": (
+            "Among validation candidates with exposure >= 10% and at least 2 position changes, "
+            "select highest validation net return plus 0.5 times validation max drawdown; "
+            "otherwise explicitly select cash. Validation and test use identical configured costs."
+        ),
+        "minimum_activity": {
+            "validation_exposure": MIN_VALIDATION_EXPOSURE,
+            "validation_position_changes": MIN_VALIDATION_POSITION_CHANGES,
+        },
         "safety": {
             "is_trained_model": False,
             "is_trade_signal": False,
             "places_orders": False,
-            "warning": "Rule-based research only. Candidate selection uses validation windows; test windows are untouched until selection is frozen. Historical results do not establish future profitability.",
+            "warning": "Rule-based research only. Candidate selection uses validation windows; test windows are untouched until selection is frozen. Cash fallback is inactivity, not strategy alpha. Historical results do not establish future profitability.",
         },
     }

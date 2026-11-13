@@ -26,14 +26,22 @@ def candidate_set() -> list[Candidate]:
     ]
 
 
-def evaluate_candidate(close: pd.Series, candidate: Candidate) -> dict:
+def evaluate_candidate(
+    close: pd.Series,
+    candidate: Candidate,
+    *,
+    fee_bps: float = 6.0,
+    slippage_bps: float = 2.0,
+) -> dict:
     if candidate.name == "ma":
         signal = moving_average_signal(close, **candidate.parameters)
     elif candidate.name == "momentum":
         signal = momentum_signal(close, **candidate.parameters)
     else:
         raise ValueError(f"Unknown candidate strategy: {candidate.name}")
-    result = backtest_positions(close, signal)
+    result = backtest_positions(
+        close, signal, fee_bps=fee_bps, slippage_bps=slippage_bps,
+    )
     # Penalize severe drawdowns and reward returns; keep the score transparent.
     result["selection_score"] = result["total_return"] + 0.5 * result["max_drawdown"]
     result["candidate"] = candidate.name
