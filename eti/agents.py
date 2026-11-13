@@ -192,6 +192,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     from .artifacts import ModelArtifactStore
     artifact = ModelArtifactStore().save_model(model)
 
+    trading = evaluation.get("trading_performance", {})
     trading_folds = {item.get("fold"): item for item in trading.get("folds", [])}
     fold_diagnostics = []
     for fold in evaluation.get("folds", []):
@@ -206,7 +207,6 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
             "market_regimes": trading_fold.get("market_regimes"),
             "trading_metrics": trading_fold.get("trading", {}),
         })
-    trading = evaluation.get("trading_performance", {})
     return {
         "kind": "trained_model_candidate",
         "venue": venue,
