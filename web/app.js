@@ -128,7 +128,7 @@ $('#login-form').addEventListener('submit',async event=>{
   const data=await api('/v1/auth/token',{method:'POST',body:JSON.stringify({
    username:form.get('username'),password:form.get('password')
   })});
-  await acceptSession(data);formElement.reset();
+  await acceptSession(data);formElement?.reset?.();
  }catch(error){showAuth(error.message)}
 });
 $('#register-form').addEventListener('submit',async event=>{
@@ -138,7 +138,7 @@ $('#register-form').addEventListener('submit',async event=>{
   const data=await api('/v1/auth/register',{method:'POST',body:JSON.stringify({
    username:form.get('username'),password:form.get('password'),invite_code:form.get('invite_code')
   })});
-  await acceptSession(data);formElement.reset();
+  await acceptSession(data);formElement?.reset?.();
  }catch(error){showAuth(error.message)}
 });
 $('#signout').addEventListener('click',()=>{
@@ -176,7 +176,7 @@ $('#workspace-form').addEventListener('submit',async event=>{
  event.preventDefault();const formElement=event.currentTarget;const form=new FormData(formElement);
  try{
   const data=await api('/v1/workspaces',{method:'POST',body:JSON.stringify({name:form.get('name')})});
-  activeWorkspace=data.id;await loadWorkspaces();formElement.reset();
+  activeWorkspace=data.id;await loadWorkspaces();formElement?.reset?.();
   $('#account-message').textContent='Workspace created.';
  }catch(error){$('#account-message').textContent=error.message}
 });
