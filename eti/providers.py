@@ -1,4 +1,4 @@
-"""Extensible provider contracts; only CCXT crypto spot and local CSV are implemented."""
+"""Extensible market-data providers: crypto spot/derivatives and labelled local OHLCV files."""
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,15 +21,21 @@ class MarketDataProvider(Protocol):
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame: ...
 
 class CcxtPublicProvider:
-    """Public OHLCV provider for Binance/MEXC crypto spot; no private API methods."""
+    """Unauthenticated crypto OHLCV provider for explicitly selected CCXT market types."""
     provider_name = "ccxt-public"
     supported_asset_classes = ("crypto",)
-    def __init__(self, venue: str = "binance"):
+    supported_market_types = ("spot", "swap", "future")
+
+    def __init__(self, venue: str = "binance", market_type: str = "spot"):
         if venue not in ("binance", "mexc"):
             raise ValueError(f"Unsupported public venue: {venue}")
+        if market_type not in self.supported_market_types:
+            raise ValueError(f"Unsupported public market type: {market_type}")
         self.venue = venue
+        self.market_type = market_type
+
     def fetch_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 1500) -> pd.DataFrame:
-        return fetch_ohlcv(self.venue, symbol, timeframe, limit)
+        return fetch_ohlcv(self.venue, symbol, timeframe, limit, market_type=self.market_type)
 
 class CsvOHLCVProvider:
     """Local OHLCV adapter; the caller labels the instrument's asset class."""
