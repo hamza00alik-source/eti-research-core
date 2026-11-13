@@ -112,7 +112,7 @@ python -m eti.worker --poll-seconds 2
 ```
 
 - `--once` claims and processes at most one queued task; the polling mode runs continuously until stopped.
-- Task claiming uses an atomic SQLite transaction and a lease. Expired worker leases are requeued until the task's configured attempt limit (default 3, maximum 10); exhausted tasks fail closed.
+- Task claiming uses an atomic SQLite transaction and an unguessable lease token. Only the current, unexpired lease holder can complete or fail a task; stale workers cannot overwrite a reclaimed task. Expired leases and retryable provider failures are requeued until the task's configured attempt limit (default 3, maximum 10); exhausted tasks fail closed.
 - Unknown capability names fail as tasks; user payloads cannot register new handlers or execute code.
 - The worker is not started automatically by FastAPI. Deploy it as a separate process only after configuring the shared persistent database and monitoring.
 - SQLite remains a local/single-instance foundation. Multi-instance worker fleets require a PostgreSQL-backed queue and operational monitoring before production use.
