@@ -292,16 +292,16 @@ def test_autonomy_profile_schedules_owner_scoped_research_tasks_and_respects_int
     )
     assert profile["enabled"] is True
     first_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert store.enqueue_due_autonomy_tasks(first_time) == 2
+    assert store.enqueue_due_autonomy_tasks(first_time) == 6
     assert store.enqueue_due_autonomy_tasks(first_time) == 0
-    assert len(store.list_agent_tasks("owner-a", workspace["id"], status="queued")) == 2
+    assert len(store.list_agent_tasks("owner-a", workspace["id"], status="queued")) == 6
     assert store.list_agent_tasks("owner-b", workspace["id"]) == []
     assert store.enqueue_due_autonomy_tasks(
         datetime(2026, 1, 1, 0, 14, tzinfo=timezone.utc)
     ) == 0
     assert store.enqueue_due_autonomy_tasks(
         datetime(2026, 1, 1, 0, 15, tzinfo=timezone.utc)
-    ) == 2
+    ) == 6
 
 
 def test_autonomy_can_be_disabled_and_reconfigured(tmp_path):
@@ -336,7 +336,7 @@ def test_autonomy_schedules_separate_daily_model_training_tasks(tmp_path):
     assert profile["model_training_enabled"] is True
     assert profile["model_training_interval_seconds"] == 86400
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert store.enqueue_due_autonomy_tasks(start) == 2
+    assert store.enqueue_due_autonomy_tasks(start) == 10
     tasks = store.list_agent_tasks("owner-a", workspace["id"], status="queued")
     assert {task["target_capability"] for task in tasks} == {
         "market.snapshot", "model.train_research"
@@ -344,15 +344,19 @@ def test_autonomy_schedules_separate_daily_model_training_tasks(tmp_path):
     training = next(task for task in tasks if task["target_capability"] == "model.train_research")
     assert training["input"]["limit"] == 3000
     assert training["input"]["scheduled_by"] == "eti.autonomy.model_training"
+    training_tasks = [task for task in tasks if task["target_capability"] == "model.train_research"]
+    assert {task["input"]["asset_class"] for task in training_tasks} == {
+        "crypto", "forex", "equity", "commodity", "index"
+    }
     assert store.enqueue_due_autonomy_tasks(start) == 0
     assert store.enqueue_due_autonomy_tasks(
         datetime(2026, 1, 1, 0, 15, tzinfo=timezone.utc)
-    ) == 1
+    ) == 5
     assert store.enqueue_due_autonomy_tasks(
         datetime(2026, 1, 2, tzinfo=timezone.utc)
-    ) == 2
+    ) == 10
     all_tasks = store.list_agent_tasks("owner-a", workspace["id"])
-    assert sum(t["target_capability"] == "model.train_research" for t in all_tasks) == 2
+    assert sum(t["target_capability"] == "model.train_research" for t in all_tasks) == 10
 
 
 def test_model_training_schedule_is_bounded_and_disabled_by_default(tmp_path):
@@ -405,9 +409,13 @@ def test_autonomy_schedules_spot_and_perpetual_swap_research(tmp_path):
         market_types=["spot", "swap"],
     )
     assert profile["market_types"] == ["spot", "swap"]
-    assert store.enqueue_due_autonomy_tasks(datetime(2026, 1, 1, tzinfo=timezone.utc)) == 2
+    assert store.enqueue_due_autonomy_tasks(datetime(2026, 1, 1, tzinfo=timezone.utc)) == 6
     tasks = store.list_agent_tasks("owner", workspace["id"], status="queued")
-    inputs = {task["input"]["market_type"]: task["input"] for task in tasks}
-    assert inputs["spot"]["symbol"] == "BTC/USDT"
-    assert inputs["swap"]["symbol"] == "BTC/USDT:USDT"
+    crypto_inputs = {task["input"]["market_type"]: task["input"] for task in tasks
+                     if task["input"].get("asset_class", "crypto") == "crypto"}
+    assert crypto_inputs["spot"]["symbol"] == "BTC/USDT"
+    assert crypto_inputs["swap"]["symbol"] == "BTC/USDT:USDT"
+    assert {task["input"]["asset_class"] for task in tasks} == {
+        "crypto", "forex", "equity", "commodity", "index"
+    }
 

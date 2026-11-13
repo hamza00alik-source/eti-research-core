@@ -88,6 +88,7 @@ class AgentWorker:
             return
         payload = {
             "venue": task_input.get("venue", "mexc"),
+            "asset_class": task_input.get("asset_class", "crypto"),
             "market_type": task_input.get("market_type", "spot"),
             "symbol": task_input.get("symbol"),
             "timeframe": task_input.get("timeframe", "1h"), "limit": 500,
