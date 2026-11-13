@@ -153,3 +153,54 @@ def test_login_and_registration_are_rate_limited(tmp_path, monkeypatch):
             "invite_code": "wrong-invite-code",
         })
         assert limited_register.status_code == 429
+
+
+def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "models.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    monkeypatch.setenv("ETI_ADMIN_USERNAMES", "trainer_admin,reviewer_admin")
+    with TestClient(app) as client:
+        trainer = _register(client, "trainer_admin")
+        reviewer = _register(client, "reviewer_admin")
+        regular = _register(client, "ordinary_user")
+        trainer_headers = {"Authorization": f"Bearer {trainer['access_token']}"}
+        reviewer_headers = {"Authorization": f"Bearer {reviewer['access_token']}"}
+        regular_headers = {"Authorization": f"Bearer {regular['access_token']}"}
+
+        payload = {
+            "model_id": "eti-core",
+            "version": "0.3.0",
+            "artifact_uri": "artifact://eti-core/0.3.0",
+            "artifact_sha256": "a" * 64,
+            "input_schema": {"features": ["close", "volume"]},
+            "supported_classes": ["crypto_spot"],
+            "training_data_ref": "dataset:training-2026-11",
+            "evaluation_report": {"passed": True, "balanced_accuracy": 0.61},
+            "calibration_status": "calibrated",
+        }
+        assert client.post("/v1/models", headers=regular_headers, json=payload).status_code == 403
+        created = client.post("/v1/models", headers=trainer_headers, json=payload)
+        assert created.status_code == 201, created.text
+        assert created.json()["lifecycle"] == "candidate"
+
+        assert client.get("/v1/models", headers=regular_headers).json()["items"] == []
+        assert client.get("/v1/models/eti-core/0.3.0", headers=regular_headers).status_code == 404
+        assert client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=trainer_headers
+        ).status_code == 409
+
+        approved = client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers
+        )
+        assert approved.status_code == 200, approved.text
+        assert approved.json()["approved_by"] == "reviewer_admin"
+        visible = client.get("/v1/models", headers=regular_headers)
+        assert len(visible.json()["items"]) == 1
+        assert visible.json()["items"][0]["lifecycle"] == "approved"
+
+        retired = client.post(
+            "/v1/models/eti-core/0.3.0/retire", headers=trainer_headers
+        )
+        assert retired.status_code == 200
+        assert retired.json()["lifecycle"] == "retired"
