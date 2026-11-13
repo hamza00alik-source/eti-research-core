@@ -146,6 +146,7 @@ The PWA also displays the authenticated account's audit trail alongside its work
 - Set `ETI_ARTIFACT_DIR` to a persistent private server directory writable only by the trusted ETI service account.
 - `POST /v1/inference/{model_id}/{version}` serves approved versions only. Requests must specify a supported asset class and exactly the feature names in the registered schema; values and returned probabilities are validated. Requests are authenticated and rate-limited.
 - Inference returns short/flat/long probabilities only. It does not size a position, approve a trade, bypass the risk engine or place an order.
+- Model approval and inference also require calibration evidence embedded in the artifact: a passing temperature-scaling report, at least 30 calibration samples and a finite positive temperature. Registry metadata alone cannot make an uncalibrated artifact approvable. The current export CLI marks artifacts uncalibrated because the time-series calibration fitter is still pending.
 - No production model is trained or promoted by this change. The training-to-artifact-to-registry workflow and model drift monitoring remain to be completed before paper autonomy.
 
 
