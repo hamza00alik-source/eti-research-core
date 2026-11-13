@@ -67,6 +67,7 @@ class AgentTaskPayload(BaseModel):
     input: Any
     deadline_at: str | None = Field(default=None, max_length=40)
     max_attempts: int = Field(default=3, ge=1, le=10)
+    max_attempts: int = Field(default=3, ge=1, le=10)
 
 
 class AgentTaskUpdatePayload(BaseModel):
@@ -268,9 +269,12 @@ def get_agent_task(workspace_id: str, task_id: str,
 @app.patch("/v1/workspaces/{workspace_id}/agents/tasks/{task_id}")
 def update_agent_task(workspace_id: str, task_id: str, payload: AgentTaskUpdatePayload,
                       account: dict[str, str] = Depends(current_account)):
+    if payload.status != "cancelled" or payload.result is not None:
+        raise HTTPException(status_code=403,
+                            detail="Accounts may cancel tasks; only the worker may complete or fail them")
     try:
         return _memory_store().update_agent_task(
-            account["id"], workspace_id, task_id, payload.status, payload.result)
+            account["id"], workspace_id, task_id, payload.status)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="task not found") from exc
     except ValueError as exc:
