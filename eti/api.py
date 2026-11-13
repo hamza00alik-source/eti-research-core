@@ -5,11 +5,11 @@ import os
 import sqlite3
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .auth import AuthManager, AuthenticationError, RegistrationDisabled
+from .auth import AuthManager, AuthenticationError, RateLimitExceeded, RegistrationDisabled
 from .config import AppConfig
 from .decision import build_research_decision
 from .portfolio import assess_portfolio
@@ -90,6 +90,22 @@ def _memory_store() -> MemoryStore:
     return MemoryStore()
 
 
+def _enforce_auth_rate_limit(
+    scope: str, request: Request, *, limit: int, window_seconds: int
+) -> AuthManager:
+    manager = _auth_manager()
+    # Use the transport peer address, not an untrusted X-Forwarded-For header.
+    subject = request.client.host if request.client is not None else "unknown"
+    try:
+        manager.consume_rate_limit(scope, subject, limit=limit, window_seconds=window_seconds)
+    except RateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=429, detail="Too many authentication requests. Try again later.",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    return manager
+
+
 def current_account(authorization: str | None = Header(default=None)) -> dict[str, str]:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required",
@@ -108,8 +124,8 @@ def _require_workspace(store: MemoryStore, account: dict[str, str], workspace_id
 
 
 @app.post("/v1/auth/register", status_code=201)
-def register(payload: RegisterPayload):
-    manager = _auth_manager()
+def register(payload: RegisterPayload, request: Request):
+    manager = _enforce_auth_rate_limit("register", request, limit=5, window_seconds=3600)
     try:
         account = manager.register(payload.username, payload.password, payload.invite_code)
     except RegistrationDisabled as exc:
@@ -123,8 +139,8 @@ def register(payload: RegisterPayload):
 
 
 @app.post("/v1/auth/token")
-def login(payload: LoginPayload):
-    manager = _auth_manager()
+def login(payload: LoginPayload, request: Request):
+    manager = _enforce_auth_rate_limit("login", request, limit=10, window_seconds=60)
     try:
         account = manager.authenticate(payload.username, payload.password)
     except ValueError as exc:
