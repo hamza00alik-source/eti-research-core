@@ -587,10 +587,10 @@ if('serviceWorker'in navigator){
  const status=$('#universe-status'),results=$('#universe-results');
  const make=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
  button.addEventListener('click',async()=>{
-  const venue=$('#universe-venue').value,marketType=$('#universe-market-type').value,limit=$('#universe-limit').value;
+  const assetClass=$('#universe-asset-class').value,venue=$('#universe-venue').value,marketType=$('#universe-market-type').value,limit=$('#universe-limit').value;
   button.disabled=true;status.textContent='Loading public exchange market catalogue…';results.replaceChildren();
   try{
-   const data=await api('/v1/markets/discover?'+new URLSearchParams({venue,market_type:marketType,limit}));
+   const data=await api('/v1/markets/discover?'+new URLSearchParams({asset_class:assetClass,venue,market_type:marketType,limit}));
    status.textContent=data.instrument_count+' instruments discovered · '+data.discovery_source;
    data.instruments.forEach(item=>{
     const card=make('article','task-item');
@@ -601,15 +601,22 @@ if('serviceWorker'in navigator){
     queue.type='button';queue.addEventListener('click',async()=>{
      if(!activeWorkspace){status.textContent='Create or select a workspace before queuing research.';return}
      queue.disabled=true;
-     try{const task=await api('/v1/workspaces/'+encodeURIComponent(activeWorkspace)+'/agents/tasks',{method:'POST',body:JSON.stringify({target_capability:'market.snapshot',input:{venue,asset_class:'crypto',market_type:marketType,symbol:item.symbol,timeframe:'1h',limit:200,scheduled_by:'manual.market.discovery'},max_attempts:2})});queue.textContent='Queued · '+task.id.slice(0,8)}
+     try{const task=await api('/v1/workspaces/'+encodeURIComponent(activeWorkspace)+'/agents/tasks',{method:'POST',body:JSON.stringify({target_capability:'market.snapshot',input:{venue:data.venue,asset_class:assetClass,market_type:marketType,symbol:item.symbol,timeframe:'1h',limit:200,scheduled_by:'manual.market.discovery'},max_attempts:2})});queue.textContent='Queued · '+task.id.slice(0,8)}
      catch(error){queue.disabled=false;status.textContent='Could not queue '+item.symbol+': '+error.message}
     });
     actions.append(queue);
-    if(marketType==='swap'||marketType==='future'){
+    const train=make('button','secondary-button','Queue model training');train.type='button';
+    train.addEventListener('click',async()=>{
+     if(!activeWorkspace){status.textContent='Create or select a workspace before queuing training.';return}
+     train.disabled=true;
+     try{const task=await api('/v1/workspaces/'+encodeURIComponent(activeWorkspace)+'/agents/tasks',{method:'POST',body:JSON.stringify({target_capability:'model.train_research',input:{venue:data.venue,asset_class:assetClass,market_type:marketType,symbol:item.symbol,timeframe:'1h',limit:3000,horizon:6,scheduled_by:'manual.market.discovery'},max_attempts:2})});train.textContent='Training queued · '+task.id.slice(0,8)}
+     catch(error){train.disabled=false;status.textContent='Could not queue training for '+item.symbol+': '+error.message}
+    });actions.append(train);
+    if(assetClass==='crypto'&&(marketType==='swap'||marketType==='future')){
      const context=make('button','secondary-button','Funding / OI data');context.type='button';
      context.addEventListener('click',async()=>{
       context.disabled=true;context.textContent='Loading…';
-      try{const report=await api('/v1/markets/derivatives/context?'+new URLSearchParams({venue,market_type:marketType,symbol:item.symbol,timeframe:'1h',limit:'100'}));
+      try{const report=await api('/v1/markets/derivatives/context?'+new URLSearchParams({venue:data.venue,market_type:marketType,symbol:item.symbol,timeframe:'1h',limit:'100'}));
        const pre=make('pre','task-result',JSON.stringify(report,null,2));card.append(pre);context.textContent='Refresh funding / OI';}
       catch(error){context.textContent='Data unavailable';status.textContent=item.symbol+': '+error.message}
       finally{context.disabled=false}
