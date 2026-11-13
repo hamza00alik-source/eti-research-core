@@ -219,7 +219,9 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
         calibration_report = {"passed": True, "sample_count": 100}
 
     monkeypatch.setattr(agents, "CcxtPublicProvider", FakeProvider)
-    monkeypatch.setattr(pipeline, "run_nested_experiment", lambda *a, **k: {
+    def fake_nested(*args, **kwargs):
+        captured["allow_short"] = kwargs.get("allow_short")
+        return {
         "fold_count": 2, "mean_test_balanced_accuracy": 0.51,
         "test_balanced_accuracy_ci": {"lower": 0.45, "upper": 0.57},
         "folds": [{"fold": 0, "selected_candidate": "hist_gradient_boosting",
@@ -228,7 +230,8 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
                    "boundaries": {"test_start": 700, "test_end": 800}}],
         "trading_performance": {"summary": {"mean_net_return": -0.01}},
         "warning": "research only",
-    })
+    }
+    monkeypatch.setattr(pipeline, "run_nested_experiment", fake_nested)
     monkeypatch.setattr(pipeline, "fit_deployable_model", lambda *a, **k: (
         FakeModel(), {"features": ["ret_1"], "calibration_status": "calibrated"}
     ))
@@ -241,12 +244,16 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
     import eti.artifacts as artifacts
     monkeypatch.setattr(artifacts, "ModelArtifactStore", FakeArtifactStore)
     result = agents.model_training_research({
-        "venue": "mexc", "symbol": "BTC/USDT", "timeframe": "1h", "limit": 1600
+        "venue": "mexc", "market_type": "swap", "symbol": "BTC/USDT:USDT",
+        "timeframe": "1h", "limit": 1600
     })
 
     assert captured["venue"] == "mexc"
-    assert captured["market_type"] == "spot"
-    assert captured["request"] == ("BTC/USDT", "1h", 1600)
+    assert captured["market_type"] == "swap"
+    assert captured["request"] == ("BTC/USDT:USDT", "1h", 1600)
+    assert captured["allow_short"] is True
+    assert result["market_type"] == "swap"
+    assert result["evaluation_passed"] is False
     assert result["kind"] == "trained_model_candidate"
     assert result["training_performed"] is True
     assert result["lifecycle"] == "unregistered_candidate"
