@@ -133,9 +133,9 @@ class BaselineModel:
         return report
 
     def calibration_temperature(self) -> float | None:
-        if self.calibration_status != "calibrated":
+        if getattr(self, "calibration_status", "uncalibrated") != "calibrated":
             return None
-        report = self.calibration_report
+        report = getattr(self, "calibration_report", None)
         if not isinstance(report, dict):
             raise RuntimeError("Calibrated model is missing its calibration report")
         temperature = report.get("temperature")
