@@ -123,6 +123,8 @@ class BaselineModel:
             raise RuntimeError("Calibrated model is missing its calibration report")
         temperature = report.get("temperature")
         sample_count = report.get("sample_count")
+        nll_before = report.get("nll_before")
+        nll_after = report.get("nll_after")
         if (
             report.get("passed") is not True
             or report.get("method") != "temperature_scaling"
@@ -130,6 +132,10 @@ class BaselineModel:
             or sample_count < 30
             or isinstance(temperature, bool) or not isinstance(temperature, (int, float))
             or not np.isfinite(temperature) or temperature <= 0
+            or isinstance(nll_before, bool) or not isinstance(nll_before, (int, float))
+            or isinstance(nll_after, bool) or not isinstance(nll_after, (int, float))
+            or not np.isfinite(nll_before) or not np.isfinite(nll_after)
+            or nll_after > nll_before + 1e-9
         ):
             raise RuntimeError("Model calibration report is invalid")
         return float(temperature)
