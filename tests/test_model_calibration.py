@@ -135,3 +135,14 @@ def test_model_missing_training_class_cannot_be_calibrated():
     assert report["passed"] is False
     assert report["reason"] == "training_model_missing_one_or_more_classes"
     assert model.calibration_status == "uncalibrated"
+
+
+@pytest.mark.parametrize("labels", [
+    np.array([0, 1, 3]),
+    np.array([0.0, 1.5, 2.0]),
+    np.array([0.0, 1.0, np.nan]),
+])
+def test_training_rejects_invalid_class_ids(labels):
+    model = BaselineModel()
+    with pytest.raises(ValueError):
+        model.fit(pd.DataFrame({"x": [1.0, 2.0, 3.0]}), labels)
