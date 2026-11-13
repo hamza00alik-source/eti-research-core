@@ -172,6 +172,9 @@ def test_login_and_registration_are_rate_limited(tmp_path, monkeypatch):
 
 def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeypatch):
     class CalibratedStub:
+        estimator = type("Estimator", (), {
+            "feature_names_in_": np.array(["feature_a", "feature_b"])
+        })()
         calibration_status = "calibrated"
         calibration_report = {
             "passed": True, "method": "temperature_scaling",
@@ -278,6 +281,9 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
     monkeypatch.setenv("ETI_ADMIN_USERNAMES", "trainer_admin,reviewer_admin")
 
     class StubModel:
+        estimator = type("Estimator", (), {
+            "feature_names_in_": np.array(["feature_a", "feature_b"])
+        })()
         probabilities = [0.2, 0.5, 0.3]
         calibration_status = "calibrated"
         calibration_report = {
