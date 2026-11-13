@@ -39,7 +39,23 @@ async function acceptSession(data){
  accessToken=data.access_token;sessionStorage.setItem(TOKEN_KEY,accessToken);
  showAccount(data.account);await loadWorkspaces();
 }
+async function loadCapabilities(){
+ const select=$('#capability-select');
+ if(!select)return;
+ try{
+  const data=await api('/v1/agents/capabilities');
+  const previous=select.value;
+  select.replaceChildren();
+  for(const capability of data.items)select.add(new Option(capability,capability));
+  if(data.items.includes(previous))select.value=previous;
+  if(!data.items.length)select.add(new Option('No capabilities available',''));
+ }catch(error){
+  select.replaceChildren(new Option('Capabilities unavailable',''));
+  $('#account-message').textContent='Could not load registered agent capabilities: '+error.message;
+ }
+}
 async function loadWorkspaces(){
+ await loadCapabilities();
  const data=await api('/v1/workspaces');
  const select=$('#workspace-select');select.replaceChildren(new Option('Select workspace',''));
  for(const workspace of data.items)select.add(new Option(workspace.name,workspace.id));
