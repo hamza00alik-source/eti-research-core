@@ -372,7 +372,7 @@ class MemoryStore:
                 or not 86400 <= model_training_interval_seconds <= 604800):
             raise ValueError("model_training_interval_seconds must be between 86400 and 604800")
         if model_training_enabled and len(set(venues)) * len(set(symbols)) * len(set(timeframes)) * len(set(market_types)) > 8:
-            raise ValueError("model training schedule supports at most 8 market combinations")
+            raise ValueError("model training schedule supports at most 10 market combinations")
         now = _utc_now()
         with self._connection() as conn:
             if not self._owns_workspace(conn, owner_id, workspace_id):
@@ -455,6 +455,8 @@ class MemoryStore:
                                 market_symbol = symbol
                                 if market_type == "swap" and symbol.endswith("/USDT") and ":" not in symbol:
                                     market_symbol = symbol + ":USDT"
+                                if market_type == "future" and (":" not in symbol or "-" not in symbol):
+                                    continue
                                 for timeframe in timeframes:
                                     task_id = str(uuid4())
                                     payload = {
@@ -531,31 +533,44 @@ class MemoryStore:
                         "UPDATE autonomy_profiles SET last_model_training_at=?, updated_at=? WHERE owner_id=?",
                         (now_text, now_text, row["owner_id"]),
                     )
-                    # Daily training uses a bounded cross-asset benchmark universe.
-                    training_jobs: list[dict[str, str]] = []
-                    for market_type in market_types:
-                        for symbol in symbols[:2]:
-                            market_symbol = symbol
-                            if market_type == "swap" and symbol.endswith("/USDT") and ":" not in symbol:
-                                market_symbol = symbol + ":USDT"
-                            if market_type == "future" and (":" not in symbol or "-" not in symbol):
-                                continue
-                            training_jobs.append({
-                                "venue": venues[0], "asset_class": "crypto",
-                                "market_type": market_type, "symbol": market_symbol,
-                            })
-                    # Reserve four of the eight daily training slots for non-crypto asset classes.
-                    training_jobs = training_jobs[:4]
-                    for asset_class, market_type, symbol in [
-                        ("forex", "spot", "EURUSD=X"),
-                        ("equity", "spot", "AAPL"),
-                        ("commodity", "future", "GC=F"),
-                        ("index", "spot", "^GSPC"),
-                    ]:
-                        training_jobs.append({
-                            "venue": "yahoo", "asset_class": asset_class,
-                            "market_type": market_type, "symbol": symbol,
-                        })
+                    # Discover the live crypto universe each day, then train on its highest-volume instruments.
+                    discovery_jobs = [
+                        (venue, market_type)
+                        for venue in ("binance", "mexc")
+                        for market_type in ("spot", "swap", "future")
+                    ]
+                    for venue, market_type in discovery_jobs:
+                        task_id = str(uuid4())
+                        payload = {
+                            "venue": venue, "asset_class": "crypto",
+                            "market_type": market_type, "limit": 100,
+                            "scheduled_by": "eti.autonomy.model_training",
+                        }
+                        conn.execute(
+                            """INSERT INTO agent_tasks
+                            (id,owner_id,workspace_id,requester,target_capability,status,input_json,
+                             max_attempts,created_at,updated_at)
+                            VALUES(?,?,?,?,?,'queued',?,2,?,?)""",
+                            (task_id, row["owner_id"], row["workspace_id"],
+                             "eti.autonomy.model_training", "market.discover",
+                             _encode_json(payload), now_text, now_text),
+                        )
+                        conn.execute(
+                            """INSERT INTO audit_events
+                            (id,owner_id,workspace_id,event_type,payload_json,created_at)
+                            VALUES(?,?,?,?,?,?)""",
+                            (str(uuid4()), row["owner_id"], row["workspace_id"],
+                             "autonomy.market_discovery.scheduled",
+                             _encode_json({"task_id": task_id, **payload}), now_text),
+                        )
+                        queued += 1
+                    # Four cross-asset reference models complement the dynamically discovered crypto candidates.
+                    training_jobs = [
+                        {"venue": "yahoo", "asset_class": "forex", "market_type": "spot", "symbol": "EURUSD=X"},
+                        {"venue": "yahoo", "asset_class": "equity", "market_type": "spot", "symbol": "AAPL"},
+                        {"venue": "yahoo", "asset_class": "commodity", "market_type": "future", "symbol": "GC=F"},
+                        {"venue": "yahoo", "asset_class": "index", "market_type": "spot", "symbol": "^GSPC"},
+                    ]
                     for job in training_jobs:
                         timeframe = timeframes[0]
                         task_id = str(uuid4())

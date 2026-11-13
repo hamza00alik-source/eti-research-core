@@ -336,27 +336,35 @@ def test_autonomy_schedules_separate_daily_model_training_tasks(tmp_path):
     assert profile["model_training_enabled"] is True
     assert profile["model_training_interval_seconds"] == 86400
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert store.enqueue_due_autonomy_tasks(start) == 10
+    assert store.enqueue_due_autonomy_tasks(start) == 15
     tasks = store.list_agent_tasks("owner-a", workspace["id"], status="queued")
     assert {task["target_capability"] for task in tasks} == {
-        "market.snapshot", "model.train_research"
+        "market.snapshot", "market.discover", "model.train_research"
+    }
+    discoveries = [task for task in tasks if task["target_capability"] == "market.discover"]
+    assert len(discoveries) == 6
+    assert {(task["input"]["venue"], task["input"]["market_type"]) for task in discoveries} == {
+        (venue, market_type) for venue in ("binance", "mexc")
+        for market_type in ("spot", "swap", "future")
     }
     training = next(task for task in tasks if task["target_capability"] == "model.train_research")
     assert training["input"]["limit"] == 3000
     assert training["input"]["scheduled_by"] == "eti.autonomy.model_training"
     training_tasks = [task for task in tasks if task["target_capability"] == "model.train_research"]
     assert {task["input"]["asset_class"] for task in training_tasks} == {
-        "crypto", "forex", "equity", "commodity", "index"
+        "forex", "equity", "commodity", "index"
     }
+    assert len(training_tasks) == 4
     assert store.enqueue_due_autonomy_tasks(start) == 0
     assert store.enqueue_due_autonomy_tasks(
         datetime(2026, 1, 1, 0, 15, tzinfo=timezone.utc)
     ) == 5
     assert store.enqueue_due_autonomy_tasks(
         datetime(2026, 1, 2, tzinfo=timezone.utc)
-    ) == 10
+    ) == 15
     all_tasks = store.list_agent_tasks("owner-a", workspace["id"])
-    assert sum(t["target_capability"] == "model.train_research" for t in all_tasks) == 10
+    assert sum(t["target_capability"] == "model.train_research" for t in all_tasks) == 8
+    assert sum(t["target_capability"] == "market.discover" for t in all_tasks) == 12
 
 
 def test_model_training_schedule_is_bounded_and_disabled_by_default(tmp_path):
@@ -364,12 +372,12 @@ def test_model_training_schedule_is_bounded_and_disabled_by_default(tmp_path):
     workspace = store.create_workspace("owner-a", "research")
     profile = store.configure_autonomy("owner-a", workspace["id"], True)
     assert profile["model_training_enabled"] is False
-    with pytest.raises(ValueError, match="at most 8"):
+    with pytest.raises(ValueError, match="at most 10"):
         store.configure_autonomy(
             "owner-a", workspace["id"], True,
             venues=["binance", "mexc"],
             symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT"],
-            timeframes=["1h"], model_training_enabled=True,
+            timeframes=["1h"], market_types=["spot", "swap"], model_training_enabled=True,
         )
 
 
@@ -419,3 +427,19 @@ def test_autonomy_schedules_spot_and_perpetual_swap_research(tmp_path):
         "crypto", "forex", "equity", "commodity", "index"
     }
 
+
+
+def test_autonomy_skips_dated_future_scan_without_exact_contract_symbol(tmp_path):
+    from datetime import datetime, timezone
+    store = MemoryStore(tmp_path / "future-symbol-guard.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    store.configure_autonomy(
+        "owner", workspace["id"], True, venues=["binance"],
+        symbols=["BTC/USDT"], timeframes=["1h"],
+        market_types=["spot", "swap", "future"],
+    )
+    store.enqueue_due_autonomy_tasks(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    tasks = store.list_agent_tasks("owner", workspace["id"], status="queued")
+    crypto_types = {task["input"]["market_type"] for task in tasks
+                    if task["input"].get("asset_class") == "crypto"}
+    assert crypto_types == {"spot", "swap"}

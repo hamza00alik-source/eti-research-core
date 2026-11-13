@@ -213,6 +213,17 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
         def fetch_ohlcv(self, symbol, timeframe, limit):
             captured["request"] = (symbol, timeframe, limit)
             return frame
+        def fetch_derivatives_context(self, symbol, timeframe, limit):
+            captured["derivatives_request"] = (symbol, timeframe, limit)
+            funding = [{"timestamp": int(pd.Timestamp(frame.iloc[i]["timestamp"]).timestamp() * 1000),
+                        "funding_rate": 0.0001} for i in range(0, len(frame), 8)]
+            oi = [{"timestamp": int(pd.Timestamp(row["timestamp"]).timestamp() * 1000),
+                   "open_interest": 1000.0 + index}
+                  for index, row in frame.iterrows()]
+            return {"funding_history": funding, "open_interest_history": oi,
+                    "history_coverage": {"has_historical_funding": True,
+                                         "has_historical_open_interest": True},
+                    "availability": {}}
 
     class FakeModel:
         calibration_status = "calibrated"
@@ -252,6 +263,10 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
     assert captured["market_type"] == "swap"
     assert captured["request"] == ("BTC/USDT:USDT", "1h", 1600)
     assert captured["allow_short"] is True
+    assert captured["derivatives_request"] == ("BTC/USDT:USDT", "1h", 1000)
+    assert result["derivative_feature_coverage"]["funding_feature_rows"] >= 1500
+    assert result["derivative_feature_coverage"]["open_interest_feature_rows"] >= 1500
+    assert result["derivative_feature_coverage"]["funding_bps_per_bar_conservative"] == pytest.approx(0.125)
     assert result["market_type"] == "swap"
     assert result["evaluation_passed"] is False
     assert result["kind"] == "trained_model_candidate"
@@ -348,6 +363,11 @@ def test_market_snapshot_accepts_explicit_crypto_perpetual_market(monkeypatch):
         def fetch_ohlcv(self, symbol, timeframe, limit):
             captured["symbol"] = symbol
             return frame
+        def fetch_derivatives_context(self, symbol, timeframe, limit):
+            return {"funding_history": [], "open_interest_history": [],
+                    "history_coverage": {"has_historical_funding": False,
+                                         "has_historical_open_interest": False},
+                    "availability": {}}
 
     monkeypatch.setattr(agents, "CcxtPublicProvider", FakeProvider)
     monkeypatch.setattr(agents, "build_features",
@@ -411,3 +431,138 @@ def test_autonomous_snapshot_followup_preserves_noncrypto_asset_class(tmp_path):
     assert queued[0]["input"]["asset_class"] == "equity"
     assert queued[0]["input"]["venue"] == "yahoo"
     assert queued[0]["input"]["symbol"] == "AAPL"
+
+
+def test_derivative_features_are_selected_only_when_history_is_present():
+    import pandas as pd
+    from eti.data import validate_ohlcv
+    from eti.features import BASE_FEATURE_COLUMNS, build_features, feature_columns_for_frame
+
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=60, freq="h", tz="UTC"),
+        "open": [100.0 + i for i in range(60)], "high": [102.0 + i for i in range(60)],
+        "low": [99.0 + i for i in range(60)], "close": [101.0 + i for i in range(60)],
+        "volume": [10.0] * 60, "funding_rate": [0.0001] * 60,
+        "open_interest": [1000.0 + i * 2 for i in range(60)],
+    })
+    clean = validate_ohlcv(frame)
+    columns = feature_columns_for_frame(clean)
+    features = build_features(clean)
+    assert columns == BASE_FEATURE_COLUMNS + ["funding_rate", "open_interest_change"]
+    assert features["funding_rate"].iloc[-1] == pytest.approx(0.0001)
+    assert features["open_interest_change"].iloc[-1] > 0
+
+
+def test_derivatives_history_asof_join_does_not_use_future_observations():
+    import pandas as pd
+    from eti.providers import enrich_ohlcv_with_derivatives
+
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=3, freq="h", tz="UTC"),
+        "open": [100.0] * 3, "high": [101.0] * 3,
+        "low": [99.0] * 3, "close": [100.0] * 3, "volume": [1.0] * 3,
+    })
+    context = {
+        "funding_history": [{"timestamp": int(pd.Timestamp("2026-01-01T01:00:00Z").timestamp() * 1000), "funding_rate": 0.001}],
+        "open_interest_history": [{"timestamp": int(pd.Timestamp("2026-01-01T01:00:00Z").timestamp() * 1000), "open_interest": 200.0}],
+    }
+    result = enrich_ohlcv_with_derivatives(frame, context, "1h")
+    assert pd.isna(result.loc[0, "funding_rate"])
+    assert result.loc[1, "funding_rate"] == pytest.approx(0.001)
+    assert result.loc[2, "open_interest"] == pytest.approx(200.0)
+
+
+def test_default_registry_exposes_dynamic_market_and_derivative_research():
+    from eti.agents import default_capabilities
+    capabilities = default_capabilities().capabilities()
+    assert "market.discover" in capabilities
+    assert "derivatives.context" in capabilities
+
+
+def test_market_discovery_ranks_active_quote_markets(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from eti.providers import CcxtPublicProvider
+
+    class FakeExchange:
+        has = {"fetchTickers": True}
+        def load_markets(self):
+            return {
+                "BTC/USDT": {"active": True, "spot": True, "quote": "USDT", "base": "BTC"},
+                "ETH/USDT": {"active": True, "spot": True, "quote": "USDT", "base": "ETH"},
+                "OLD/USDT": {"active": False, "spot": True, "quote": "USDT", "base": "OLD"},
+                "BTC/USDT:USDT": {"active": True, "swap": True, "quote": "USDT", "base": "BTC", "linear": True},
+            }
+        def fetch_tickers(self, symbols):
+            return {"BTC/USDT": {"quoteVolume": 10}, "ETH/USDT": {"quoteVolume": 50}}
+
+    monkeypatch.setitem(sys.modules, "ccxt", SimpleNamespace(binance=lambda _config: FakeExchange()))
+    result = CcxtPublicProvider("binance", "spot").discover_markets(limit=10)
+    assert [item["symbol"] for item in result] == ["ETH/USDT", "BTC/USDT"]
+    assert all(item["market_type"] == "spot" for item in result)
+
+
+def test_derivative_context_reports_unavailable_history_without_fabricating(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from eti.providers import CcxtPublicProvider
+
+    class FakeExchange:
+        has = {"fetchFundingRateHistory": False, "fetchFundingRate": False,
+               "fetchOpenInterestHistory": False, "fetchOpenInterest": False}
+        def load_markets(self):
+            return {"BTC/USDT:USDT": {"swap": True}}
+        def milliseconds(self): return 1760000000000
+        def parse_timeframe(self, _timeframe): return 3600
+
+    monkeypatch.setitem(sys.modules, "ccxt", SimpleNamespace(binance=lambda _config: FakeExchange()))
+    result = CcxtPublicProvider("binance", "swap").fetch_derivatives_context("BTC/USDT:USDT")
+    assert result["funding_history"] == []
+    assert result["open_interest_history"] == []
+    assert result["current_funding"] is None
+    assert result["current_open_interest"] is None
+    assert result["history_coverage"]["has_historical_funding"] is False
+
+
+def test_yahoo_reference_discovery_covers_all_noncrypto_asset_classes():
+    from eti.agents import discover_market_universe
+    expected = {
+        "forex": "EURUSD=X", "equity": "AAPL",
+        "commodity": "GC=F", "index": "^GSPC",
+    }
+    for asset_class, symbol in expected.items():
+        market_type = "future" if asset_class == "commodity" else "spot"
+        result = discover_market_universe({"asset_class": asset_class, "market_type": market_type})
+        assert result["venue"] == "yahoo"
+        assert result["instrument_count"] > 0
+        assert symbol in {item["symbol"] for item in result["instruments"]}
+
+
+def test_autonomous_market_discovery_queues_top_instrument_training_once(tmp_path):
+    from eti.agents import AgentCapabilityRegistry
+    from eti.worker import AgentWorker
+
+    store = MemoryStore(tmp_path / "discovery-training.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    task = store.create_agent_task(
+        "owner", workspace["id"], "eti.autonomy.model_training", "market.discover",
+        {"venue": "binance", "asset_class": "crypto", "market_type": "swap",
+         "limit": 100, "scheduled_by": "eti.autonomy.model_training"},
+    )
+    discovered = {"kind": "market_universe_discovery", "instruments": [
+        {"symbol": "BTC/USDT:USDT", "venue": "binance", "asset_class": "crypto",
+         "market_type": "swap", "quote_volume": 1000000},
+        {"symbol": "ETH/USDT:USDT", "venue": "binance", "asset_class": "crypto",
+         "market_type": "swap", "quote_volume": 500000},
+    ]}
+    registry = AgentCapabilityRegistry()
+    registry.register("market.discover", lambda _payload: discovered)
+    worker = AgentWorker(store, registry)
+    completed = worker.run_once()
+    assert completed["status"] == "completed"
+    worker._enqueue_discovered_model_training(task, discovered)
+    queued = store.list_agent_tasks("owner", workspace["id"], status="queued")
+    assert len(queued) == 1
+    assert queued[0]["target_capability"] == "model.train_research"
+    assert queued[0]["input"]["symbol"] == "BTC/USDT:USDT"
+    assert queued[0]["input"]["source_discovery_task_id"] == task["id"]

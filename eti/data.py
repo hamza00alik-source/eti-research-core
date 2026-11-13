@@ -15,7 +15,8 @@ def validate_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
     missing = set(OHLCV_COLUMNS) - set(frame.columns)
     if missing:
         raise ValueError(f"Missing OHLCV columns: {sorted(missing)}")
-    out = frame[OHLCV_COLUMNS].copy()
+    optional_columns = [name for name in ("funding_rate", "open_interest") if name in frame.columns]
+    out = frame[OHLCV_COLUMNS + optional_columns].copy()
     # CCXT returns Unix epoch timestamps in milliseconds. Passing those
     # integers to pandas without a unit interprets them as nanoseconds,
     # silently moving candles to 1970 and causing valid history to be dropped.
@@ -29,7 +30,10 @@ def validate_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
         )
     for col in OHLCV_COLUMNS[1:]:
         out[col] = pd.to_numeric(out[col], errors="coerce")
-    out = out.replace([np.inf, -np.inf], np.nan).dropna()
+    out[OHLCV_COLUMNS] = out[OHLCV_COLUMNS].replace([np.inf, -np.inf], np.nan)
+    out = out.dropna(subset=OHLCV_COLUMNS)
+    for name in optional_columns:
+        out[name] = pd.to_numeric(out[name], errors="coerce").replace([np.inf, -np.inf], np.nan)
     out = out.sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
     if out.empty:
         raise ValueError("No valid OHLCV candles")

@@ -6,8 +6,8 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 
 - Live spot execution is available but disabled by default. It requires owner-managed credentials, saved capital/risk limits and explicit one-time owner authorization; no per-trade approval is required.
 - Live execution remains Binance/MEXC spot only and disabled by default. Research data now distinguishes crypto spot, perpetual swaps and dated futures where each exchange lists the requested contract. Derivative execution is not implemented.
-- Public Yahoo Finance OHLCV research adapter is available for forex, equities, indices and commodities (Yahoo ticker notation such as EURUSD=X, AAPL, ^GSPC and GC=F). The owner-controlled autonomous loop includes a small cross-asset benchmark watchlist for those asset classes. This is public market-data access, not an authenticated broker feed; history and interval coverage vary. Validated CSV remains available as a fallback.
-- Derivative and non-crypto candidate training is exploratory: long/short price-only evaluation is available, but funding history, open interest, liquidation data, financing, corporate actions, rolls and contract-specific margin/fee schedules are incomplete. A quality gate prevents unsupported candidates from passing approval.
+- Public Yahoo Finance OHLCV research adapter is available for forex, equities, indices and commodities (Yahoo ticker notation such as EURUSD=X, AAPL, ^GSPC and GC=F). The owner-controlled autonomous loop discovers active crypto spot, perpetual-swap and dated-future listings across Binance/MEXC each day, then queues up to one top-ranked instrument per discovery. It also schedules forex, equity, commodity and index reference models, for up to ten candidate-training runs per daily cycle. This is public market-data access, not an authenticated broker feed; history and interval coverage vary. Validated CSV remains available as a fallback.
+- Derivative and non-crypto candidate training is exploratory: historical funding and open-interest features are used when supplied, but liquidation data is not yet a model feature and side-aware funding settlement, financing, corporate actions, futures rolls and contract-specific margin/fee schedules remain incomplete. A quality gate prevents unsupported candidates from passing approval.
 - Training does not run on application startup or in CI. It can be launched manually through the research capability/CLI or scheduled by the owner in the autonomous research settings; scheduled candidates remain subject to the same quality gates.
 - No profitability claim: backtests do not establish future performance.
 - Independent risk: model decisions must pass deterministic risk and portfolio checks; defaults disable shorts and leverage above 1x.
@@ -203,3 +203,12 @@ python -m eti.pipeline --exchange mexc --symbol BTC/USDT \
 ```
 
 If the calibration window has fewer than 30 rows, fewer than five examples of any class, or temperature scaling does not improve calibration-window log loss, the artifact remains `uncalibrated` and cannot be approved. A passing calibration report is not evidence of profitability and must be reviewed alongside out-of-sample trading metrics. The export does not register or approve the model; an independent evaluation report and reviewer approval are still required before inference. The export flag is explicit; API startup, CI and worker startup never train or export models.
+
+
+## Global market discovery and derivatives research
+
+- Authenticated dashboard discovery can list active Binance/MEXC spot, perpetual-swap and dated-future instruments, ranking by public quote volume when the venue supports bulk tickers.
+- Derivatives research can request current funding/open-interest values and historical funding/open-interest observations where CCXT and the selected venue expose those endpoints. Unsupported endpoints are reported explicitly; missing values are never synthesized.
+- When historical funding and open-interest data are available, ETI aligns them to completed OHLCV candles with backward-only as-of joins and trains dedicated funding-rate and open-interest-change features. No future observation is joined to an earlier candle.
+- Nested derivative evaluation applies a conservative absolute funding drag estimated from observed funding intervals, plus explicit fee and slippage assumptions. This approximation is not side-aware exchange settlement.
+- Derivative candidates remain blocked from approval because liquidation, contract-specific fee schedules, funding-side settlement, margin tiers, mark/index-price risk and venue execution controls are not yet independently validated. Live execution remains spot-only.
