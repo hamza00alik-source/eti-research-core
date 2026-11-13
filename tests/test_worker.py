@@ -150,7 +150,8 @@ def test_worker_keeps_quality_failed_model_as_unapproved_candidate(tmp_path):
     workspace = _workspace(store)
     worker = AgentWorker(store, registry=AgentCapabilityRegistry())
     result = {
-        "venue": "mexc", "symbol": "BTC/USDT", "timeframe": "1h",
+        "venue": "mexc", "asset_class": "crypto", "market_type": "spot",
+        "symbol": "BTC/USDT", "timeframe": "1h",
         "training_data_ref": "ccxt:mexc:BTC/USDT:1h:3000:" + "a" * 64,
         "candidate_artifact": {
             "artifact_uri": "artifact://sha256/" + "a" * 64,
@@ -235,7 +236,8 @@ def test_worker_auto_approves_only_quality_passed_calibrated_artifact(tmp_path, 
 
     monkeypatch.setattr(worker_module, "ModelArtifactStore", FakeArtifacts)
     result = {
-        "venue": "mexc", "symbol": "ETH/USDT", "timeframe": "1h",
+        "venue": "mexc", "asset_class": "crypto", "market_type": "spot",
+        "symbol": "ETH/USDT", "timeframe": "1h",
         "training_data_ref": "ccxt:mexc:ETH/USDT:1h:3000:" + "b" * 64,
         "candidate_artifact": {
             "artifact_uri": "artifact://sha256/" + "b" * 64,
