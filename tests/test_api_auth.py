@@ -63,15 +63,21 @@ def test_authenticated_agent_task_and_message_ledger_api(tmp_path, monkeypatch):
                                 json={"name": "agent lab"}).json()
         workspace_id = workspace["id"]
 
+        capabilities = client.get("/v1/agents/capabilities", headers=headers)
+        assert capabilities.status_code == 200
+        assert "market.snapshot" in capabilities.json()["items"]
+
         created = client.post(
             f"/v1/workspaces/{workspace_id}/agents/tasks",
             headers=headers,
-            json={"target_capability": "market.research",
-                  "input": {"symbol": "BTC/USDT", "timeframe": "1h"}},
+            json={"target_capability": "market.snapshot",
+                  "input": {"symbol": "BTC/USDT", "timeframe": "1h"},
+                  "max_attempts": 2},
         )
         assert created.status_code == 201, created.text
         task = created.json()
         assert task["status"] == "queued"
+        assert task["max_attempts"] == 2
 
         listed = client.get(f"/v1/workspaces/{workspace_id}/agents/tasks",
                             headers=headers)
