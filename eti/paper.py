@@ -107,8 +107,10 @@ def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
         daily_pnl_fraction <= -risk_config.max_daily_loss
         or drawdown >= risk_config.max_drawdown
     )
+    stop_breach = quantity > 0 and entry_price is not None and price <= float(entry_price) * 0.95
+    exit_guard = risk_breach or stop_breach
     should_exit = quantity > 0 and (
-        prediction != 2 or confidence < confidence_threshold or risk_breach
+        prediction != 2 or confidence < confidence_threshold or exit_guard
     )
     if should_exit:
         fill_price = price * (1.0 - slippage_rate)
@@ -118,16 +120,16 @@ def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
         cash += notional - fee
         realized_pnl += pnl
         events.append({
-            "event_type": "risk_stop" if risk_breach else "exit",
+            "event_type": "risk_stop" if exit_guard else "exit",
             "quantity": quantity, "price": fill_price, "notional": notional,
             "fee": fee, "slippage_bps": slippage_bps, "realized_pnl": pnl,
             "prediction": prediction, "confidence": confidence,
-            "risk_decision": {"reason": "daily_loss_or_drawdown_limit" if risk_breach else "model_signal_exit",
+            "risk_decision": {"reason": "daily_loss_or_drawdown_limit" if risk_breach else ("fixed_five_percent_stop" if stop_breach else "model_signal_exit"),
                               "live_execution": False},
         })
         quantity, entry_price, position_cost = 0.0, None, 0.0
 
-    if quantity <= 0 and prediction == 2 and confidence >= confidence_threshold and not risk_breach:
+    if quantity <= 0 and prediction == 2 and confidence >= confidence_threshold and not exit_guard:
         requested = mark_equity * risk_config.max_position_fraction
         stop_price = price * 0.95
         risk_decision = RiskEngine(risk_config).assess(RiskRequest(
