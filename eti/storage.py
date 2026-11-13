@@ -482,6 +482,42 @@ class MemoryStore:
                                                        "timeframe": timeframe}), now_text),
                                     )
                                     queued += 1
+                    # Small public benchmark universe extends autonomous research beyond crypto.
+                    global_watchlist = [
+                        ("forex", "spot", "EURUSD=X"),
+                        ("equity", "spot", "AAPL"),
+                        ("commodity", "future", "GC=F"),
+                        ("index", "spot", "^GSPC"),
+                    ]
+                    for asset_class, market_type, symbol in global_watchlist:
+                        timeframe = timeframes[0]
+                        task_id = str(uuid4())
+                        payload = {
+                            "venue": "yahoo", "asset_class": asset_class,
+                            "market_type": market_type, "symbol": symbol,
+                            "timeframe": timeframe, "limit": 200,
+                            "scheduled_by": "eti.autonomy.supervisor",
+                        }
+                        conn.execute(
+                            """INSERT INTO agent_tasks
+                            (id,owner_id,workspace_id,requester,target_capability,status,input_json,
+                             max_attempts,created_at,updated_at)
+                            VALUES(?,?,?,?,?,'queued',?,3,?,?)""",
+                            (task_id, row["owner_id"], row["workspace_id"],
+                             "eti.autonomy.supervisor", "market.snapshot",
+                             _encode_json(payload), now_text, now_text),
+                        )
+                        conn.execute(
+                            """INSERT INTO audit_events
+                            (id,owner_id,workspace_id,event_type,payload_json,created_at)
+                            VALUES(?,?,?,?,?,?)""",
+                            (str(uuid4()), row["owner_id"], row["workspace_id"],
+                             "autonomy.scan.queued",
+                             _encode_json({"task_id": task_id, "venue": "yahoo",
+                                           "asset_class": asset_class, "market_type": market_type,
+                                           "symbol": symbol, "timeframe": timeframe}), now_text),
+                        )
+                        queued += 1
                 training_enabled = bool(row["model_training_enabled"])
                 training_previous = row["last_model_training_at"]
                 training_due = training_enabled and (
@@ -495,40 +531,58 @@ class MemoryStore:
                         "UPDATE autonomy_profiles SET last_model_training_at=?, updated_at=? WHERE owner_id=?",
                         (now_text, now_text, row["owner_id"]),
                     )
+                    # Daily training uses a bounded cross-asset benchmark universe.
+                    training_jobs: list[dict[str, str]] = []
                     for market_type in market_types:
-                        for venue in venues:
-                            for symbol in symbols:
-                                market_symbol = symbol
-                                if market_type == "swap" and symbol.endswith("/USDT") and ":" not in symbol:
-                                    market_symbol = symbol + ":USDT"
-                                for timeframe in timeframes:
-                                    task_id = str(uuid4())
-                                    payload = {
-                                        "venue": venue, "market_type": market_type,
-                                        "symbol": market_symbol, "timeframe": timeframe,
-                                        "limit": 3000, "horizon": 6,
-                                        "scheduled_by": "eti.autonomy.model_training",
-                                    }
-                                    conn.execute(
-                                        """INSERT INTO agent_tasks
-                                        (id,owner_id,workspace_id,requester,target_capability,status,input_json,
-                                         max_attempts,created_at,updated_at)
-                                        VALUES(?,?,?,?,?,'queued',?,2,?,?)""",
-                                        (task_id, row["owner_id"], row["workspace_id"],
-                                         "eti.autonomy.model_training", "model.train_research",
-                                         _encode_json(payload), now_text, now_text),
-                                    )
-                                    conn.execute(
-                                        """INSERT INTO audit_events
-                                        (id,owner_id,workspace_id,event_type,payload_json,created_at)
-                                        VALUES(?,?,?,?,?,?)""",
-                                        (str(uuid4()), row["owner_id"], row["workspace_id"],
-                                         "autonomy.model_training.scheduled",
-                                         _encode_json({"task_id": task_id, "venue": venue,
-                                                       "market_type": market_type, "symbol": market_symbol,
-                                                       "timeframe": timeframe}), now_text),
-                                    )
-                                    queued += 1
+                        for symbol in symbols[:2]:
+                            market_symbol = symbol
+                            if market_type == "swap" and symbol.endswith("/USDT") and ":" not in symbol:
+                                market_symbol = symbol + ":USDT"
+                            if market_type == "future" and (":" not in symbol or "-" not in symbol):
+                                continue
+                            training_jobs.append({
+                                "venue": venues[0], "asset_class": "crypto",
+                                "market_type": market_type, "symbol": market_symbol,
+                            })
+                    # Reserve four of the eight daily training slots for non-crypto asset classes.
+                    training_jobs = training_jobs[:4]
+                    for asset_class, market_type, symbol in [
+                        ("forex", "spot", "EURUSD=X"),
+                        ("equity", "spot", "AAPL"),
+                        ("commodity", "future", "GC=F"),
+                        ("index", "spot", "^GSPC"),
+                    ]:
+                        training_jobs.append({
+                            "venue": "yahoo", "asset_class": asset_class,
+                            "market_type": market_type, "symbol": symbol,
+                        })
+                    for job in training_jobs:
+                        timeframe = timeframes[0]
+                        task_id = str(uuid4())
+                        payload = {
+                            **job, "timeframe": timeframe, "limit": 3000, "horizon": 6,
+                            "scheduled_by": "eti.autonomy.model_training",
+                        }
+                        conn.execute(
+                            """INSERT INTO agent_tasks
+                            (id,owner_id,workspace_id,requester,target_capability,status,input_json,
+                             max_attempts,created_at,updated_at)
+                            VALUES(?,?,?,?,?,'queued',?,2,?,?)""",
+                            (task_id, row["owner_id"], row["workspace_id"],
+                             "eti.autonomy.model_training", "model.train_research",
+                             _encode_json(payload), now_text, now_text),
+                        )
+                        conn.execute(
+                            """INSERT INTO audit_events
+                            (id,owner_id,workspace_id,event_type,payload_json,created_at)
+                            VALUES(?,?,?,?,?,?)""",
+                            (str(uuid4()), row["owner_id"], row["workspace_id"],
+                             "autonomy.model_training.scheduled",
+                             _encode_json({"task_id": task_id, **job, "timeframe": timeframe}),
+                             now_text),
+                        )
+                        queued += 1
+
         return queued
 
     def record_agent_worker_heartbeat(
