@@ -173,7 +173,7 @@ def test_login_and_registration_are_rate_limited(tmp_path, monkeypatch):
 def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeypatch):
     class CalibratedStub:
         estimator = type("Estimator", (), {
-            "feature_names_in_": np.array(["feature_a", "feature_b"])
+            "feature_names_in_": np.array(["close", "volume"])
         })()
         calibration_status = "calibrated"
         calibration_report = {
@@ -217,6 +217,13 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
         assert client.post(
             "/v1/models/eti-core/0.3.0/approve", headers=trainer_headers
         ).status_code == 409
+
+        CalibratedStub.estimator.feature_names_in_ = np.array(["bad", "volume"])
+        schema_mismatch = client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers
+        )
+        assert schema_mismatch.status_code == 409
+        CalibratedStub.estimator.feature_names_in_ = np.array(["close", "volume"])
 
         approved = client.post(
             "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers
