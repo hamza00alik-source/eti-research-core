@@ -4,11 +4,25 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-FEATURE_COLUMNS = [
+BASE_FEATURE_COLUMNS = [
     "ret_1", "ret_3", "ret_6", "volatility_20", "sma_gap_10",
     "sma_gap_30", "rsi_14", "range_pct", "body_pct",
     "close_location", "volume_z20", "atr_pct",
 ]
+
+
+def feature_columns_for_frame(frame: pd.DataFrame) -> list[str]:
+    """Select only features backed by data actually present in this market frame."""
+    columns = list(BASE_FEATURE_COLUMNS)
+    if "funding_rate" in frame.columns:
+        columns.append("funding_rate")
+    if "open_interest" in frame.columns:
+        columns.append("open_interest_change")
+    return columns
+
+
+# Backwards-compatible alias for callers that explicitly require the base spot schema.
+FEATURE_COLUMNS = BASE_FEATURE_COLUMNS
 
 
 def build_features(frame: pd.DataFrame) -> pd.DataFrame:
@@ -48,6 +62,11 @@ def build_features(frame: pd.DataFrame) -> pd.DataFrame:
     out["close_location"] = (close-low) / span
     out["volume_z20"] = (vol-vol_mean) / vol_std.replace(0, np.nan)
     out["atr_pct"] = atr / close
+    if "funding_rate" in d.columns:
+        out["funding_rate"] = pd.to_numeric(d["funding_rate"], errors="coerce")
+    if "open_interest" in d.columns:
+        open_interest = pd.to_numeric(d["open_interest"], errors="coerce")
+        out["open_interest_change"] = open_interest.pct_change().replace([np.inf, -np.inf], np.nan)
     return out.replace([np.inf, -np.inf], np.nan)
 
 
