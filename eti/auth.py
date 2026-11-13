@@ -203,6 +203,29 @@ class AuthManager:
             raise AuthenticationError("invalid username or password")
         return {"id": row[0], "username": row[1]}
 
+    def change_password(self, account_id: str, current_password: str, new_password: str) -> None:
+        """Verify the current password and atomically replace its scrypt hash."""
+        current_bytes = self._password_bytes(current_password)
+        new_bytes = self._password_bytes(new_password)
+        with sqlite3.connect(self.database_path, timeout=10) as conn:
+            conn.execute("PRAGMA busy_timeout = 10000")
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT password_salt, password_hash FROM auth_accounts WHERE id = ?",
+                (account_id,),
+            ).fetchone()
+            if row is None:
+                raise AuthenticationError("invalid account credentials")
+            candidate = self._hash_password(current_bytes, row[0])
+            if not hmac.compare_digest(candidate, row[1]):
+                raise AuthenticationError("current password is incorrect")
+            salt = secrets.token_bytes(16)
+            password_hash = self._hash_password(new_bytes, salt)
+            conn.execute(
+                "UPDATE auth_accounts SET password_salt = ?, password_hash = ? WHERE id = ?",
+                (salt, password_hash, account_id),
+            )
+
     def issue_token(self, account: dict[str, str], *, now: int | None = None) -> str:
         issued = int(time.time()) if now is None else int(now)
         header = {"alg": "HS256", "typ": "JWT"}
