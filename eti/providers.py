@@ -121,6 +121,7 @@ class CcxtPublicProvider:
                 "current_funding": bool(exchange.has.get("fetchFundingRate")),
                 "open_interest_history": bool(exchange.has.get("fetchOpenInterestHistory")),
                 "current_open_interest": bool(exchange.has.get("fetchOpenInterest")),
+                "liquidation_history": bool(exchange.has.get("fetchLiquidations")),
             },
         }
         if result["availability"]["funding_history"]:
@@ -166,9 +167,22 @@ class CcxtPublicProvider:
                     }
             except Exception as exc:
                 result["availability"]["current_open_interest_error"] = type(exc).__name__
+        if result["availability"]["liquidation_history"]:
+            try:
+                rows = exchange.fetch_liquidations(symbol, since=since, limit=limit)
+                result["liquidation_history"] = [
+                    {"timestamp": int(row["timestamp"]), "side": row.get("side"),
+                     "price": float(row["price"]) if row.get("price") is not None else None,
+                     "amount": float(row["amount"]) if row.get("amount") is not None else None,
+                     "cost": float(row["cost"]) if row.get("cost") is not None else None}
+                    for row in rows if row.get("timestamp") is not None
+                ]
+            except Exception as exc:
+                result["availability"]["liquidation_history_error"] = type(exc).__name__
         result["history_coverage"] = {
             "funding_observations": len(result["funding_history"]),
             "open_interest_observations": len(result["open_interest_history"]),
+            "liquidation_observations": len(result["liquidation_history"]),
             "has_historical_funding": bool(result["funding_history"]),
             "has_historical_open_interest": bool(result["open_interest_history"]),
         }
