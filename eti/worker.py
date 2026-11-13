@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from .agents import AgentCapabilityRegistry, default_capabilities
 from .paper import run_paper_tick
+from .execution import run_live_tick
 from .storage import MemoryStore
 
 
@@ -30,6 +31,8 @@ class AgentWorker:
         self.registry = registry or default_capabilities()
         if "paper.tick" not in self.registry.capabilities():
             self.registry.register("paper.tick", lambda payload: run_paper_tick(payload, self.store))
+        if "live.tick" not in self.registry.capabilities():
+            self.registry.register("live.tick", lambda payload: run_live_tick(payload, self.store))
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be an integer from 5 to 3600")
         self.lease_seconds = lease_seconds
@@ -141,9 +144,11 @@ class AgentWorker:
         # This only creates public-data research tasks; order execution is not registered.
         scheduled = self.store.enqueue_due_autonomy_tasks()
         paper_scheduled = self.store.enqueue_due_paper_tasks()
-        if scheduled or paper_scheduled:
+        live_scheduled = self.store.enqueue_due_live_execution_tasks()
+        if scheduled or paper_scheduled or live_scheduled:
             print(json.dumps({"event": "autonomy.tasks_scheduled",
-                              "research_tasks": scheduled, "paper_tasks": paper_scheduled},
+                              "research_tasks": scheduled, "paper_tasks": paper_scheduled,
+                              "live_tasks": live_scheduled},
                              separators=(",", ":")), flush=True)
         self.store.record_agent_worker_heartbeat(self.worker_id, self.registry.capabilities())
         task = self.store.claim_next_agent_task(lease_seconds=self.lease_seconds)
@@ -166,7 +171,14 @@ class AgentWorker:
         )
         error_type = None
         try:
-            result = self.registry.execute(capability, task["input"])
+            task_input = task["input"]
+            if capability == "live.tick":
+                if (task.get("requester") != "eti.live.supervisor"
+                        or not isinstance(task_input, dict)
+                        or task_input.get("scheduled_by") != "eti.live.supervisor"):
+                    raise ValueError("live execution tasks must be created by the owner-authorized supervisor")
+                task_input = {**task_input, "owner_id": task["owner_id"], "task_id": task["id"]}
+            result = self.registry.execute(capability, task_input)
             if capability == "model.train_research":
                 result = self._register_model_candidate(result)
             status, retryable = "completed", False
