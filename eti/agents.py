@@ -132,6 +132,7 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
             "current_funding": derivative_context.get("current_funding"),
             "current_open_interest": derivative_context.get("current_open_interest"),
             "history_coverage": derivative_context.get("history_coverage"),
+            "liquidation_observations": len(derivative_context.get("liquidation_history") or []),
             "availability": derivative_context.get("availability"),
         } if derivative_context else None),
         "limitations": limitations,
@@ -262,8 +263,8 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     )
     quality_checks = {
         "at_least_three_test_folds": fold_count >= 3,
-        "derivative_funding_history_available": not (asset_class == "crypto" and market_type in {"swap", "future"}) or bool(derivative_context and derivative_context.get("history_coverage", {}).get("has_historical_funding")),
-        "derivative_open_interest_history_available": not (asset_class == "crypto" and market_type in {"swap", "future"}) or bool(derivative_context and derivative_context.get("history_coverage", {}).get("has_historical_open_interest")),
+        "derivative_funding_history_available": not (asset_class == "crypto" and market_type in {"swap", "future"}) or bool(derivative_feature_coverage and derivative_feature_coverage["funding_observations"] >= 3 and derivative_feature_coverage["funding_feature_rows"] >= 500),
+        "derivative_open_interest_history_available": not (asset_class == "crypto" and market_type in {"swap", "future"}) or bool(derivative_feature_coverage and derivative_feature_coverage["open_interest_observations"] >= 50 and derivative_feature_coverage["open_interest_feature_rows"] >= 500),
         "instrument_cost_model_supported": asset_class == "crypto" and market_type == "spot",
         "derivative_cost_model_independently_validated": asset_class == "crypto" and market_type == "spot",
         "balanced_accuracy_at_least_0_52": isinstance(mean_score, (int, float)) and mean_score >= 0.52,
