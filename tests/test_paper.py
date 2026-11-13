@@ -194,4 +194,4 @@ def test_paper_tick_enforces_stop_loss_and_does_not_reenter_same_candle(tmp_path
     stopped = run_paper_tick({"owner_id": "owner", "session_id": session["id"]}, store)
     assert stopped["position_qty"] == 0
     assert stopped["events"][0]["event_type"] == "risk_stop"
-    assert stopped["decision"]["reason"] == "below_confidence_threshold_or_flat"
+    assert stopped["events"][0]["risk_decision"]["reason"] == "fixed_five_percent_stop"
