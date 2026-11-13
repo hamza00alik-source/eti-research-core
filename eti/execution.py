@@ -206,6 +206,13 @@ def run_live_tick(payload: dict[str, Any], store) -> dict[str, Any]:
         state = store.get_live_execution_state(owner_id, venue, symbol, timeframe)
         if state["last_processed_candle"] and candle_at <= state["last_processed_candle"]:
             return {"status": "already_processed", "processed": False, "live_execution": True}
+        other_positions = [
+            item for item in store.list_live_execution_states(owner_id, venue, timeframe)
+            if item["symbol"] != symbol and float(item["position_qty"]) > 1e-12
+        ]
+        if other_positions and float(state["position_qty"]) <= 1e-12:
+            return {"status": "waiting_for_existing_position",
+                    "active_symbol": other_positions[0]["symbol"], "live_execution": True}
 
         base_currency, quote_currency = symbol.split("/", 1)
         quote_total = _total_balance(balance, quote_currency)
@@ -218,10 +225,10 @@ def run_live_tick(payload: dict[str, Any], store) -> dict[str, Any]:
             return {"status": "no_allocated_equity", "processed": False, "live_execution": True}
 
         daily_date = candle_at[:10]
-        daily_start = float(state["daily_start_equity"] or equity)
-        if state["daily_date"] != daily_date:
+        daily_start = float(profile["daily_start_equity"] or equity)
+        if profile["daily_date"] != daily_date:
             daily_start = equity
-        peak_equity = max(float(state["peak_equity"] or equity), equity)
+        peak_equity = max(float(profile["peak_equity"] or equity), equity)
         daily_pnl = (equity - daily_start) / daily_start if daily_start > 0 else -1.0
         drawdown = max(0.0, 1.0 - equity / peak_equity) if peak_equity > 0 else 1.0
 
@@ -283,6 +290,7 @@ def run_live_tick(payload: dict[str, Any], store) -> dict[str, Any]:
         if risk_breach:
             store.disable_live_execution(owner_id, "daily_loss_or_drawdown_limit")
             if not should_sell:
+                store.update_live_execution_account_state(owner_id, daily_date, daily_start, peak_equity)
                 store.apply_live_execution_state(
                     owner_id, venue, symbol, timeframe, candle_at,
                     {"position_qty": position_qty, "entry_price": state["entry_price"],
@@ -292,6 +300,7 @@ def run_live_tick(payload: dict[str, Any], store) -> dict[str, Any]:
                 return {"status": "stopped", "reason": "daily_loss_or_drawdown_limit", "live_execution": True}
 
         if side is None or amount <= 0:
+            store.update_live_execution_account_state(owner_id, daily_date, daily_start, peak_equity)
             store.apply_live_execution_state(
                 owner_id, venue, symbol, timeframe, candle_at,
                 {"position_qty": position_qty, "entry_price": state["entry_price"],
@@ -307,6 +316,7 @@ def run_live_tick(payload: dict[str, Any], store) -> dict[str, Any]:
         market = exchange.market(symbol)
         minimum_cost = ((market.get("limits") or {}).get("cost") or {}).get("min") or 0.0
         if amount <= 0 or amount * price < float(minimum_cost):
+            store.update_live_execution_account_state(owner_id, daily_date, daily_start, peak_equity)
             store.apply_live_execution_state(
                 owner_id, venue, symbol, timeframe, candle_at,
                 {"position_qty": position_qty, "entry_price": state["entry_price"],
@@ -315,6 +325,7 @@ def run_live_tick(payload: dict[str, Any], store) -> dict[str, Any]:
             )
             return {"status": "below_exchange_minimum", "processed": True, "live_execution": True}
 
+        store.update_live_execution_account_state(owner_id, daily_date, daily_start, peak_equity)
         task_id = task_id if isinstance(task_id, str) and task_id else str(uuid4())
         client_order_id = "eti" + task_id.replace("-", "")[:29]
         intent, created = store.create_live_order_intent(
@@ -354,6 +365,7 @@ def run_live_tick(payload: dict[str, Any], store) -> dict[str, Any]:
                 "peak_equity": peak_equity,
             })
             store.apply_live_execution_state(owner_id, venue, symbol, timeframe, candle_at, next_state)
+            store.update_live_execution_account_state(owner_id, daily_date, daily_start, peak_equity)
         elif normalized_status == "unknown":
             store.disable_live_execution(owner_id, "exchange_order_response_uncertain")
         return {
