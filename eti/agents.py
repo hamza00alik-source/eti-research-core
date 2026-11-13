@@ -165,11 +165,11 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     timeframe = payload.get("timeframe", "1h")
     limit = payload.get("limit", 3000)
     horizon = payload.get("horizon", 6)
-    if venue not in {"binance", "mexc"}:
+    if not isinstance(venue, str) or venue not in {"binance", "mexc"}:
         raise ValueError("venue must be binance or mexc")
     if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
         raise ValueError("symbol must be a valid spot pair such as BTC/USDT")
-    if timeframe not in {"1h", "4h", "1d"}:
+    if not isinstance(timeframe, str) or timeframe not in {"1h", "4h", "1d"}:
         raise ValueError("timeframe must be one of: 1h, 4h, or 1d")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1500 <= limit <= 5000:
         raise ValueError("training limit must be an integer from 1500 to 5000")
@@ -192,8 +192,10 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     from .artifacts import ModelArtifactStore
     artifact = ModelArtifactStore().save_model(model)
 
+    trading_folds = {item.get("fold"): item for item in trading.get("folds", [])}
     fold_diagnostics = []
     for fold in evaluation.get("folds", []):
+        trading_fold = trading_folds.get(fold.get("fold"), {})
         fold_diagnostics.append({
             "fold": fold.get("fold"),
             "selected_candidate": fold.get("selected_candidate"),
@@ -201,6 +203,8 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
             "test_accuracy": fold.get("test_accuracy"),
             "test_balanced_accuracy": fold.get("test_balanced_accuracy"),
             "boundaries": fold.get("boundaries"),
+            "market_regimes": trading_fold.get("market_regimes"),
+            "trading_metrics": trading_fold.get("trading", {}),
         })
     trading = evaluation.get("trading_performance", {})
     return {
