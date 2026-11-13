@@ -30,6 +30,29 @@ class AgentWorker:
         self.lease_seconds = lease_seconds
         self.worker_id = str(uuid4())
 
+    def _enqueue_strategy_followup(self, task: dict[str, Any]) -> None:
+        task_input = task.get("input")
+        if (task.get("target_capability") != "market.snapshot"
+                or task.get("requester") != "eti.autonomy.supervisor"
+                or not isinstance(task_input, dict)
+                or task_input.get("scheduled_by") != "eti.autonomy.supervisor"):
+            return
+        payload = {
+            "venue": task_input.get("venue", "mexc"), "symbol": task_input.get("symbol"),
+            "timeframe": task_input.get("timeframe", "1h"), "limit": 500,
+            "min_history": 120, "validation_size": 80, "test_size": 80,
+            "step_size": 80, "purge_bars": 2, "fee_bps": 6.0, "slippage_bps": 2.0,
+            "scheduled_by": "eti.autonomy.supervisor", "source_snapshot_task_id": task["id"],
+        }
+        followup = self.store.create_agent_task(
+            task["owner_id"], task["workspace_id"], "eti.autonomy.supervisor",
+            "strategy.walk_forward", payload, max_attempts=2,
+        )
+        print(json.dumps({"event": "autonomy.strategy_evaluation_queued",
+                          "task_id": followup["id"], "source_snapshot_task_id": task["id"],
+                          "symbol": payload["symbol"], "timeframe": payload["timeframe"]},
+                         separators=(",", ":")), flush=True)
+
     def run_once(self) -> dict[str, Any] | None:
         # The supervisor autonomously seeds owner-enabled research schedules.
         # This only creates public-data research tasks; order execution is not registered.
@@ -79,6 +102,11 @@ class AgentWorker:
             {"task_id": task["id"], "status": updated["status"], "result": result},
             task["id"],
         )
+        if status == "completed":
+            try:
+                self._enqueue_strategy_followup(task)
+            except Exception:
+                print("ETI_STRATEGY_FOLLOWUP_ENQUEUE_FAILED", flush=True)
         return updated
 
     def run_forever(self, poll_seconds: float = 2.0) -> None:
