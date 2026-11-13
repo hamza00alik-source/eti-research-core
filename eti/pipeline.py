@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -96,8 +97,12 @@ def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[Baselin
     calibration_report = model.fit_temperature_calibration(
         calibration[FEATURE_COLUMNS], calibration["label"].astype(int)
     )
+    dataset_sha256 = hashlib.sha256(
+        pd.util.hash_pandas_object(dataset, index=True).values.tobytes()
+    ).hexdigest()
     schema = {
         "features": list(FEATURE_COLUMNS),
+        "dataset_sha256": dataset_sha256,
         "feature_version": "eti.features.v1",
         "training_rows": int(len(training)),
         "calibration_rows": int(len(calibration)),
