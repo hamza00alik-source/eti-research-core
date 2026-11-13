@@ -173,10 +173,10 @@ $('#delete-workspace').addEventListener('click',async()=>{
  finally{button.disabled=false}
 });
 $('#workspace-form').addEventListener('submit',async event=>{
- event.preventDefault();const form=new FormData(event.currentTarget);
+ event.preventDefault();const formElement=event.currentTarget;const form=new FormData(formElement);
  try{
   const data=await api('/v1/workspaces',{method:'POST',body:JSON.stringify({name:form.get('name')})});
-  activeWorkspace=data.id;await loadWorkspaces();event.currentTarget.reset();
+  activeWorkspace=data.id;await loadWorkspaces();formElement.reset();
   $('#account-message').textContent='Workspace created.';
  }catch(error){$('#account-message').textContent=error.message}
 });
