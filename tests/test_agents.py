@@ -536,3 +536,33 @@ def test_yahoo_reference_discovery_covers_all_noncrypto_asset_classes():
         assert result["venue"] == "yahoo"
         assert result["instrument_count"] > 0
         assert symbol in {item["symbol"] for item in result["instruments"]}
+
+
+def test_autonomous_market_discovery_queues_top_instrument_training_once(tmp_path):
+    from eti.agents import AgentCapabilityRegistry
+    from eti.worker import AgentWorker
+
+    store = MemoryStore(tmp_path / "discovery-training.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    task = store.create_agent_task(
+        "owner", workspace["id"], "eti.autonomy.model_training", "market.discover",
+        {"venue": "binance", "asset_class": "crypto", "market_type": "swap",
+         "limit": 100, "scheduled_by": "eti.autonomy.model_training"},
+    )
+    discovered = {"kind": "market_universe_discovery", "instruments": [
+        {"symbol": "BTC/USDT:USDT", "venue": "binance", "asset_class": "crypto",
+         "market_type": "swap", "quote_volume": 1000000},
+        {"symbol": "ETH/USDT:USDT", "venue": "binance", "asset_class": "crypto",
+         "market_type": "swap", "quote_volume": 500000},
+    ]}
+    registry = AgentCapabilityRegistry()
+    registry.register("market.discover", lambda _payload: discovered)
+    worker = AgentWorker(store, registry)
+    completed = worker.run_once()
+    assert completed["status"] == "completed"
+    worker._enqueue_discovered_model_training(task, discovered)
+    queued = store.list_agent_tasks("owner", workspace["id"], status="queued")
+    assert len(queued) == 1
+    assert queued[0]["target_capability"] == "model.train_research"
+    assert queued[0]["input"]["symbol"] == "BTC/USDT:USDT"
+    assert queued[0]["input"]["source_discovery_task_id"] == task["id"]
