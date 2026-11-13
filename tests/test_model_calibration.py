@@ -146,3 +146,12 @@ def test_training_rejects_invalid_class_ids(labels):
     model = BaselineModel()
     with pytest.raises(ValueError):
         model.fit(pd.DataFrame({"x": [1.0, 2.0, 3.0]}), labels)
+
+
+def test_legacy_artifact_without_calibration_fields_defaults_to_uncalibrated():
+    model = BaselineModel.__new__(BaselineModel)
+    model.estimator = FixedEstimator()
+    model.classes_ = np.array([0, 1, 2])
+    probabilities = model.predict_proba(pd.DataFrame({"x": [1.0]}))[0]
+    np.testing.assert_allclose(probabilities, [0.1, 0.8, 0.1])
+    assert not model.has_valid_calibration()
