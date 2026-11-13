@@ -113,6 +113,36 @@ class MemoryStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_audit_owner_time
                     ON audit_events(owner_id, created_at);
+
+                CREATE TABLE IF NOT EXISTS agent_tasks (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    requester TEXT NOT NULL,
+                    target_capability TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('queued','running','completed','failed','cancelled')),
+                    input_json TEXT NOT NULL,
+                    result_json TEXT,
+                    deadline_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_tasks_owner_status
+                    ON agent_tasks(owner_id, workspace_id, status, created_at);
+
+                CREATE TABLE IF NOT EXISTS agent_messages (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    task_id TEXT REFERENCES agent_tasks(id) ON DELETE CASCADE,
+                    sender TEXT NOT NULL,
+                    recipient TEXT NOT NULL,
+                    message_type TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_messages_task
+                    ON agent_messages(owner_id, workspace_id, task_id, created_at);
                 """
             )
 
@@ -271,6 +301,166 @@ class MemoryStore:
         return [
             {"id": row["id"], "workspace_id": row["workspace_id"],
              "event_type": row["event_type"], "payload": json.loads(row["payload_json"]),
+             "created_at": row["created_at"]}
+            for row in rows
+        ]
+
+
+    def create_agent_task(
+        self, owner_id: str, workspace_id: str, requester: str,
+        target_capability: str, input_data: Any, deadline_at: str | None = None
+    ) -> dict[str, Any]:
+        """Queue a typed task; this records work but does not execute an agent."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        requester = _required_text(requester, "requester", 80)
+        target_capability = _required_text(target_capability, "target_capability", 120)
+        encoded = _encode_json(input_data)
+        if deadline_at is not None:
+            deadline_at = _required_text(deadline_at, "deadline_at", 40)
+        task_id, now = str(uuid4()), _utc_now()
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            conn.execute(
+                "INSERT INTO agent_tasks(id, owner_id, workspace_id, requester, target_capability, "
+                "status, input_json, deadline_at, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)",
+                (task_id, owner_id, workspace_id, requester, target_capability,
+                 encoded, deadline_at, now, now),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id, owner_id, workspace_id, event_type, payload_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (str(uuid4()), owner_id, workspace_id, "agent.task.queued",
+                 _encode_json({"task_id": task_id, "capability": target_capability}), now),
+            )
+        return {"id": task_id, "owner_id": owner_id, "workspace_id": workspace_id,
+                "requester": requester, "target_capability": target_capability,
+                "status": "queued", "input": json.loads(encoded), "result": None,
+                "deadline_at": deadline_at, "created_at": now, "updated_at": now}
+
+    def get_agent_task(self, owner_id: str, workspace_id: str, task_id: str) -> dict[str, Any] | None:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        task_id = _required_text(task_id, "task_id")
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM agent_tasks WHERE id = ? AND owner_id = ? AND workspace_id = ?",
+                (task_id, owner_id, workspace_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"id": row["id"], "owner_id": row["owner_id"], "workspace_id": row["workspace_id"],
+                "requester": row["requester"], "target_capability": row["target_capability"],
+                "status": row["status"], "input": json.loads(row["input_json"]),
+                "result": json.loads(row["result_json"]) if row["result_json"] is not None else None,
+                "deadline_at": row["deadline_at"], "created_at": row["created_at"],
+                "updated_at": row["updated_at"]}
+
+    def update_agent_task(
+        self, owner_id: str, workspace_id: str, task_id: str,
+        status: str, result: Any = None
+    ) -> dict[str, Any]:
+        """Apply an allowed state transition; terminal tasks cannot be reopened."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        task_id = _required_text(task_id, "task_id")
+        status = _required_text(status, "status", 20)
+        allowed = {
+            "queued": {"running", "cancelled", "failed"},
+            "running": {"completed", "failed", "cancelled"},
+            "completed": set(), "failed": set(), "cancelled": set(),
+        }
+        if status not in allowed:
+            raise ValueError("invalid task status")
+        encoded_result = None if result is None else _encode_json(result)
+        now = _utc_now()
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT status FROM agent_tasks WHERE id = ? AND owner_id = ? AND workspace_id = ?",
+                (task_id, owner_id, workspace_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("task not found")
+            if status not in allowed[row["status"]]:
+                raise ValueError(f"invalid task transition: {row['status']} -> {status}")
+            if status == "completed" and encoded_result is None:
+                raise ValueError("completed tasks require a result")
+            conn.execute(
+                "UPDATE agent_tasks SET status = ?, result_json = COALESCE(?, result_json), updated_at = ? "
+                "WHERE id = ? AND owner_id = ? AND workspace_id = ?",
+                (status, encoded_result, now, task_id, owner_id, workspace_id),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id, owner_id, workspace_id, event_type, payload_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (str(uuid4()), owner_id, workspace_id, f"agent.task.{status}",
+                 _encode_json({"task_id": task_id}), now),
+            )
+        return self.get_agent_task(owner_id, workspace_id, task_id)  # type: ignore[return-value]
+
+    def send_agent_message(
+        self, owner_id: str, workspace_id: str, sender: str, recipient: str,
+        message_type: str, payload: Any, task_id: str | None = None
+    ) -> dict[str, Any]:
+        """Persist an agent message as data; messages are never executed as code."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        sender = _required_text(sender, "sender", 80)
+        recipient = _required_text(recipient, "recipient", 80)
+        message_type = _required_text(message_type, "message_type", 80)
+        encoded = _encode_json(payload)
+        message_id, now = str(uuid4()), _utc_now()
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            if task_id is not None:
+                task_id = _required_text(task_id, "task_id")
+                exists = conn.execute(
+                    "SELECT 1 FROM agent_tasks WHERE id = ? AND owner_id = ? AND workspace_id = ?",
+                    (task_id, owner_id, workspace_id),
+                ).fetchone()
+                if exists is None:
+                    raise LookupError("task not found")
+            conn.execute(
+                "INSERT INTO agent_messages(id, owner_id, workspace_id, task_id, sender, recipient, "
+                "message_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (message_id, owner_id, workspace_id, task_id, sender, recipient,
+                 message_type, encoded, now),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id, owner_id, workspace_id, event_type, payload_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (str(uuid4()), owner_id, workspace_id, "agent.message.created",
+                 _encode_json({"message_id": message_id, "task_id": task_id,
+                               "sender": sender, "recipient": recipient}), now),
+            )
+        return {"id": message_id, "owner_id": owner_id, "workspace_id": workspace_id,
+                "task_id": task_id, "sender": sender, "recipient": recipient,
+                "message_type": message_type, "payload": json.loads(encoded), "created_at": now}
+
+    def list_agent_messages(
+        self, owner_id: str, workspace_id: str, task_id: str | None = None,
+        limit: int = 100
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be an integer from 1 to 500")
+        query = ("SELECT * FROM agent_messages WHERE owner_id = ? AND workspace_id = ?")
+        params: list[Any] = [owner_id, workspace_id]
+        if task_id is not None:
+            query += " AND task_id = ?"
+            params.append(_required_text(task_id, "task_id"))
+        query += " ORDER BY created_at, id LIMIT ?"
+        params.append(limit)
+        with self._connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [
+            {"id": row["id"], "owner_id": row["owner_id"], "workspace_id": row["workspace_id"],
+             "task_id": row["task_id"], "sender": row["sender"], "recipient": row["recipient"],
+             "message_type": row["message_type"], "payload": json.loads(row["payload_json"]),
              "created_at": row["created_at"]}
             for row in rows
         ]

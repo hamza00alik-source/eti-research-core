@@ -78,3 +78,63 @@ def test_store_validates_limits_and_identity(tmp_path):
 def test_store_requires_file_backed_database():
     with pytest.raises(ValueError, match="file-backed"):
         MemoryStore(":memory:")
+
+
+def test_agent_tasks_are_durable_and_have_guarded_state_transitions(tmp_path):
+    path = tmp_path / "agents.sqlite3"
+    store = MemoryStore(path)
+    workspace = store.create_workspace("owner-a", "research")
+    task = store.create_agent_task(
+        "owner-a", workspace["id"], "orchestrator", "market.research",
+        {"symbol": "BTC/USDT", "timeframe": "1h"}
+    )
+    assert task["status"] == "queued"
+    reopened = MemoryStore(path)
+    assert reopened.get_agent_task("owner-a", workspace["id"], task["id"])["input"]["symbol"] == "BTC/USDT"
+    running = reopened.update_agent_task("owner-a", workspace["id"], task["id"], "running")
+    assert running["status"] == "running"
+    done = reopened.update_agent_task(
+        "owner-a", workspace["id"], task["id"], "completed", {"finding": "test"}
+    )
+    assert done["result"] == {"finding": "test"}
+    with pytest.raises(ValueError, match="invalid task transition"):
+        reopened.update_agent_task("owner-a", workspace["id"], task["id"], "running")
+
+
+def test_agent_tasks_and_messages_are_isolated_by_owner(tmp_path):
+    store = MemoryStore(tmp_path / "agents.sqlite3")
+    workspace = store.create_workspace("owner-a", "research")
+    task = store.create_agent_task("owner-a", workspace["id"], "planner", "risk.check", {})
+    assert store.get_agent_task("owner-b", workspace["id"], task["id"]) is None
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.create_agent_task("owner-b", workspace["id"], "planner", "risk.check", {})
+    with pytest.raises(LookupError, match="task not found"):
+        store.send_agent_message(
+            "owner-a", workspace["id"], "planner", "risk", "request", {}, "not-a-task"
+        )
+
+
+def test_agent_messages_are_persisted_as_data_and_task_scoped(tmp_path):
+    path = tmp_path / "agents.sqlite3"
+    store = MemoryStore(path)
+    workspace = store.create_workspace("owner-a", "research")
+    task = store.create_agent_task("owner-a", workspace["id"], "planner", "risk.check", {})
+    message = store.send_agent_message(
+        "owner-a", workspace["id"], "planner", "risk", "risk.request",
+        {"max_leverage": 1, "note": "assess only"}, task["id"]
+    )
+    reopened = MemoryStore(path)
+    messages = reopened.list_agent_messages("owner-a", workspace["id"], task["id"])
+    assert len(messages) == 1
+    assert messages[0]["id"] == message["id"]
+    assert messages[0]["payload"]["max_leverage"] == 1
+    assert reopened.list_agent_messages("owner-b", workspace["id"]) == []
+
+
+def test_completed_agent_task_requires_result(tmp_path):
+    store = MemoryStore(tmp_path / "agents.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    task = store.create_agent_task("owner", workspace["id"], "planner", "data.check", {})
+    store.update_agent_task("owner", workspace["id"], task["id"], "running")
+    with pytest.raises(ValueError, match="require a result"):
+        store.update_agent_task("owner", workspace["id"], task["id"], "completed")
