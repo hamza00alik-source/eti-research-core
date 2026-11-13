@@ -69,7 +69,7 @@
 </div>
 <div class="autonomy-card live-execution-card" aria-labelledby="live-execution-heading">
  <div><div class="eyebrow">AUTONOMOUS EXECUTION</div><h3 id="live-execution-heading">Live spot trading</h3>
- <p class="muted">Configure your allowed watchlist and capital once. After one-time owner authorization, ETI can make and execute trade decisions without per-trade confirmations. First release: Binance/MEXC spot, one open ETI position at a time, long/flat only, no leverage or shorting. Only approved, calibrated ETI models may trade.</p></div>
+ <p class="muted">Configure your allowed watchlist and capital once. After one-time owner authorization, ETI can make and execute trade decisions without per-trade confirmations. First release: Binance/MEXC spot, one open ETI position at a time, long/flat only, no leverage or shorting. The worker automatically promotes only models that pass ETI's strict walk-forward, artifact-integrity and calibration gates.</p></div>
  <form id="live-execution-form" class="registry-form">
   <label>Exchange<select name="venue"><option value="binance">Binance</option><option value="mexc">MEXC</option></select></label>
   <label>Timeframe<select name="timeframe"><option value="1h">1 hour</option><option value="4h">4 hours</option><option value="1d">1 day</option></select></label>
