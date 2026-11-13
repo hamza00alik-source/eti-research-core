@@ -104,7 +104,9 @@ def test_authenticated_agent_task_and_message_ledger_api(tmp_path, monkeypatch):
         assert messages.json()["items"][0]["payload"]["max_leverage"] == 1
 
 
-def test_api_security_headers_prevent_private_response_caching():
+def test_api_security_headers_prevent_private_response_caching(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "headers.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
     with TestClient(app) as client:
         response = client.get("/v1/profile")
         assert response.status_code == 401
