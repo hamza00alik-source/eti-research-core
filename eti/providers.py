@@ -116,6 +116,7 @@ class CcxtPublicProvider:
             "venue": self.venue, "symbol": symbol, "market_type": self.market_type,
             "funding_history": [], "open_interest_history": [],
             "current_funding": None, "current_open_interest": None,
+            "liquidation_history": [],
             "availability": {
                 "funding_history": bool(exchange.has.get("fetchFundingRateHistory")),
                 "current_funding": bool(exchange.has.get("fetchFundingRate")),
