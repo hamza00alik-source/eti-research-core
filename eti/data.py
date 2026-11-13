@@ -69,8 +69,9 @@ def fetch_ohlcv(
     limit: int = 1500,
     since_ms: int | None = None,
     pause_seconds: float = 0.15,
+    market_type: str = "spot",
 ) -> pd.DataFrame:
-    """Fetch public OHLCV candles via CCXT; paginate and exclude the live candle."""
+    """Fetch completed public OHLCV candles for a CCXT spot, swap or dated-future market."""
     try:
         import ccxt
     except ImportError as exc:
@@ -80,9 +81,22 @@ def fetch_ohlcv(
     exchange_class: Any = getattr(ccxt, exchange_id, None)
     if exchange_class is None:
         raise ValueError(f"Unsupported CCXT exchange id: {exchange_id}")
-    exchange = exchange_class({"enableRateLimit": True})
+    if market_type not in {"spot", "swap", "future"}:
+        raise ValueError("market_type must be spot, swap, or future")
+    exchange = exchange_class({
+        "enableRateLimit": True,
+        "options": {"defaultType": market_type},
+    })
     if not exchange.has.get("fetchOHLCV"):
         raise ValueError(f"{exchange_id} does not support fetchOHLCV")
+    markets = exchange.load_markets()
+    try:
+        market = markets[symbol]
+    except KeyError as exc:
+        raise ValueError(f"Unknown {market_type} symbol for {exchange_id}: {symbol}") from exc
+    market_flag = {"spot": "spot", "swap": "swap", "future": "future"}[market_type]
+    if not market.get(market_flag, False):
+        raise ValueError(f"{exchange_id} {symbol} is not a {market_type} market")
     if timeframe.endswith("M"):
         raise ValueError("Calendar-month candles are not yet supported by the fixed-duration completion filter")
     timeframe_seconds = exchange.parse_timeframe(timeframe)

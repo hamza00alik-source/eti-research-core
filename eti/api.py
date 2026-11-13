@@ -70,6 +70,7 @@ class AutonomyConfigPayload(BaseModel):
     venues: list[str] = Field(default_factory=lambda: ["mexc"], min_length=1, max_length=2)
     symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"], min_length=1, max_length=20)
     timeframes: list[str] = Field(default_factory=lambda: ["1h"], min_length=1, max_length=6)
+    market_types: list[str] = Field(default_factory=lambda: ["spot", "swap"], min_length=1, max_length=3)
     interval_seconds: int = Field(default=900, ge=300, le=86400)
     model_training_enabled: bool = False
     model_training_interval_seconds: int = Field(default=86400, ge=86400, le=604800)
@@ -237,7 +238,8 @@ def set_autonomy_config(payload: AutonomyConfigPayload,
         profile = store.configure_autonomy(
             account["id"], workspace_id, payload.enabled, payload.venues,
             payload.symbols, payload.timeframes, payload.interval_seconds,
-            payload.model_training_enabled, payload.model_training_interval_seconds
+            payload.model_training_enabled, payload.model_training_interval_seconds,
+            market_types=payload.market_types
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
@@ -899,15 +901,35 @@ def health():
 
 @app.get("/markets/supported")
 def supported_markets():
-    return {"venues": ["binance", "mexc"], "asset_classes": ["crypto"],
-            "market_types": ["spot"], "other_asset_classes": "CSV historical data only"}
+    return {
+        "venues": ["binance", "mexc"],
+        "asset_classes": ["crypto", "forex", "equity", "commodity", "index"],
+        "crypto_public_market_types": ["spot", "swap", "future"],
+        "market_types": ["spot", "swap", "future"],
+        "catalog_market_types": ["spot", "margin", "swap", "future", "option", "cfd"],
+        "data_coverage": {
+            "crypto": "Public CCXT OHLCV for supported spot, perpetual swap and dated-future symbols",
+            "forex_equity_commodity_index": "Yahoo Finance public OHLCV plus validated CSV fallback; authenticated broker feeds are not connected",
+        },
+        "execution_market_types": ["spot"],
+        "live_execution_enabled": False,
+    }
 
 
 @app.get("/providers/capabilities")
 def provider_capabilities():
-    return {"live_public_provider": ["crypto spot via Binance/MEXC"],
-            "historical_csv_adapter": ["crypto", "forex", "equity", "commodity", "index"],
-            "not_connected": ["forex broker feeds", "equity broker feeds", "commodity feeds"]}
+    return {
+        "public_market_data_provider": [
+            "crypto spot via Binance/MEXC where listed",
+            "crypto perpetual swaps via Binance/MEXC where listed",
+            "crypto dated futures via Binance/MEXC where listed",
+            "forex, equities, commodities and indices via Yahoo Finance public OHLCV",
+        ],
+        "historical_csv_adapter": ["crypto", "forex", "equity", "commodity", "index"],
+        "not_connected": ["authenticated forex broker feeds", "authenticated equity broker feeds", "authenticated commodity broker feeds", "authenticated index broker feeds"],
+        "data_quality_notes": ["Yahoo Finance coverage and history vary by instrument and interval", "derivatives funding history", "open interest history", "liquidation data", "exchange-specific margin tiers"],
+        "live_execution": "spot only; derivatives execution is not implemented",
+    }
 
 
 @app.get("/risk/config")

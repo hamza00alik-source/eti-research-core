@@ -110,8 +110,9 @@ def test_market_snapshot_defaults_to_mexc_public_feed(monkeypatch):
     )
 
     class FakeProvider:
-        def __init__(self, venue):
+        def __init__(self, venue, market_type="spot"):
             captured["venue"] = venue
+            captured["market_type"] = market_type
 
         def fetch_ohlcv(self, symbol, timeframe, limit):
             captured["request"] = (symbol, timeframe, limit)
@@ -125,6 +126,7 @@ def test_market_snapshot_defaults_to_mexc_public_feed(monkeypatch):
     result = agents.market_snapshot({"symbol": "BTC/USDT"})
 
     assert captured["venue"] == "mexc"
+    assert captured["market_type"] == "spot"
     assert captured["request"] == ("BTC/USDT", "1h", 200)
     assert result["venue"] == "mexc"
     assert result["market_type"] == "spot"
@@ -147,8 +149,9 @@ def test_strategy_walk_forward_capability_uses_public_data_and_returns_report(mo
     })
     captured = {}
     class FakeProvider:
-        def __init__(self, venue):
+        def __init__(self, venue, market_type="spot"):
             captured["venue"] = venue
+            captured["market_type"] = market_type
         def fetch_ohlcv(self, symbol, timeframe, limit):
             captured["request"] = (symbol, timeframe, limit)
             return frame
@@ -187,6 +190,7 @@ def test_autonomous_snapshot_automatically_queues_strategy_followup(tmp_path):
     assert queued[0]["target_capability"] == "strategy.walk_forward"
     assert queued[0]["input"]["source_snapshot_task_id"] == task["id"]
     assert queued[0]["input"]["limit"] == 500
+    assert queued[0]["input"]["market_type"] == "spot"
 
 
 def test_model_training_research_creates_unapproved_candidate(monkeypatch):
@@ -203,8 +207,9 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
     captured = {}
 
     class FakeProvider:
-        def __init__(self, venue):
+        def __init__(self, venue, market_type="spot"):
             captured["venue"] = venue
+            captured["market_type"] = market_type
         def fetch_ohlcv(self, symbol, timeframe, limit):
             captured["request"] = (symbol, timeframe, limit)
             return frame
@@ -214,7 +219,9 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
         calibration_report = {"passed": True, "sample_count": 100}
 
     monkeypatch.setattr(agents, "CcxtPublicProvider", FakeProvider)
-    monkeypatch.setattr(pipeline, "run_nested_experiment", lambda *a, **k: {
+    def fake_nested(*args, **kwargs):
+        captured["allow_short"] = kwargs.get("allow_short")
+        return {
         "fold_count": 2, "mean_test_balanced_accuracy": 0.51,
         "test_balanced_accuracy_ci": {"lower": 0.45, "upper": 0.57},
         "folds": [{"fold": 0, "selected_candidate": "hist_gradient_boosting",
@@ -223,7 +230,8 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
                    "boundaries": {"test_start": 700, "test_end": 800}}],
         "trading_performance": {"summary": {"mean_net_return": -0.01}},
         "warning": "research only",
-    })
+    }
+    monkeypatch.setattr(pipeline, "run_nested_experiment", fake_nested)
     monkeypatch.setattr(pipeline, "fit_deployable_model", lambda *a, **k: (
         FakeModel(), {"features": ["ret_1"], "calibration_status": "calibrated"}
     ))
@@ -236,18 +244,23 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
     import eti.artifacts as artifacts
     monkeypatch.setattr(artifacts, "ModelArtifactStore", FakeArtifactStore)
     result = agents.model_training_research({
-        "venue": "mexc", "symbol": "BTC/USDT", "timeframe": "1h", "limit": 1600
+        "venue": "mexc", "market_type": "swap", "symbol": "BTC/USDT:USDT",
+        "timeframe": "1h", "limit": 1600
     })
 
     assert captured["venue"] == "mexc"
-    assert captured["request"] == ("BTC/USDT", "1h", 1600)
+    assert captured["market_type"] == "swap"
+    assert captured["request"] == ("BTC/USDT:USDT", "1h", 1600)
+    assert captured["allow_short"] is True
+    assert result["market_type"] == "swap"
+    assert result["evaluation_passed"] is False
     assert result["kind"] == "trained_model_candidate"
     assert result["training_performed"] is True
     assert result["lifecycle"] == "unregistered_candidate"
     assert result["approval_status"] == "not_approved"
     assert result["candidate_artifact"]["artifact_sha256"] == "a" * 64
     assert result["evaluation"]["fold_count"] == 2
-    assert any("no credentials" in item for item in result["limitations"])
+    assert any("funding" in item.lower() for item in result["limitations"])
 
 
 def test_model_training_research_rejects_unsafe_limits_before_network():
@@ -288,8 +301,9 @@ def test_model_training_research_runs_real_pipeline_and_writes_candidate(tmp_pat
     })
 
     class FakeProvider:
-        def __init__(self, venue):
+        def __init__(self, venue, market_type="spot"):
             self.venue = venue
+            self.market_type = market_type
         def fetch_ohlcv(self, symbol, timeframe, limit):
             return frame.tail(limit).reset_index(drop=True)
 
@@ -311,3 +325,68 @@ def test_model_training_research_runs_real_pipeline_and_writes_candidate(tmp_pat
     assert result["lifecycle"] == "unregistered_candidate"
     assert result["approval_status"] == "not_approved"
     assert result["calibration_status"] in {"calibrated", "uncalibrated"}
+
+
+def test_market_snapshot_accepts_explicit_crypto_perpetual_market(monkeypatch):
+    import pandas as pd
+    import eti.agents as agents
+
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=50, freq="h", tz="UTC"),
+        "open": [100.0] * 50, "high": [102.0] * 50,
+        "low": [99.0] * 50, "close": [101.0] * 50,
+        "volume": [10.0] * 50,
+    })
+    captured = {}
+    names = ("ret_1", "ret_3", "ret_6", "volatility_20", "sma_gap_10",
+             "sma_gap_30", "rsi_14", "range_pct", "atr_pct")
+
+    class FakeProvider:
+        def __init__(self, venue, market_type="spot"):
+            captured["venue"] = venue
+            captured["market_type"] = market_type
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            captured["symbol"] = symbol
+            return frame
+
+    monkeypatch.setattr(agents, "CcxtPublicProvider", FakeProvider)
+    monkeypatch.setattr(agents, "build_features",
+                        lambda _frame: pd.DataFrame([{name: 0.1 for name in names}]))
+    result = agents.market_snapshot({
+        "venue": "binance", "market_type": "swap",
+        "symbol": "BTC/USDT:USDT", "timeframe": "1h", "limit": 100,
+    })
+    assert captured == {"venue": "binance", "market_type": "swap", "symbol": "BTC/USDT:USDT"}
+    assert result["market_type"] == "swap"
+    assert result["research_ranking"] is None
+    assert any("funding" in item.lower() for item in result["limitations"])
+
+
+
+def test_market_snapshot_accepts_yahoo_ticker_for_equities(monkeypatch):
+    import pandas as pd
+    import eti.agents as agents
+
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=50, freq="h", tz="UTC"),
+        "open": [100.0] * 50, "high": [102.0] * 50,
+        "low": [99.0] * 50, "close": [101.0] * 50,
+        "volume": [1000.0] * 50,
+    })
+    names = ("ret_1", "ret_3", "ret_6", "volatility_20", "sma_gap_10",
+             "sma_gap_30", "rsi_14", "range_pct", "atr_pct")
+    captured = {}
+    class FakeYahooProvider:
+        def __init__(self, asset_class):
+            captured["asset_class"] = asset_class
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            captured["symbol"] = symbol
+            return frame
+    monkeypatch.setattr(agents, "YahooFinanceProvider", FakeYahooProvider)
+    monkeypatch.setattr(agents, "build_features",
+                        lambda _frame: pd.DataFrame([{name: 0.1 for name in names}]))
+    result = agents.market_snapshot({"asset_class": "equity", "symbol": "AAPL"})
+    assert captured == {"asset_class": "equity", "symbol": "AAPL"}
+    assert result["venue"] == "yahoo"
+    assert result["asset_class"] == "equity"
+    assert result["research_ranking"] is None

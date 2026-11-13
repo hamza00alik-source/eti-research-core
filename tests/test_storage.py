@@ -393,3 +393,21 @@ def test_exchange_credentials_are_owner_scoped_masked_and_audited(tmp_path):
         "exchange.credentials.deleted", "exchange.credentials.saved"
     ]
     assert all("encrypted-secret" not in str(event["payload"]) for event in events)
+
+
+def test_autonomy_schedules_spot_and_perpetual_swap_research(tmp_path):
+    from datetime import datetime, timezone
+    store = MemoryStore(tmp_path / "multi-market-autonomy.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    profile = store.configure_autonomy(
+        "owner", workspace["id"], True, venues=["binance"],
+        symbols=["BTC/USDT"], timeframes=["1h"],
+        market_types=["spot", "swap"],
+    )
+    assert profile["market_types"] == ["spot", "swap"]
+    assert store.enqueue_due_autonomy_tasks(datetime(2026, 1, 1, tzinfo=timezone.utc)) == 2
+    tasks = store.list_agent_tasks("owner", workspace["id"], status="queued")
+    inputs = {task["input"]["market_type"]: task["input"] for task in tasks}
+    assert inputs["spot"]["symbol"] == "BTC/USDT"
+    assert inputs["swap"]["symbol"] == "BTC/USDT:USDT"
+

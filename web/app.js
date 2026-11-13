@@ -46,12 +46,17 @@ let modelTrainingIntervalSeconds=86400;
 async function saveAutonomyConfig(patch={}){
  const current=autonomyProfile||{};
  const next={...current,...patch};
+ const marketTypeSelect=$('#autonomy-market-types');
+ const selectedMarketTypes=marketTypeSelect
+  ?Array.from(marketTypeSelect.selectedOptions).map(option=>option.value)
+  :null;
  const data=await api('/v1/autonomy',{method:'PUT',body:JSON.stringify({
   enabled:next.enabled??autonomyEnabled,
   workspace_id:activeWorkspace||null,
   venues:next.venues||['mexc'],
   symbols:next.symbols||['BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT'],
   timeframes:next.timeframes||['1h'],
+  market_types:patch.market_types||selectedMarketTypes||next.market_types||['spot'],
   interval_seconds:next.interval_seconds||900,
   model_training_enabled:next.model_training_enabled??modelTrainingEnabled,
   model_training_interval_seconds:next.model_training_interval_seconds||modelTrainingIntervalSeconds
@@ -70,6 +75,9 @@ async function loadAutonomy(){
   autonomyEnabled=Boolean(autonomyProfile.enabled);
   modelTrainingEnabled=Boolean(autonomyProfile.model_training_enabled);
   modelTrainingIntervalSeconds=Number(autonomyProfile.model_training_interval_seconds||86400);
+  const marketTypeSelect=$('#autonomy-market-types');
+  if(marketTypeSelect){const selected=autonomyProfile.market_types||['spot','swap'];
+   Array.from(marketTypeSelect.options).forEach(option=>option.selected=selected.includes(option.value));}
   status.textContent=!autonomyEnabled?'Autonomous operation is OFF':modelTrainingEnabled?'Autonomous operation is ON · market scans + daily model training · research only':'Market scans are ON · daily model training is OFF';
   button.textContent=autonomyEnabled&&modelTrainingEnabled?'Pause autonomous operation':autonomyEnabled?'Complete autonomous setup':'Start autonomous operation';
   const trainingButton=$('#model-training-toggle');
@@ -476,9 +484,9 @@ $('#paper-session-form')?.addEventListener('submit',async event=>{
  }catch(error){message.textContent='Paper session creation failed: '+error.message}
 });
 const taskInputTemplates={
- 'market.snapshot':{venue:'mexc',symbol:'BTC/USDT',timeframe:'1h',limit:200},
- 'strategy.walk_forward':{venue:'mexc',symbol:'BTC/USDT',timeframe:'1h',limit:500,min_history:120,validation_size:80,test_size:80,step_size:80,purge_bars:2,fee_bps:6,slippage_bps:2},
- 'model.train_research':{venue:'mexc',symbol:'BTC/USDT',timeframe:'1h',limit:3000,horizon:6}
+ 'market.snapshot':{venue:'mexc',market_type:'spot',symbol:'BTC/USDT',timeframe:'1h',limit:200},
+ 'strategy.walk_forward':{venue:'mexc',market_type:'spot',symbol:'BTC/USDT',timeframe:'1h',limit:500,min_history:120,validation_size:80,test_size:80,step_size:80,purge_bars:2,fee_bps:6,slippage_bps:2},
+ 'model.train_research':{venue:'mexc',market_type:'spot',symbol:'BTC/USDT',timeframe:'1h',limit:3000,horizon:6}
 };
 function updateTaskInputTemplate(){
  const capability=$('#capability-select')?.value;
@@ -495,10 +503,17 @@ $('#task-form').addEventListener('submit',async event=>{
   $('#task-list').textContent='Task input must be a JSON object.';return;
  }
  if(capability==='model.train_research'){
-  if(!['binance','mexc'].includes(input.venue)||typeof input.symbol!=='string'||!input.symbol.includes('/')||
+  const assetClass=input.asset_class||'crypto';
+  const marketType=input.market_type||'spot';
+  const validAsset=['crypto','forex','equity','commodity','index'].includes(assetClass);
+  const validSymbol=typeof input.symbol==='string'&&input.symbol.trim().length>0&&input.symbol.length<=40&&
+   (assetClass!=='crypto'||input.symbol.includes('/'));
+  const validVenue=assetClass!=='crypto'||['binance','mexc'].includes(input.venue||'mexc');
+  const validMarketType=assetClass==='crypto'?['spot','swap','future'].includes(marketType):['spot','future'].includes(marketType);
+  if(!validAsset||!validSymbol||!validVenue||!validMarketType||
      !['1h','4h','1d'].includes(input.timeframe)||!Number.isInteger(input.limit)||input.limit<1500||input.limit>5000||
      !Number.isInteger(input.horizon)||input.horizon<2||input.horizon>24){
-   $('#task-list').textContent='Model training requires venue binance/mexc, a spot pair, timeframe 1h/4h/1d, limit 1500–5000 candles, and horizon 2–24. Use the suggested template.';
+   $('#task-list').textContent='Training needs an asset_class (crypto/forex/equity/commodity/index), supported market_type, ticker or CCXT symbol, timeframe 1h/4h/1d, 1500–5000 candles and horizon 2–24. Crypto uses Binance/MEXC; other assets use Yahoo tickers such as AAPL, EURUSD=X, GC=F or ^GSPC.';
    return;
   }
  }
@@ -528,7 +543,7 @@ async function loadStatus(){
   ]);
   $('#health').textContent=h.status+' · '+h.mode;
   $('#execution').textContent=e.enabled?'Enabled':'Disabled';
-  $('#markets').textContent=m.asset_classes.join(', ')+' · '+m.venues.join(', ');
+  $('#markets').textContent='Research: '+m.asset_classes.join(', ')+' · execution: '+m.execution_market_types.join(', ');
   $('#providers').textContent=JSON.stringify(p,null,2);
  }catch(err){
   $('#health').textContent='API unavailable';

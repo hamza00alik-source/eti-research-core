@@ -310,6 +310,7 @@ class MemoryStore:
                 row[1] for row in conn.execute("PRAGMA table_info(autonomy_profiles)").fetchall()
             }
             for column, definition in (
+                ("market_types_json", "TEXT NOT NULL DEFAULT '[\"spot\"]'"),
                 ("model_training_enabled", "INTEGER NOT NULL DEFAULT 0"),
                 ("model_training_interval_seconds", "INTEGER NOT NULL DEFAULT 86400"),
                 ("last_model_training_at", "TEXT"),
@@ -336,7 +337,8 @@ class MemoryStore:
         venues: list[str] | None = None, symbols: list[str] | None = None,
         timeframes: list[str] | None = None, interval_seconds: int = 900,
         model_training_enabled: bool = False,
-        model_training_interval_seconds: int = 86400
+        model_training_interval_seconds: int = 86400,
+        market_types: list[str] | None = None
     ) -> dict[str, Any]:
         """Persist an owner-scoped autonomous public-market research schedule."""
         owner_id = _required_text(owner_id, "owner_id")
@@ -346,12 +348,17 @@ class MemoryStore:
         venues = venues or ["mexc"]
         symbols = symbols or ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"]
         timeframes = timeframes or ["1h"]
+        market_types = market_types or ["spot"]
+        if not isinstance(market_types, list) or not market_types or any(
+            value not in {"spot", "swap", "future"} for value in market_types
+        ):
+            raise ValueError("market_types must contain spot, swap and/or future; dated futures require an exact contract symbol")
         if not isinstance(venues, list) or not venues or any(v not in {"binance", "mexc"} for v in venues):
             raise ValueError("venues must contain binance and/or mexc")
         if not isinstance(symbols, list) or not 1 <= len(symbols) <= 20 or any(
             not isinstance(v, str) or "/" not in v or len(v) > 40 for v in symbols
         ):
-            raise ValueError("symbols must be 1-20 valid spot pairs")
+            raise ValueError("symbols must be 1-20 valid CCXT crypto symbols")
         if not isinstance(timeframes, list) or not timeframes or any(
             v not in {"5m", "15m", "30m", "1h", "4h", "1d"} for v in timeframes
         ):
@@ -364,7 +371,7 @@ class MemoryStore:
                 or not isinstance(model_training_interval_seconds, int)
                 or not 86400 <= model_training_interval_seconds <= 604800):
             raise ValueError("model_training_interval_seconds must be between 86400 and 604800")
-        if model_training_enabled and len(set(venues)) * len(set(symbols)) * len(set(timeframes)) > 8:
+        if model_training_enabled and len(set(venues)) * len(set(symbols)) * len(set(timeframes)) * len(set(market_types)) > 8:
             raise ValueError("model training schedule supports at most 8 market combinations")
         now = _utc_now()
         with self._connection() as conn:
@@ -373,20 +380,21 @@ class MemoryStore:
             conn.execute(
                 """INSERT INTO autonomy_profiles
                 (owner_id, workspace_id, enabled, interval_seconds, venues_json, symbols_json,
-                 timeframes_json, last_scheduled_at, model_training_enabled,
+                 timeframes_json, market_types_json, last_scheduled_at, model_training_enabled,
                  model_training_interval_seconds, last_model_training_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?)
                 ON CONFLICT(owner_id) DO UPDATE SET workspace_id=excluded.workspace_id,
                 enabled=excluded.enabled, interval_seconds=excluded.interval_seconds,
                 venues_json=excluded.venues_json, symbols_json=excluded.symbols_json,
                 timeframes_json=excluded.timeframes_json,
+                market_types_json=excluded.market_types_json,
                 model_training_enabled=excluded.model_training_enabled,
                 model_training_interval_seconds=excluded.model_training_interval_seconds,
                 updated_at=excluded.updated_at""",
                 (owner_id, workspace_id, int(enabled), interval_seconds,
                  _encode_json(sorted(set(venues))), _encode_json(sorted(set(symbols))),
-                 _encode_json(sorted(set(timeframes))), int(model_training_enabled),
-                 model_training_interval_seconds, now),
+                 _encode_json(sorted(set(timeframes))), _encode_json(sorted(set(market_types))),
+                 int(model_training_enabled), model_training_interval_seconds, now),
             )
             row=conn.execute("SELECT * FROM autonomy_profiles WHERE owner_id=?", (owner_id,)).fetchone()
             conn.execute(
@@ -404,6 +412,7 @@ class MemoryStore:
                 "enabled": bool(row["enabled"]), "interval_seconds": row["interval_seconds"],
                 "venues": json.loads(row["venues_json"]), "symbols": json.loads(row["symbols_json"]),
                 "timeframes": json.loads(row["timeframes_json"]),
+                "market_types": json.loads(row["market_types_json"]) if "market_types_json" in row.keys() else ["spot"],
                 "model_training_enabled": bool(row["model_training_enabled"]),
                 "model_training_interval_seconds": row["model_training_interval_seconds"],
                 "last_model_training_at": row["last_model_training_at"],
@@ -416,14 +425,14 @@ class MemoryStore:
         return self._autonomy_profile_dict(row) if row else None
 
     def enqueue_due_autonomy_tasks(self, now: datetime | None = None) -> int:
-        """Atomically enqueue due research scans; never creates execution/order tasks."""
+        """Atomically enqueue scheduled spot/swap research and model training tasks."""
         current = now or datetime.now(timezone.utc)
         if current.tzinfo is None:
             raise ValueError("now must be timezone-aware")
-        now_text=current.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00","Z")
-        queued=0
+        now_text = current.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+        queued = 0
         with self._connection() as conn:
-            rows=conn.execute("SELECT * FROM autonomy_profiles WHERE enabled=1").fetchall()
+            rows = conn.execute("SELECT * FROM autonomy_profiles WHERE enabled=1").fetchall()
             for row in rows:
                 previous = row["last_scheduled_at"]
                 scan_due = not previous or (
@@ -434,37 +443,45 @@ class MemoryStore:
                 venues = json.loads(row["venues_json"])
                 symbols = json.loads(row["symbols_json"])
                 timeframes = json.loads(row["timeframes_json"])
+                market_types = json.loads(row["market_types_json"]) if "market_types_json" in row.keys() else ["spot"]
                 if scan_due:
-                    # Reserve this interval in the same transaction as task insertion.
                     conn.execute(
                         "UPDATE autonomy_profiles SET last_scheduled_at=?, updated_at=? WHERE owner_id=?",
                         (now_text, now_text, row["owner_id"]),
                     )
-                    for venue in venues:
-                        for symbol in symbols:
-                            for timeframe in timeframes:
-                                task_id = str(uuid4())
-                                payload = {"venue": venue, "symbol": symbol, "timeframe": timeframe,
-                                           "limit": 200, "scheduled_by": "eti.autonomy.supervisor"}
-                                conn.execute(
-                                    """INSERT INTO agent_tasks
-                                    (id,owner_id,workspace_id,requester,target_capability,status,input_json,
-                                     max_attempts,created_at,updated_at)
-                                    VALUES(?,?,?,?,?,'queued',?,3,?,?)""",
-                                    (task_id, row["owner_id"], row["workspace_id"],
-                                     "eti.autonomy.supervisor", "market.snapshot",
-                                     _encode_json(payload), now_text, now_text),
-                                )
-                                conn.execute(
-                                    """INSERT INTO audit_events
-                                    (id,owner_id,workspace_id,event_type,payload_json,created_at)
-                                    VALUES(?,?,?,?,?,?)""",
-                                    (str(uuid4()), row["owner_id"], row["workspace_id"],
-                                     "autonomy.scan.queued",
-                                     _encode_json({"task_id": task_id, "venue": venue,
-                                                   "symbol": symbol, "timeframe": timeframe}), now_text),
-                                )
-                                queued += 1
+                    for market_type in market_types:
+                        for venue in venues:
+                            for symbol in symbols:
+                                market_symbol = symbol
+                                if market_type == "swap" and symbol.endswith("/USDT") and ":" not in symbol:
+                                    market_symbol = symbol + ":USDT"
+                                for timeframe in timeframes:
+                                    task_id = str(uuid4())
+                                    payload = {
+                                        "venue": venue, "market_type": market_type,
+                                        "symbol": market_symbol, "timeframe": timeframe,
+                                        "limit": 200, "scheduled_by": "eti.autonomy.supervisor",
+                                    }
+                                    conn.execute(
+                                        """INSERT INTO agent_tasks
+                                        (id,owner_id,workspace_id,requester,target_capability,status,input_json,
+                                         max_attempts,created_at,updated_at)
+                                        VALUES(?,?,?,?,?,'queued',?,3,?,?)""",
+                                        (task_id, row["owner_id"], row["workspace_id"],
+                                         "eti.autonomy.supervisor", "market.snapshot",
+                                         _encode_json(payload), now_text, now_text),
+                                    )
+                                    conn.execute(
+                                        """INSERT INTO audit_events
+                                        (id,owner_id,workspace_id,event_type,payload_json,created_at)
+                                        VALUES(?,?,?,?,?,?)""",
+                                        (str(uuid4()), row["owner_id"], row["workspace_id"],
+                                         "autonomy.scan.queued",
+                                         _encode_json({"task_id": task_id, "venue": venue,
+                                                       "market_type": market_type, "symbol": market_symbol,
+                                                       "timeframe": timeframe}), now_text),
+                                    )
+                                    queued += 1
                 training_enabled = bool(row["model_training_enabled"])
                 training_previous = row["last_model_training_at"]
                 training_due = training_enabled and (
@@ -478,35 +495,40 @@ class MemoryStore:
                         "UPDATE autonomy_profiles SET last_model_training_at=?, updated_at=? WHERE owner_id=?",
                         (now_text, now_text, row["owner_id"]),
                     )
-                    for venue in venues:
-                        for symbol in symbols:
-                            for timeframe in timeframes:
-                                task_id = str(uuid4())
-                                payload = {
-                                    "venue": venue, "symbol": symbol,
-                                    "timeframe": timeframe, "limit": 3000, "horizon": 6,
-                                    "scheduled_by": "eti.autonomy.model_training",
-                                }
-                                conn.execute(
-                                    """INSERT INTO agent_tasks
-                                    (id,owner_id,workspace_id,requester,target_capability,status,input_json,
-                                     max_attempts,created_at,updated_at)
-                                    VALUES(?,?,?,?,?,'queued',?,2,?,?)""",
-                                    (task_id, row["owner_id"], row["workspace_id"],
-                                     "eti.autonomy.model_training", "model.train_research",
-                                     _encode_json(payload), now_text, now_text),
-                                )
-                                conn.execute(
-                                    """INSERT INTO audit_events
-                                    (id,owner_id,workspace_id,event_type,payload_json,created_at)
-                                    VALUES(?,?,?,?,?,?)""",
-                                    (str(uuid4()), row["owner_id"], row["workspace_id"],
-                                     "autonomy.model_training.scheduled",
-                                     _encode_json({"task_id": task_id, "venue": venue,
-                                                   "symbol": symbol, "timeframe": timeframe}),
-                                     now_text),
-                                )
-                                queued += 1
+                    for market_type in market_types:
+                        for venue in venues:
+                            for symbol in symbols:
+                                market_symbol = symbol
+                                if market_type == "swap" and symbol.endswith("/USDT") and ":" not in symbol:
+                                    market_symbol = symbol + ":USDT"
+                                for timeframe in timeframes:
+                                    task_id = str(uuid4())
+                                    payload = {
+                                        "venue": venue, "market_type": market_type,
+                                        "symbol": market_symbol, "timeframe": timeframe,
+                                        "limit": 3000, "horizon": 6,
+                                        "scheduled_by": "eti.autonomy.model_training",
+                                    }
+                                    conn.execute(
+                                        """INSERT INTO agent_tasks
+                                        (id,owner_id,workspace_id,requester,target_capability,status,input_json,
+                                         max_attempts,created_at,updated_at)
+                                        VALUES(?,?,?,?,?,'queued',?,2,?,?)""",
+                                        (task_id, row["owner_id"], row["workspace_id"],
+                                         "eti.autonomy.model_training", "model.train_research",
+                                         _encode_json(payload), now_text, now_text),
+                                    )
+                                    conn.execute(
+                                        """INSERT INTO audit_events
+                                        (id,owner_id,workspace_id,event_type,payload_json,created_at)
+                                        VALUES(?,?,?,?,?,?)""",
+                                        (str(uuid4()), row["owner_id"], row["workspace_id"],
+                                         "autonomy.model_training.scheduled",
+                                         _encode_json({"task_id": task_id, "venue": venue,
+                                                       "market_type": market_type, "symbol": market_symbol,
+                                                       "timeframe": timeframe}), now_text),
+                                    )
+                                    queued += 1
         return queued
 
     def record_agent_worker_heartbeat(

@@ -146,8 +146,10 @@ def export_deployable_model(
 def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
                           min_train: int = 500, validation_size: int = 100,
                           test_size: int = 100, step_size: int = 100,
-                          timeframe: str = "1h") -> dict:
-    """Train-from-scratch candidate models inside purged nested walk-forward folds."""
+                          timeframe: str = "1h", allow_short: bool = False,
+                          funding_bps_per_bar: float = 0.0,
+                          fee_bps: float = 6.0, slippage_bps: float = 2.0) -> dict:
+    """Train candidates inside purged folds; configure long/short and explicit derivative cost assumptions."""
     from sklearn.dummy import DummyClassifier
     from .evaluation import run_nested_walk_forward
     frame = validate_ohlcv(frame)
@@ -190,8 +192,9 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
             "market_regimes": regime_diagnostics,
             **evaluate_predictions(
                 close_test, actual_test, prediction_test,
-                fee_bps=6.0, slippage_bps=2.0, funding_bps_per_bar=0.0,
-                allow_short=False, bars_per_year=bars_per_year,
+                fee_bps=fee_bps, slippage_bps=slippage_bps,
+                funding_bps_per_bar=funding_bps_per_bar,
+                allow_short=allow_short, bars_per_year=bars_per_year,
             ),
         })
     def mean_metric(strategy_name: str, metric_name: str) -> float:
@@ -221,6 +224,9 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
         "warning": "Fold metrics are averaged descriptively; overlapping test windows are dependent. Costs are illustrative assumptions, not exchange-specific quotes.",
     }
     report.update({"rows": len(dataset), "horizon": horizon, "timeframe": timeframe,
+                   "cost_assumptions": {"fee_bps": float(fee_bps), "slippage_bps": float(slippage_bps),
+                                        "funding_bps_per_bar": float(funding_bps_per_bar),
+                                        "allow_short": bool(allow_short)},
                    "training_performed": True,
                    "model_note": "HistGradientBoostingClassifier is fitted from scratch within each fold; majority-class is a naive comparator."})
     return report
