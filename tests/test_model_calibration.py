@@ -22,6 +22,8 @@ def test_temperature_calibration_is_applied_to_model_probabilities():
         "method": "temperature_scaling",
         "sample_count": 50,
         "temperature": 2.0,
+        "nll_before": 1.2,
+        "nll_after": 1.0,
     }
     probabilities = model.predict_proba(pd.DataFrame({"x": [1.0]}))[0]
     expected = np.power(np.array([0.1, 0.8, 0.1]), 0.5)
@@ -62,6 +64,7 @@ def test_refitting_model_resets_previous_calibration_state():
     model.calibration_report = {
         "passed": True, "method": "temperature_scaling",
         "sample_count": 50, "temperature": 1.5,
+        "nll_before": 1.2, "nll_after": 1.0,
     }
 
     model.fit(pd.DataFrame({"x": [1.0, 2.0, 3.0]}), np.array([0, 1, 2]))
