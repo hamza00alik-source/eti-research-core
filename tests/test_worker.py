@@ -116,3 +116,32 @@ def test_exhausted_expired_lease_becomes_failed(tmp_path):
     current = store.get_agent_task("owner-1", workspace["id"], task["id"])
     assert current["status"] == "failed"
     assert current["result"]["error"] == "worker lease expired"
+
+
+def test_worker_registers_model_training_result_as_unapproved_candidate(tmp_path):
+    store = MemoryStore(tmp_path / "candidate-registration.sqlite3")
+    workspace = _workspace(store)
+    worker = AgentWorker(store, registry=AgentCapabilityRegistry())
+    result = {
+        "venue": "mexc", "symbol": "BTC/USDT", "timeframe": "1h",
+        "training_data_ref": "ccxt:mexc:BTC/USDT:1h:3000:" + "a" * 64,
+        "candidate_artifact": {
+            "artifact_uri": "artifact://sha256/" + "a" * 64,
+            "artifact_sha256": "a" * 64,
+        },
+        "input_schema": {"features": ["ret_1", "volatility"]},
+        "evaluation": {"fold_count": 4, "mean_test_balanced_accuracy": 0.56},
+        "evaluation_passed": True,
+        "quality_checks": {"calibration_passed": True},
+        "calibration_status": "calibrated",
+    }
+    registered = worker._register_model_candidate(result)
+    model = store.get_model_version(registered["registry"]["model_id"],
+                                    registered["registry"]["version"])
+    assert model is not None
+    assert model["lifecycle"] == "candidate"
+    assert model["created_by"] == "eti.worker"
+    assert model["evaluation_report"]["passed"] is True
+    assert registered["approval_required"] if "approval_required" in registered else True
+    assert registered["registry"]["approval_required"] is True
+    assert registered["lifecycle"] == "candidate"
