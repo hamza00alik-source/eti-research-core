@@ -585,6 +585,12 @@ if('serviceWorker'in navigator){
 (()=>{
  const button=$('#universe-discover');if(!button)return;
  const status=$('#universe-status'),results=$('#universe-results');
+ const assetSelect=$('#universe-asset-class'),venueSelect=$('#universe-venue'),typeSelect=$('#universe-market-type');
+ assetSelect.addEventListener('change',()=>{
+  const asset=assetSelect.value;venueSelect.disabled=asset!=='crypto';
+  Array.from(typeSelect.options).forEach(option=>{option.disabled=asset==='crypto'?false:asset==='index'?option.value==='swap':asset==='commodity'?option.value!=='future':option.value!=='spot'});
+  typeSelect.value=asset==='commodity'?'future':'spot';
+ });
  const make=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
  button.addEventListener('click',async()=>{
   const assetClass=$('#universe-asset-class').value,venue=$('#universe-venue').value,marketType=$('#universe-market-type').value,limit=$('#universe-limit').value;
