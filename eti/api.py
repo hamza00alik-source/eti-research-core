@@ -970,7 +970,9 @@ def provider_capabilities():
         },
         "daily_model_training_budget": 8,
         "not_connected": ["authenticated forex broker feeds", "authenticated equity broker feeds", "authenticated commodity broker feeds", "authenticated index broker feeds"],
-        "data_quality_notes": ["Yahoo Finance coverage and history vary by instrument and interval", "derivatives funding history", "open interest history", "liquidation data", "exchange-specific margin tiers"],
+        "data_quality_notes": ["Yahoo Finance coverage and history vary by instrument and interval", "derivatives funding and open-interest history are queried where CCXT reports support", "liquidation history is not yet incorporated into model features", "exchange-specific margin tiers and side-aware funding settlement remain incomplete"],
+        "discovery": "Authenticated live catalogue discovery is available for Binance and MEXC spot, swap and dated-future markets",
+        "derivatives_research": ["historical funding rate features", "open-interest percentage-change features", "conservative absolute funding drag in nested evaluation"],
         "live_execution": "spot only; derivatives execution is not implemented",
     }
 
