@@ -10,6 +10,7 @@ import argparse
 import json
 import time
 from typing import Any
+from uuid import uuid4
 
 from .agents import AgentCapabilityRegistry, default_capabilities
 from .storage import MemoryStore
@@ -27,8 +28,10 @@ class AgentWorker:
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be an integer from 5 to 3600")
         self.lease_seconds = lease_seconds
+        self.worker_id = str(uuid4())
 
     def run_once(self) -> dict[str, Any] | None:
+        self.store.record_agent_worker_heartbeat(self.worker_id, self.registry.capabilities())
         task = self.store.claim_next_agent_task(lease_seconds=self.lease_seconds)
         if task is None:
             return None
