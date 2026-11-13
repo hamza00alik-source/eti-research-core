@@ -93,3 +93,14 @@ The shared-platform target contracts are documented in [PLATFORM_ARCHITECTURE.md
 - The store is not exposed through HTTP yet. The owner identifier must come from a verified authentication principal; clients must never be allowed to choose it.
 - SQLite is a local/single-instance foundation. Multi-instance production deployment requires a PostgreSQL-backed implementation/migration before shared concurrent writes.
 - Authentication, authenticated API routes, agent orchestration and model registry are not yet implemented.
+
+
+## Durable agent orchestration foundation
+
+The storage layer now includes owner/workspace-scoped agent task and message ledgers:
+
+- Tasks have typed requester/capability fields, bounded JSON input/result, optional deadline metadata and guarded lifecycle transitions.
+- Messages are durable, typed JSON data linked optionally to a task; message payloads are never executed as instructions or code.
+- Task and message creation/state changes append audit events.
+- Reads and writes enforce workspace ownership; tests cover cross-owner isolation and persistence.
+- This is a durable ledger, not an autonomous scheduler or running agent network. Authenticated API routes, permission policies, worker dispatch, retries, timeout enforcement and agent implementations remain separate work.
