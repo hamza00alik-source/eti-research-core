@@ -226,3 +226,28 @@ def test_live_supervisor_schedules_only_owner_authorized_profile_tasks(tmp_path)
     assert live_tasks[0]["input"]["scheduled_by"] == "eti.live.supervisor"
     assert live_tasks[0]["input"]["task_id"] == live_tasks[0]["id"]
     assert store.enqueue_due_live_execution_tasks(datetime.now(timezone.utc)) == 0
+
+
+def test_live_account_risk_state_persists_across_symbols_and_days(tmp_path):
+    store = _live_store(tmp_path)
+    profile = store.update_live_execution_account_state("owner", "2026-11-13", 1000.0, 1050.0)
+    assert profile["daily_date"] == "2026-11-13"
+    assert profile["daily_start_equity"] == 1000.0
+    assert profile["peak_equity"] == 1050.0
+    states = store.list_live_execution_states("owner", "binance", "1h")
+    assert states == []
+
+
+def test_live_settings_cannot_orphan_an_open_position(tmp_path):
+    import pytest
+    store = _live_store(tmp_path)
+    store.apply_live_execution_state(
+        "owner", "binance", "BTC/USDT", "1h", "2026-11-13T10:00:00+00:00",
+        {"position_qty": 0.01, "entry_price": 100.0, "daily_date": "2026-11-13",
+         "daily_start_equity": 1000.0, "peak_equity": 1000.0},
+    )
+    store.disable_live_execution("owner")
+    with pytest.raises(ValueError, match="close ETI-managed positions"):
+        store.save_live_execution_profile(
+            "owner", "binance", ["ETH/USDT"], "1h", 1000.0, {},
+        )
