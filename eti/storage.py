@@ -310,40 +310,46 @@ class MemoryStore:
         with self._connection() as conn:
             rows=conn.execute("SELECT * FROM autonomy_profiles WHERE enabled=1").fetchall()
             for row in rows:
-                previous=row["last_scheduled_at"]
-                if previous:
-                    last=datetime.fromisoformat(previous.replace("Z","+00:00"))
-                    if (current.astimezone(timezone.utc)-last).total_seconds() < row["interval_seconds"]:
-                        continue
-                # Reserve this interval in the same transaction as task insertion.
-                conn.execute("UPDATE autonomy_profiles SET last_scheduled_at=?, updated_at=? WHERE owner_id=?",
-                             (now_text, now_text, row["owner_id"]))
-                venues=json.loads(row["venues_json"])
-                symbols=json.loads(row["symbols_json"])
-                timeframes=json.loads(row["timeframes_json"])
-                for venue in venues:
-                    for symbol in symbols:
-                        for timeframe in timeframes:
-                            task_id=str(uuid4())
-                            payload={"venue":venue,"symbol":symbol,"timeframe":timeframe,"limit":200,
-                                     "scheduled_by":"eti.autonomy.supervisor"}
-                            conn.execute(
-                                """INSERT INTO agent_tasks
-                                (id,owner_id,workspace_id,requester,target_capability,status,input_json,
-                                 max_attempts,created_at,updated_at)
-                                VALUES(?,?,?,?,?,'queued',?,3,?,?)""",
-                                (task_id,row["owner_id"],row["workspace_id"],"eti.autonomy.supervisor",
-                                 "market.snapshot",_encode_json(payload),now_text,now_text),
-                            )
-                            conn.execute(
-                                """INSERT INTO audit_events
-                                (id,owner_id,workspace_id,event_type,payload_json,created_at)
-                                VALUES(?,?,?,?,?,?)""",
-                                (str(uuid4()),row["owner_id"],row["workspace_id"],"autonomy.scan.queued",
-                                 _encode_json({"task_id":task_id,"venue":venue,"symbol":symbol,"timeframe":timeframe}),
-                                 now_text),
-                            )
-                            queued += 1
+                previous = row["last_scheduled_at"]
+                scan_due = not previous or (
+                    current.astimezone(timezone.utc) - datetime.fromisoformat(
+                        previous.replace("Z", "+00:00")
+                    )
+                ).total_seconds() >= row["interval_seconds"]
+                venues = json.loads(row["venues_json"])
+                symbols = json.loads(row["symbols_json"])
+                timeframes = json.loads(row["timeframes_json"])
+                if scan_due:
+                    # Reserve this interval in the same transaction as task insertion.
+                    conn.execute(
+                        "UPDATE autonomy_profiles SET last_scheduled_at=?, updated_at=? WHERE owner_id=?",
+                        (now_text, now_text, row["owner_id"]),
+                    )
+                    for venue in venues:
+                        for symbol in symbols:
+                            for timeframe in timeframes:
+                                task_id = str(uuid4())
+                                payload = {"venue": venue, "symbol": symbol, "timeframe": timeframe,
+                                           "limit": 200, "scheduled_by": "eti.autonomy.supervisor"}
+                                conn.execute(
+                                    """INSERT INTO agent_tasks
+                                    (id,owner_id,workspace_id,requester,target_capability,status,input_json,
+                                     max_attempts,created_at,updated_at)
+                                    VALUES(?,?,?,?,?,'queued',?,3,?,?)""",
+                                    (task_id, row["owner_id"], row["workspace_id"],
+                                     "eti.autonomy.supervisor", "market.snapshot",
+                                     _encode_json(payload), now_text, now_text),
+                                )
+                                conn.execute(
+                                    """INSERT INTO audit_events
+                                    (id,owner_id,workspace_id,event_type,payload_json,created_at)
+                                    VALUES(?,?,?,?,?,?)""",
+                                    (str(uuid4()), row["owner_id"], row["workspace_id"],
+                                     "autonomy.scan.queued",
+                                     _encode_json({"task_id": task_id, "venue": venue,
+                                                   "symbol": symbol, "timeframe": timeframe}), now_text),
+                                )
+                                queued += 1
                 training_enabled = bool(row["model_training_enabled"])
                 training_previous = row["last_model_training_at"]
                 training_due = training_enabled and (
