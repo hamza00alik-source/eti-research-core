@@ -70,6 +70,7 @@ class AutonomyConfigPayload(BaseModel):
     venues: list[str] = Field(default_factory=lambda: ["mexc"], min_length=1, max_length=2)
     symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"], min_length=1, max_length=20)
     timeframes: list[str] = Field(default_factory=lambda: ["1h"], min_length=1, max_length=6)
+    market_types: list[str] = Field(default_factory=lambda: ["spot", "swap"], min_length=1, max_length=2)
     interval_seconds: int = Field(default=900, ge=300, le=86400)
     model_training_enabled: bool = False
     model_training_interval_seconds: int = Field(default=86400, ge=86400, le=604800)
@@ -237,7 +238,8 @@ def set_autonomy_config(payload: AutonomyConfigPayload,
         profile = store.configure_autonomy(
             account["id"], workspace_id, payload.enabled, payload.venues,
             payload.symbols, payload.timeframes, payload.interval_seconds,
-            payload.model_training_enabled, payload.model_training_interval_seconds
+            payload.model_training_enabled, payload.model_training_interval_seconds,
+            market_types=payload.market_types
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
