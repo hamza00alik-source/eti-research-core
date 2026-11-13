@@ -354,6 +354,9 @@ def _model_admin_usernames() -> set[str]:
 
 
 def _model_has_verified_calibration(model: Any) -> bool:
+    checker = getattr(model, "has_valid_calibration", None)
+    if callable(checker):
+        return bool(checker())
     report = getattr(model, "calibration_report", None)
     temperature = report.get("temperature") if isinstance(report, dict) else None
     sample_count = report.get("sample_count", 0) if isinstance(report, dict) else 0
@@ -363,6 +366,7 @@ def _model_has_verified_calibration(model: Any) -> bool:
         and report.get("passed") is True
         and report.get("method") == "temperature_scaling"
         and isinstance(sample_count, int) and sample_count >= 30
+        and not isinstance(temperature, bool)
         and isinstance(temperature, (int, float)) and math.isfinite(temperature)
         and temperature > 0
     )
