@@ -364,7 +364,7 @@ def get_model(model_id: str, version: str,
 
 @app.post("/v1/inference/{model_id}/{version}")
 def infer_model(model_id: str, version: str, payload: ModelInferencePayload,
-                request: Request, account: dict[str, str] = Depends(current_account)):
+                account: dict[str, str] = Depends(current_account)):
     manager = _auth_manager()
     try:
         manager.consume_rate_limit(
@@ -403,11 +403,15 @@ def infer_model(model_id: str, version: str, payload: ModelInferencePayload,
         raise HTTPException(status_code=503, detail="approved model artifact is unavailable or invalid") from exc
     frame = pd.DataFrame([values], columns=expected)
     try:
-        probabilities = model.predict_proba(frame)[0]
+        probabilities = [float(value) for value in model.predict_proba(frame)[0]]
+        probability_total = math.fsum(probabilities)
+        if (len(probabilities) != 3 or not all(math.isfinite(value) and value >= 0 for value in probabilities)
+                or not math.isclose(probability_total, 1.0, rel_tol=1e-5, abs_tol=1e-6)):
+            raise ValueError("model returned invalid class probabilities")
     except Exception as exc:
-        raise HTTPException(status_code=422, detail="model rejected the registered feature input") from exc
+        raise HTTPException(status_code=503, detail="approved model returned invalid inference output") from exc
     class_names = {0: "short", 1: "flat", 2: "long"}
-    scores = {class_names[index]: float(probabilities[index]) for index in range(3)}
+    scores = {class_names[index]: probabilities[index] for index in range(3)}
     predicted = max(scores, key=scores.get)
     return {
         "model_id": model_id,
