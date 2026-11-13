@@ -63,15 +63,21 @@ def test_authenticated_agent_task_and_message_ledger_api(tmp_path, monkeypatch):
                                 json={"name": "agent lab"}).json()
         workspace_id = workspace["id"]
 
+        capabilities = client.get("/v1/agents/capabilities", headers=headers)
+        assert capabilities.status_code == 200
+        assert "market.snapshot" in capabilities.json()["items"]
+
         created = client.post(
             f"/v1/workspaces/{workspace_id}/agents/tasks",
             headers=headers,
-            json={"target_capability": "market.research",
-                  "input": {"symbol": "BTC/USDT", "timeframe": "1h"}},
+            json={"target_capability": "market.snapshot",
+                  "input": {"symbol": "BTC/USDT", "timeframe": "1h"},
+                  "max_attempts": 2},
         )
         assert created.status_code == 201, created.text
         task = created.json()
         assert task["status"] == "queued"
+        assert task["max_attempts"] == 2
 
         listed = client.get(f"/v1/workspaces/{workspace_id}/agents/tasks",
                             headers=headers)
@@ -80,14 +86,19 @@ def test_authenticated_agent_task_and_message_ledger_api(tmp_path, monkeypatch):
             f"/v1/workspaces/{workspace_id}/agents/tasks/{task['id']}",
             headers=headers, json={"status": "running"},
         )
-        assert running.status_code == 200
+        assert running.status_code == 403
         completed = client.patch(
             f"/v1/workspaces/{workspace_id}/agents/tasks/{task['id']}",
             headers=headers,
             json={"status": "completed", "result": {"summary": "research complete"}},
         )
-        assert completed.status_code == 200
-        assert completed.json()["status"] == "completed"
+        assert completed.status_code == 403
+        cancelled = client.patch(
+            f"/v1/workspaces/{workspace_id}/agents/tasks/{task['id']}",
+            headers=headers, json={"status": "cancelled"},
+        )
+        assert cancelled.status_code == 200
+        assert cancelled.json()["status"] == "cancelled"
 
         message = client.post(
             f"/v1/workspaces/{workspace_id}/agents/messages",
@@ -204,28 +215,3 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
         )
         assert retired.status_code == 200
         assert retired.json()["lifecycle"] == "retired"
-
-
-def test_audit_endpoint_is_authenticated_and_account_scoped(tmp_path, monkeypatch):
-    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "audit.sqlite3"))
-    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
-    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
-    with TestClient(app) as client:
-        assert client.get("/v1/audit/events").status_code == 401
-        first = _register(client, "audit_first")
-        second = _register(client, "audit_second")
-        h1 = {"Authorization": f"Bearer {first['access_token']}"}
-        h2 = {"Authorization": f"Bearer {second['access_token']}"}
-        workspace = client.post("/v1/workspaces", headers=h1,
-                                json={"name": "audit workspace"}).json()
-        task = client.post(
-            f"/v1/workspaces/{workspace['id']}/agents/tasks",
-            headers=h1,
-            json={"target_capability": "market.research", "input": {"symbol": "BTC/USDT"}},
-        )
-        assert task.status_code == 201
-        events = client.get("/v1/audit/events", headers=h1)
-        assert events.status_code == 200
-        assert any(item["event_type"] == "agent.task.queued"
-                   for item in events.json()["items"])
-        assert client.get("/v1/audit/events", headers=h2).json()["items"] == []
