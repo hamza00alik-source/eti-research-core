@@ -158,8 +158,94 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
+    """Train and evaluate a bounded research candidate from public spot candles."""
+    venue = payload.get("venue", "mexc")
+    symbol = payload.get("symbol")
+    timeframe = payload.get("timeframe", "1h")
+    limit = payload.get("limit", 3000)
+    horizon = payload.get("horizon", 6)
+    if venue not in {"binance", "mexc"}:
+        raise ValueError("venue must be binance or mexc")
+    if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
+        raise ValueError("symbol must be a valid spot pair such as BTC/USDT")
+    if timeframe not in {"1h", "4h", "1d"}:
+        raise ValueError("model training supports 1h, 4h, or 1d candles")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1500 <= limit <= 5000:
+        raise ValueError("training limit must be an integer from 1500 to 5000")
+    if isinstance(horizon, bool) or not isinstance(horizon, int) or not 2 <= horizon <= 24:
+        raise ValueError("horizon must be an integer from 2 to 24")
+
+    frame = CcxtPublicProvider(venue).fetch_ohlcv(symbol, timeframe, limit)
+    timestamps = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+    if timestamps.isna().any() or timestamps.duplicated().any() or not timestamps.is_monotonic_increasing:
+        raise ValueError("provider timestamps must be valid, unique, and chronological")
+    if len(frame) < 1500:
+        raise ValueError("provider returned fewer than 1500 completed candles")
+
+    from .pipeline import fit_deployable_model, run_nested_experiment
+    evaluation = run_nested_experiment(
+        frame, horizon=horizon, min_train=500, validation_size=100,
+        test_size=100, step_size=250, timeframe=timeframe,
+    )
+    model, schema = fit_deployable_model(frame, horizon=horizon)
+    from .artifacts import ModelArtifactStore
+    artifact = ModelArtifactStore().save_model(model)
+
+    fold_diagnostics = []
+    for fold in evaluation.get("folds", []):
+        fold_diagnostics.append({
+            "fold": fold.get("fold"),
+            "selected_candidate": fold.get("selected_candidate"),
+            "validation_scores": fold.get("validation_scores"),
+            "test_accuracy": fold.get("test_accuracy"),
+            "test_balanced_accuracy": fold.get("test_balanced_accuracy"),
+            "boundaries": fold.get("boundaries"),
+        })
+    trading = evaluation.get("trading_performance", {})
+    return {
+        "kind": "trained_model_candidate",
+        "venue": venue,
+        "asset_class": "crypto",
+        "market_type": "spot",
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "requested_candles": limit,
+        "available_candles": len(frame),
+        "data_start": timestamps.iloc[0].isoformat(),
+        "data_end": timestamps.iloc[-1].isoformat(),
+        "model_family": "HistGradientBoostingClassifier",
+        "training_method": "from_scratch_purged_nested_walk_forward_v1",
+        "training_performed": True,
+        "evaluation": {
+            "fold_count": evaluation.get("fold_count", 0),
+            "mean_test_balanced_accuracy": evaluation.get("mean_test_balanced_accuracy"),
+            "test_balanced_accuracy_ci": evaluation.get("test_balanced_accuracy_ci"),
+            "trading_summary": trading.get("summary", {}),
+            "folds": fold_diagnostics,
+            "warning": evaluation.get("warning"),
+        },
+        "candidate_artifact": artifact,
+        "input_schema": schema,
+        "calibration_status": model.calibration_status,
+        "calibration_report": model.calibration_report,
+        "lifecycle": "unregistered_candidate",
+        "approval_status": "not_approved",
+        "limitations": [
+            "This is a research candidate artifact; it is not registered, approved, or enabled for inference.",
+            "Nested test folds are held out from candidate selection; final artifact calibration uses a separate chronological holdout.",
+            "Calibration failure blocks approval; no automatic promotion occurs.",
+            "Single-market evaluation is not a portfolio backtest and does not establish future profitability.",
+            "Public spot candles only; no credentials, balances, orders, leverage, or live execution.",
+        ],
+    }
+
+
+
+
 def default_capabilities() -> AgentCapabilityRegistry:
     registry = AgentCapabilityRegistry()
     registry.register("market.snapshot", market_snapshot)
     registry.register("strategy.walk_forward", strategy_walk_forward)
+    registry.register("model.train_research", model_training_research)
     return registry
