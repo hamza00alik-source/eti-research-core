@@ -145,3 +145,53 @@ def test_paper_session_risk_limits_cannot_be_relaxed(tmp_path):
             "mexc", "BTC/USDT", "1h", 1000.0,
             {"max_position_fraction": 0.50},
         )
+
+
+def test_paper_tick_enforces_stop_loss_and_does_not_reenter_same_candle(tmp_path, monkeypatch):
+    import eti.paper as paper
+    store = MemoryStore(tmp_path / "paper-stop.sqlite3")
+    workspace = store.create_workspace("owner", "paper")
+    _approved_model(store)
+    session = store.create_paper_session(
+        "owner", workspace["id"], "eti-mexc-btc-usdt-1h", "paper-test",
+        "mexc", "BTC/USDT", "1h", 10000.0, {},
+    )
+    store.set_paper_session_status("owner", session["id"], "running")
+
+    class FakeModel:
+        def predict_proba(self, frame):
+            return np.array([[0.05, 0.05, 0.90]])
+
+    class FakeProvider:
+        calls = 0
+        def __init__(self, venue):
+            pass
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            self.calls += 1
+            price = 100.0 if self.calls == 1 else 94.0
+            return pd.DataFrame({
+                "timestamp": pd.date_range(
+                    "2026-02-01" if self.calls == 1 else "2026-02-02",
+                    periods=80, freq="h", tz="UTC"
+                ),
+                "open": [price] * 80, "high": [price * 1.01] * 80,
+                "low": [price * 0.99] * 80, "close": [price] * 80,
+                "volume": [1000.0] * 80,
+            })
+
+    class FakeArtifacts:
+        def load_model(self, uri, digest):
+            return FakeModel()
+
+    monkeypatch.setattr(paper, "CcxtPublicProvider", FakeProvider)
+    monkeypatch.setattr(paper, "ModelArtifactStore", FakeArtifacts)
+    monkeypatch.setattr(paper, "build_features", lambda frame: pd.DataFrame(
+        [[0.0] * len(FEATURE_COLUMNS)], columns=FEATURE_COLUMNS, index=[79]
+    ))
+
+    opened = run_paper_tick({"owner_id": "owner", "session_id": session["id"]}, store)
+    assert opened["position_qty"] > 0
+    stopped = run_paper_tick({"owner_id": "owner", "session_id": session["id"]}, store)
+    assert stopped["position_qty"] == 0
+    assert stopped["events"][0]["event_type"] == "risk_stop"
+    assert stopped["decision"]["reason"] == "below_confidence_threshold_or_flat"
