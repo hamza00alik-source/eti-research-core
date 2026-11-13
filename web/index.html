@@ -52,8 +52,8 @@
 <pre id="memory-list" aria-live="polite">Choose a workspace to load memory.</pre>
 <h3>Agent task ledger</h3>
 <form id="task-form">
-<label>Capability<input name="capability" value="market.snapshot" maxlength="120" required></label>
-<label class="wide-field">Task input (JSON)<textarea name="input" rows="3" spellcheck="false">{"symbol":"BTC/USDT","timeframe":"1h"}</textarea></label>
+<label>Registered capability<select id="capability-select" name="capability" required><option value="market.snapshot">market.snapshot</option></select></label>
+<label class="wide-field">Task input (JSON)<textarea name="input" rows="3" spellcheck="false">{"venue":"mexc","symbol":"BTC/USDT","timeframe":"1h","limit":200}</textarea></label>
 <button type="submit">Queue research task</button>
 </form>
 <pre id="task-list" aria-live="polite">No tasks loaded.</pre>
