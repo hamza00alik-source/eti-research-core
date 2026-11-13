@@ -6,7 +6,12 @@ from dataclasses import dataclass
 import pandas as pd
 
 from .backtest import backtest_positions
-from .strategies import moving_average_signal, momentum_signal
+from .strategies import (
+    donchian_breakout_signal,
+    mean_reversion_signal,
+    moving_average_signal,
+    momentum_signal,
+)
 
 
 @dataclass(frozen=True)
@@ -23,7 +28,23 @@ def candidate_set() -> list[Candidate]:
         Candidate("momentum", {"lookback": 6}),
         Candidate("momentum", {"lookback": 12}),
         Candidate("momentum", {"lookback": 24}),
+        Candidate("breakout", {"window": 20}),
+        Candidate("breakout", {"window": 40}),
+        Candidate("mean_reversion", {"window": 20, "entry_z": 1.5, "exit_z": 0.0}),
+        Candidate("mean_reversion", {"window": 40, "entry_z": 2.0, "exit_z": 0.0}),
     ]
+
+
+def build_signal(close: pd.Series, candidate: Candidate) -> pd.Series:
+    if candidate.name == "ma":
+        return moving_average_signal(close, **candidate.parameters)
+    if candidate.name == "momentum":
+        return momentum_signal(close, **candidate.parameters)
+    if candidate.name == "breakout":
+        return donchian_breakout_signal(close, **candidate.parameters)
+    if candidate.name == "mean_reversion":
+        return mean_reversion_signal(close, **candidate.parameters)
+    raise ValueError(f"Unknown candidate strategy: {candidate.name}")
 
 
 def evaluate_candidate(
@@ -33,16 +54,10 @@ def evaluate_candidate(
     fee_bps: float = 6.0,
     slippage_bps: float = 2.0,
 ) -> dict:
-    if candidate.name == "ma":
-        signal = moving_average_signal(close, **candidate.parameters)
-    elif candidate.name == "momentum":
-        signal = momentum_signal(close, **candidate.parameters)
-    else:
-        raise ValueError(f"Unknown candidate strategy: {candidate.name}")
+    signal = build_signal(close, candidate)
     result = backtest_positions(
         close, signal, fee_bps=fee_bps, slippage_bps=slippage_bps,
     )
-    # Penalize severe drawdowns and reward returns; keep the score transparent.
     result["selection_score"] = result["total_return"] + 0.5 * result["max_drawdown"]
     result["candidate"] = candidate.name
     result["parameters"] = candidate.parameters
