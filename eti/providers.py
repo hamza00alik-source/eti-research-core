@@ -124,4 +124,11 @@ class YahooFinanceProvider:
                 "open": "first", "high": "max", "low": "min",
                 "close": "last", "volume": "sum",
             }).dropna().reset_index()
-        return validate_ohlcv(frame).tail(limit).reset_index(drop=True)
+        timeframe_ms = {
+            "1m": 60_000, "5m": 300_000, "15m": 900_000,
+            "30m": 1_800_000, "1h": 3_600_000,
+            "4h": 14_400_000, "1d": 86_400_000,
+        }[timeframe]
+        now_ms = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
+        completed = drop_incomplete_candles(frame, timeframe_ms, now_ms)
+        return completed.tail(limit).reset_index(drop=True)
