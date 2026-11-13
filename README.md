@@ -89,13 +89,23 @@ The repository includes a Docker image and Compose stack for a single-host deplo
 1. Install Docker Engine and the Docker Compose plugin on a Linux host.
 2. Copy `.env.example` to `.env` on the host and replace both placeholder secrets with independently generated random values. Keep `.env` private and out of Git.
 3. Keep `ETI_BIND_ADDRESS=127.0.0.1` when using a TLS reverse proxy on the same host. Do not expose the raw API port directly to the public internet.
-4. Run `docker compose up --build -d` from the repository directory.
+4. Run `docker compose up --build -d` from the repository directory. The container honors the platform-provided `PORT` variable (default 8000) for managed Docker hosts.
 5. Check `docker compose ps` and `docker compose logs -f api worker`. The API health check is `/health`; the worker should appear in the signed-in PWA after its first heartbeat.
 
 The default binding is localhost intentionally. Configure a domain and HTTPS reverse proxy (for example, Caddy or Nginx) before remote access. Use a firewall, secure host updates, encrypted backups, and a recovery test. Invite-only registration requires sharing the registration key only with intended testers.
 
-**Deployment limits:** this is a single-host private-beta deployment template, not a managed public service. The API and worker share SQLite on one host; do not scale them across machines or replicas. There is no managed PostgreSQL, email verification, automated backup service, monitoring/alerting, or public Android app yet. Do not add exchange credentials or enable live trading. Before a public launch, complete a security review, TLS/domain setup, backup/restore test, email verification and edge rate limiting.
+**Deployment limits:** this is a single-host private-beta deployment template, not a managed public service. The API and worker share SQLite on one host; do not scale them across machines or replicas. There is no managed PostgreSQL, email verification, monitoring/alerting, or public Android app yet. Encrypted object-store backups are optional and must be configured; they are not enabled by default. Do not add exchange credentials or enable live trading. Before a public launch, complete a security review, TLS/domain setup, backup/restore test, email verification and edge rate limiting.
 
+
+## Single-instance production runtime and encrypted backups
+
+- Railway's initial deployment uses one API service with a persistent volume mounted at `/app/data`. The durable worker runs inside that same service so API and worker share the same SQLite file; do not scale this service horizontally or split the worker onto another service while SQLite is in use.
+- Set `ETI_EMBEDDED_WORKER=1` to enable the worker in the API lifespan. Local development and Compose retain their separate worker service by default.
+- Set `ETI_BACKUP_ENABLED=1` to run an immediate and then daily encrypted SQLite snapshot to the configured S3-compatible object bucket. Snapshots use SQLite's online backup API, pass `PRAGMA integrity_check`, and are encrypted with AES-256-GCM before upload. Old objects are removed after the configured retention period (7–365 days).
+- Required backup variables: `ETI_BACKUP_S3_ENDPOINT`, `ETI_BACKUP_S3_BUCKET`, `ETI_BACKUP_S3_ACCESS_KEY_ID`, `ETI_BACKUP_S3_SECRET_ACCESS_KEY`, and `ETI_BACKUP_ENCRYPTION_KEY` (URL-safe base64 encoding of 32 random bytes; generate with `python -c 'import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())'`). Optional: `ETI_BACKUP_S3_REGION`, `ETI_BACKUP_S3_ADDRESSING_STYLE` (`path` or `virtual`), `ETI_BACKUP_S3_PREFIX`, `ETI_BACKUP_RETENTION_DAYS`, and `ETI_BACKUP_INTERVAL_SECONDS`.
+- Restore with `python -m eti.backup restore --key '<exact-object-key>' --destination /app/data/eti.sqlite3`. Restore decrypts into a temporary file, verifies SQLite integrity, then atomically replaces the destination. Stop API/worker writes before running a restore.
+- Backups are encrypted independently of the storage provider. Keep the encryption key in Railway's sealed variables and in a separate secure offline recovery location; losing that key makes backups unrecoverable. Never put it in Git or chat.
+- This is a single-instance deployment design, not high availability. PostgreSQL migration is required before multiple API/worker replicas or horizontal scaling.
 
 ## PWA account workspace
 
