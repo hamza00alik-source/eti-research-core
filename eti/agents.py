@@ -197,9 +197,9 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         fold_diagnostics.append({
             "fold": fold.get("fold"),
             "selected_candidate": fold.get("selected_candidate"),
-            "validation_scores": fold.get("validation_scores"),
-            "test_accuracy": fold.get("test_accuracy"),
-            "test_balanced_accuracy": fold.get("test_balanced_accuracy"),
+            "validation_scores": fold.get("validation"),
+            "test_accuracy": (fold.get("test") or {}).get("accuracy"),
+            "test_balanced_accuracy": (fold.get("test") or {}).get("balanced_accuracy"),
             "boundaries": fold.get("boundaries"),
         })
     trading = evaluation.get("trading_performance", {})
@@ -214,7 +214,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         "available_candles": len(frame),
         "data_start": timestamps.iloc[0].isoformat(),
         "data_end": timestamps.iloc[-1].isoformat(),
-        "model_family": "ETI BaselineModel",
+        "model_family": "HistGradientBoostingClassifier via ETI BaselineModel",
         "training_method": "from_scratch_purged_nested_walk_forward_v1",
         "training_performed": True,
         "evaluation": {
@@ -223,6 +223,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
             "test_balanced_accuracy_ci": evaluation.get("test_balanced_accuracy_ci"),
             "trading_summary": trading.get("summary", {}),
             "folds": fold_diagnostics,
+            "model_note": evaluation.get("model_note"),
             "warning": evaluation.get("warning"),
         },
         "candidate_artifact": artifact,
