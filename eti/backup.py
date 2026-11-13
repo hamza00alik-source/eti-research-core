@@ -30,6 +30,25 @@ def _key_from_env(value: str | None = None) -> bytes:
     return key
 
 
+def validate_backup_configuration() -> None:
+    required = (
+        "ETI_BACKUP_S3_ENDPOINT",
+        "ETI_BACKUP_S3_BUCKET",
+        "ETI_BACKUP_S3_ACCESS_KEY_ID",
+        "ETI_BACKUP_S3_SECRET_ACCESS_KEY",
+        "ETI_BACKUP_ENCRYPTION_KEY",
+    )
+    missing = [name for name in required if not os.environ.get(name)]
+    if missing:
+        raise RuntimeError("missing required backup settings: " + ", ".join(missing))
+    _key_from_env()
+    retention_days = int(os.environ.get("ETI_BACKUP_RETENTION_DAYS", "30"))
+    if not 7 <= retention_days <= 365:
+        raise ValueError("ETI_BACKUP_RETENTION_DAYS must be between 7 and 365")
+    if os.environ.get("ETI_BACKUP_S3_ADDRESSING_STYLE", "path") not in {"path", "virtual"}:
+        raise ValueError("ETI_BACKUP_S3_ADDRESSING_STYLE must be path or virtual")
+
+
 def snapshot_sqlite(database_path: str | os.PathLike[str]) -> bytes:
     """Take a transactionally consistent SQLite snapshot and verify its integrity."""
     source_path = Path(database_path)
@@ -103,6 +122,7 @@ def _s3_client():
 
 
 def backup_once() -> str:
+    validate_backup_configuration()
     bucket = os.environ["ETI_BACKUP_S3_BUCKET"]
     database = os.environ.get("ETI_DATABASE_PATH", "/app/data/eti.sqlite3")
     prefix = os.environ.get("ETI_BACKUP_S3_PREFIX", "eti/sqlite").strip("/")
