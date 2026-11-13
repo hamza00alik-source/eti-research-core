@@ -103,8 +103,8 @@ def test_temperature_calibration_fails_closed_for_small_or_missing_class_samples
     model.classes_ = np.array([0, 1, 2])
 
     too_small = model.fit_temperature_calibration(
-        pd.DataFrame({"x": np.arange(20, dtype=float)}),
-        np.tile(np.array([0, 1, 2]), 6)[:20],
+        pd.DataFrame({"x": np.arange(18, dtype=float)}),
+        np.tile(np.array([0, 1, 2]), 6),
     )
     assert too_small["passed"] is False
     assert model.calibration_status == "uncalibrated"
