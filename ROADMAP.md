@@ -65,7 +65,8 @@
 - [x] Specify central model registry, immutable versions and gated promotion lifecycle
 - [x] Define stable client-neutral API families and backend-only market plug-in contract
 - [x] Define authentication, authorization, encryption, audit and credential-handling requirements
-- [ ] Implement persistent workspace memory with isolation and retention tests
+- [x] Add file-backed SQLite workspace/memory store with owner-scoped queries and isolation tests
+- [ ] Add authenticated API access, retention/deletion policy and production PostgreSQL backend
 - [ ] Implement authenticated session and scoped authorization
 - [ ] Implement durable agent task/message orchestration and audit events
 - [ ] Implement central model registry and versioned inference service
