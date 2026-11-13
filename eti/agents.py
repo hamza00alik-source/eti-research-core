@@ -52,7 +52,7 @@ class AgentCapabilityRegistry:
 
 def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     """Fetch completed public crypto spot candles and summarize causal indicators."""
-    venue = payload.get("venue", "binance")
+    venue = payload.get("venue", "mexc")
     symbol = payload.get("symbol")
     timeframe = payload.get("timeframe", "1h")
     limit = payload.get("limit", 200)
