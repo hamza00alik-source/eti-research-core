@@ -908,7 +908,7 @@ def supported_markets():
         "market_types": ["spot", "swap", "future", "margin", "option", "cfd"],
         "data_coverage": {
             "crypto": "Public CCXT OHLCV for supported spot, perpetual swap and dated-future symbols",
-            "forex_equity_commodity_index": "Validated user-supplied OHLCV CSV; live broker/data feeds are not connected",
+            "forex_equity_commodity_index": "Yahoo Finance public OHLCV plus validated CSV fallback; authenticated broker feeds are not connected",
         },
         "execution_market_types": ["spot"],
         "live_execution_enabled": False,
