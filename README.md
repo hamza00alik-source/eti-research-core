@@ -77,6 +77,7 @@ All routes in this section require `Authorization: Bearer <access_token>`. The a
 - `GET/POST /v1/workspaces/{workspace_id}/agents/tasks`: list or queue durable task records.
 - `GET/PATCH /v1/workspaces/{workspace_id}/agents/tasks/{task_id}`: read a task or apply a guarded status transition.
 - `GET/POST /v1/workspaces/{workspace_id}/agents/messages`: list or append typed JSON messages.
+- `GET /v1/audit/events`: list the authenticated account's audit history.
 
 Every workspace route checks account ownership and returns not-found for another account's workspace. Agent tasks/messages remain a durable ledger only: creating a task does not run an agent, and message payloads are stored as data, never executed as code or instructions. Model registry APIs, worker dispatch, permissioned agent capabilities and production deployment remain future work.
 
@@ -98,3 +99,6 @@ The PWA still requires a deployed HTTPS backend and configured server secrets be
 - The API derives creator and approver identities from the verified account token; clients cannot set these fields.
 - Candidate and retired versions are hidden from ordinary accounts.
 - The registry remains metadata-only: it does not host/download model binaries, run inference, train models or auto-promote candidates.
+
+
+The mobile PWA displays the authenticated account's audit trail alongside its workspace memory and agent task ledger.
