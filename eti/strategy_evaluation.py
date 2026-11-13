@@ -84,15 +84,15 @@ def run_strategy_walk_forward(
         else:
             selected_name, selected_parameters = "cash", {}
 
-        through_test = close.iloc[:fold.test_end]
+        # Start each held-out fold flat and give every candidate the same
+        # in-window warm-up; do not carry a stateful position from pre-test
+        # history into a test fold.
+        test_close = close.iloc[fold.test_start:fold.test_end]
         if selected_name == "cash":
-            test_signal = pd.Series(0.0, index=through_test.index).iloc[fold.test_start:fold.test_end]
+            test_signal = pd.Series(0.0, index=test_close.index)
         else:
             from .evolution import Candidate
-            test_signal = build_signal(through_test, Candidate(selected_name, selected_parameters)).iloc[
-                fold.test_start:fold.test_end
-            ]
-        test_close = close.iloc[fold.test_start:fold.test_end]
+            test_signal = build_signal(test_close, Candidate(selected_name, selected_parameters))
         tested = backtest_positions(
             test_close, test_signal, fee_bps=float(fee_bps),
             slippage_bps=float(slippage_bps), allow_short=False,
