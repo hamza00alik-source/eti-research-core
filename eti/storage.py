@@ -1669,6 +1669,8 @@ class MemoryStore:
         capital_allocation_usdt: float, risk_config: dict[str, Any],
     ) -> dict[str, Any]:
         owner_id = _required_text(owner_id, "owner_id")
+        if not self.list_workspaces(owner_id):
+            self.create_workspace(owner_id, "ETI Live Execution")
         if venue not in {"binance", "mexc"}:
             raise ValueError("venue must be binance or mexc")
         if not isinstance(symbols, list) or not 1 <= len(symbols) <= 8:
@@ -1825,7 +1827,7 @@ class MemoryStore:
                     task_id = str(uuid4())
                     payload = {"owner_id": row["owner_id"], "venue": row["venue"],
                                "symbol": symbol, "timeframe": row["timeframe"],
-                               "scheduled_by": "eti.live.supervisor"}
+                               "task_id": task_id, "scheduled_by": "eti.live.supervisor"}
                     conn.execute(
                         """INSERT INTO agent_tasks
                         (id,owner_id,workspace_id,requester,target_capability,status,input_json,
