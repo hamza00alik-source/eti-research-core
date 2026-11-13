@@ -1275,6 +1275,33 @@ class MemoryStore:
             raise ValueError("initial_cash must be a finite positive amount")
         if not isinstance(risk_config, dict):
             raise ValueError("risk_config must be an object")
+        risk_config = {
+            "max_risk_per_trade": 0.005, "max_position_fraction": 0.10,
+            "max_gross_exposure": 0.25, "max_daily_loss": 0.02,
+            "max_drawdown": 0.08, "fee_bps": 6.0, "slippage_bps": 8.0,
+            "confidence_threshold": 0.55, **risk_config,
+        }
+        safe_caps = {
+            "max_risk_per_trade": 0.005, "max_position_fraction": 0.10,
+            "max_gross_exposure": 0.25, "max_daily_loss": 0.02,
+            "max_drawdown": 0.08,
+        }
+        for key, maximum in safe_caps.items():
+            value = risk_config.get(key)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or not 0 < value <= maximum):
+                raise ValueError(f"{key} exceeds the allowed paper risk limit")
+        for key in ("fee_bps", "slippage_bps"):
+            value = risk_config.get(key)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or not 0 <= value <= 100):
+                raise ValueError(f"{key} must be between 0 and 100")
+        threshold = risk_config.get("confidence_threshold")
+        if (isinstance(threshold, bool) or not isinstance(threshold, (int, float))
+                or not math.isfinite(threshold) or not 0.50 <= threshold <= 0.95):
+            raise ValueError("confidence_threshold must be between 0.50 and 0.95")
+        risk_config["allow_short"] = False
+        risk_config["allow_live_orders"] = False
         model = self.get_model_version(model_id, model_version)
         if model is None or model["lifecycle"] != "approved":
             raise ValueError("paper trading requires an approved model version")
