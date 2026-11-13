@@ -334,7 +334,7 @@ def authorize_live_execution(payload: LiveExecutionAuthorizationPayload,
                              account: dict[str, str] = Depends(current_account)):
     _require_model_admin(account)
     if not all((payload.confirm_live_trading, payload.confirm_spot_trading_permission,
-                payload.confirm_withdrawals_disabled)):
+                payload.confirm_withdrawals_disabled, payload.confirm_ip_restrictions)):
         raise HTTPException(status_code=422, detail="All one-time live trading and API-key safety confirmations are required")
     try:
         profile = _memory_store().authorize_live_execution(account["id"])
