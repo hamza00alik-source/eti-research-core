@@ -169,4 +169,4 @@ python -m eti.pipeline --exchange mexc --symbol BTC/USDT \
   --model-id eti-crypto-core --model-version 0.1.0
 ```
 
-This does not register or approve the model. A configured registry administrator must register the metadata, and a different administrator must approve it after the server verifies the artifact. The export flag is explicit; API startup, CI and worker startup never train or export models.
+This does not register or approve the model. A configured registry administrator must register the metadata, and a different administrator must approve it after the server verifies the artifact. The export metadata explicitly marks the model as `uncalibrated`; do not change that status manually. A calibration pipeline and passing evaluation report are still required before the registry will approve it. The export flag is explicit; API startup, CI and worker startup never train or export models.
