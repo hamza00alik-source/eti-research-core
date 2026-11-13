@@ -262,3 +262,49 @@ def test_default_registry_exposes_model_training_as_research_only():
     from eti.agents import default_capabilities
     registry = default_capabilities()
     assert "model.train_research" in registry.capabilities()
+
+
+def test_model_training_research_runs_real_pipeline_and_writes_candidate(tmp_path, monkeypatch):
+    import numpy as np
+    import pandas as pd
+    import eti.agents as agents
+    from eti.artifacts import ModelArtifactStore
+
+    rng = np.random.default_rng(20261113)
+    returns = rng.normal(0.0001, 0.012, 1700)
+    close = 100 * np.exp(np.cumsum(returns))
+    open_price = close * (1 + rng.normal(0, 0.002, len(close)))
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=len(close), freq="h", tz="UTC"),
+        "open": open_price,
+        "high": np.maximum(open_price, close) * 1.003,
+        "low": np.minimum(open_price, close) * 0.997,
+        "close": close,
+        "volume": rng.lognormal(4, 0.3, len(close)),
+    })
+
+    class FakeProvider:
+        def __init__(self, venue):
+            self.venue = venue
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            return frame.tail(limit).reset_index(drop=True)
+
+    monkeypatch.setattr(agents, "CcxtPublicProvider", FakeProvider)
+    monkeypatch.setattr(agents, "ModelArtifactStore",
+                        lambda: ModelArtifactStore(tmp_path), raising=False)
+    import eti.artifacts as artifacts
+    monkeypatch.setattr(artifacts, "ModelArtifactStore",
+                        lambda: ModelArtifactStore(tmp_path))
+
+    result = agents.model_training_research({
+        "venue": "mexc", "symbol": "BTC/USDT", "timeframe": "1h", "limit": 1700
+    })
+
+    assert result["training_performed"] is True
+    assert result["model_family"] == "HistGradientBoostingClassifier via ETI BaselineModel"
+    assert result["evaluation"]["fold_count"] >= 1
+    assert result["evaluation"]["folds"][0]["test_balanced_accuracy"] is not None
+    assert result["candidate_artifact"]["artifact_uri"].startswith("artifact://sha256/")
+    assert result["lifecycle"] == "unregistered_candidate"
+    assert result["approval_status"] == "not_approved"
+    assert result["calibration_status"] in {"calibrated", "uncalibrated"}
