@@ -218,8 +218,8 @@ def test_model_training_research_creates_unapproved_candidate(monkeypatch):
         "fold_count": 2, "mean_test_balanced_accuracy": 0.51,
         "test_balanced_accuracy_ci": {"lower": 0.45, "upper": 0.57},
         "folds": [{"fold": 0, "selected_candidate": "hist_gradient_boosting",
-                   "validation": {"accuracy": 0.52, "balanced_accuracy": 0.51},
-                   "test": {"accuracy": 0.52, "balanced_accuracy": 0.51},
+                   "validation_scores": {"hist_gradient_boosting": 0.51},
+                   "test_accuracy": 0.52, "test_balanced_accuracy": 0.51,
                    "boundaries": {"test_start": 700, "test_end": 800}}],
         "trading_performance": {"summary": {"mean_net_return": -0.01}},
         "warning": "research only",
@@ -290,8 +290,6 @@ def test_model_training_research_runs_real_pipeline_and_writes_candidate(tmp_pat
             return frame.tail(limit).reset_index(drop=True)
 
     monkeypatch.setattr(agents, "CcxtPublicProvider", FakeProvider)
-    monkeypatch.setattr(agents, "ModelArtifactStore",
-                        lambda: ModelArtifactStore(tmp_path), raising=False)
     import eti.artifacts as artifacts
     monkeypatch.setattr(artifacts, "ModelArtifactStore",
                         lambda: ModelArtifactStore(tmp_path))
