@@ -57,3 +57,67 @@ def test_exported_model_is_explicitly_marked_uncalibrated(monkeypatch):
     )
     assert exported["calibration_status"] == "uncalibrated"
     assert exported["supported_classes"] == ["crypto_spot"]
+
+
+def test_training_cli_does_not_export_models_by_default(tmp_path, monkeypatch):
+    import json
+    import sys
+    import eti.pipeline as pipeline
+
+    output = tmp_path / "metrics.json"
+    monkeypatch.setattr(sys, "argv", ["eti.pipeline", "--output", str(output)])
+    monkeypatch.setattr(
+        pipeline, "fetch_ohlcv",
+        lambda *args: pd.DataFrame({"close": [100.0, 101.0]}),
+    )
+    monkeypatch.setattr(
+        pipeline, "run_experiment",
+        lambda *args, **kwargs: {"test": {"balanced_accuracy": 0.4}},
+    )
+    monkeypatch.setattr(
+        pipeline, "export_deployable_model",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("export must be opt-in")),
+    )
+
+    pipeline.main()
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert "exported_model" not in report
+
+
+def test_training_cli_exports_only_when_explicit_flag_is_set(tmp_path, monkeypatch):
+    import json
+    import sys
+    import eti.pipeline as pipeline
+
+    output = tmp_path / "metrics-export.json"
+    calls = {}
+    monkeypatch.setattr(
+        sys, "argv",
+        ["eti.pipeline", "--output", str(output), "--save-model",
+         "--model-id", "eti-test", "--model-version", "0.2.0"],
+    )
+    monkeypatch.setattr(
+        pipeline, "fetch_ohlcv",
+        lambda *args: pd.DataFrame({"close": [100.0, 101.0]}),
+    )
+    monkeypatch.setattr(
+        pipeline, "run_experiment",
+        lambda *args, **kwargs: {"test": {"balanced_accuracy": 0.4}},
+    )
+
+    def fake_export(frame, model_id, version, training_data_ref):
+        calls.update(model_id=model_id, version=version, training_data_ref=training_data_ref)
+        return {"artifact_uri": "artifact://sha256/" + "d" * 64,
+                "calibration_status": "uncalibrated"}
+
+    monkeypatch.setattr(pipeline, "export_deployable_model", fake_export)
+    pipeline.main()
+    report = json.loads(output.read_text(encoding="utf-8"))
+
+    assert calls == {
+        "model_id": "eti-test",
+        "version": "0.2.0",
+        "training_data_ref": "ccxt:binance:BTC/USDT:1h:3000",
+    }
+    assert report["exported_model"]["calibration_status"] == "uncalibrated"
+    assert "candidate artifact only" in report["warning"]
