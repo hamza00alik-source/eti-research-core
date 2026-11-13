@@ -107,6 +107,17 @@ $('#login-form').addEventListener('submit',async event=>{
   await acceptSession(data);event.currentTarget.reset();
  }catch(error){showAuth(error.message)}
 });
+$('#password-form').addEventListener('submit',async event=>{
+ event.preventDefault();const form=new FormData(event.currentTarget);
+ const button=event.currentTarget.querySelector('button[type="submit"]');button.disabled=true;
+ try{
+  await api('/v1/auth/password',{method:'POST',body:JSON.stringify({
+   current_password:form.get('current_password'),new_password:form.get('new_password')
+  })});
+  event.currentTarget.reset();clearSession();showAuth('Password updated successfully. Sign in again with your new password.');
+ }catch(error){$('#account-message').textContent='Password change failed: '+error.message}
+ finally{button.disabled=false}
+});
 $('#register-form').addEventListener('submit',async event=>{
  event.preventDefault();const form=new FormData(event.currentTarget);
  $('#account-message').textContent='Creating invited account…';
