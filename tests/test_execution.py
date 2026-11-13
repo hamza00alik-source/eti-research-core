@@ -27,9 +27,16 @@ def _live_store(tmp_path):
         {"passed": True}, "calibrated", "trainer",
     )
     store.approve_model_version("eti-binance-btc-usdt-1h", "live-test", "reviewer")
+    store.register_model_version(
+        "eti-binance-eth-usdt-1h", "live-test",
+        "artifact://sha256/" + "b" * 64, "b" * 64,
+        {"features": FEATURE_COLUMNS}, ["crypto_spot"], "live-test-data",
+        {"passed": True}, "calibrated", "trainer",
+    )
+    store.approve_model_version("eti-binance-eth-usdt-1h", "live-test", "reviewer")
     store.upsert_exchange_credential("owner", "binance", "encrypted-key", "encrypted-secret", "1234")
     store.save_live_execution_profile(
-        "owner", "binance", ["BTC/USDT"], "1h", 1000.0,
+        "owner", "binance", ["BTC/USDT", "ETH/USDT"], "1h", 1000.0,
         {"max_risk_per_trade": 0.005, "max_position_fraction": 0.10,
          "max_gross_exposure": 0.25, "max_daily_loss": 0.02,
          "max_drawdown": 0.08, "confidence_threshold": 0.60},
@@ -138,6 +145,14 @@ def test_authorized_live_tick_places_one_risk_gated_order_and_is_candle_idempote
     assert calls["orders"] == 1
     state = store.get_live_execution_state("owner", "binance", "BTC/USDT", "1h")
     assert state["position_qty"] > 0
+
+    waiting = execution.run_live_tick(
+        {"owner_id": "owner", "venue": "binance", "symbol": "ETH/USDT",
+         "timeframe": "1h", "task_id": "22222222-1234-1234-1234-123456789abc"},
+        store,
+    )
+    assert waiting["status"] == "waiting_for_existing_position"
+    assert calls["orders"] == 1
 
     duplicate = execution.run_live_tick(payload, store)
     assert duplicate["status"] == "already_processed"
