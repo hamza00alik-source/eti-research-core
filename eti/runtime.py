@@ -32,9 +32,10 @@ def _backup_loop(stop: threading.Event, interval: int) -> None:
     while not stop.is_set():
         try:
             object_key = backup_once()
-            logger.info("encrypted database backup uploaded: %s", object_key)
+            print(f"ETI_BACKUP_UPLOADED key={object_key}", flush=True)
         except Exception:
             logger.exception("encrypted database backup failed")
+            print("ETI_BACKUP_FAILED; see preceding traceback", flush=True)
         stop.wait(interval)
 
 
@@ -60,7 +61,7 @@ async def runtime_lifespan(_app):
         stops.append(stop)
         threads.append(thread)
         thread.start()
-        logger.info("embedded ETI worker started")
+        print("ETI_WORKER_STARTED", flush=True)
 
     if backup_enabled:
         interval = int(os.environ.get("ETI_BACKUP_INTERVAL_SECONDS", "86400"))
@@ -73,7 +74,7 @@ async def runtime_lifespan(_app):
         stops.append(stop)
         threads.append(thread)
         thread.start()
-        logger.info("ETI off-site backup scheduler started")
+        print("ETI_BACKUP_SCHEDULER_STARTED", flush=True)
 
     try:
         yield
