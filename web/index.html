@@ -35,12 +35,13 @@
 </form>
 </div>
 <div id="account-view" hidden>
-<div class="account-row"><div><strong id="account-name">Signed in</strong><p class="muted">Your private ETI workspace</p></div><button id="signout" type="button" class="secondary-button">Sign out</button></div>
+<div class="account-row"><div><strong id="account-name">Signed in</strong><p class="muted">Your private ETI workspace</p></div><button id="export-account" type="button" class="secondary-button">Export my data (JSON)</button><button id="signout" type="button" class="secondary-button">Sign out</button></div>
 <form id="workspace-form" class="inline-form">
 <label>New workspace name<input name="name" maxlength="80" placeholder="My research" required></label>
 <button type="submit">Create workspace</button>
 </form>
 <label class="workspace-picker">Active workspace<select id="workspace-select"><option value="">Select workspace</option></select></label>
+<div class="workspace-actions"><button id="delete-workspace" type="button" class="secondary-button">Delete selected workspace</button></div>
 <div id="workspace-tools" hidden>
 <h3>Persistent memory</h3>
 <form id="memory-form">
