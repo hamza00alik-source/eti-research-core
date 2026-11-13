@@ -167,8 +167,8 @@ def test_paper_tick_enforces_stop_loss_and_does_not_reenter_same_candle(tmp_path
         def __init__(self, venue):
             pass
         def fetch_ohlcv(self, symbol, timeframe, limit):
-            self.calls += 1
-            price = 100.0 if self.calls == 1 else 94.0
+            type(self).calls += 1
+            price = 100.0 if type(self).calls == 1 else 94.0
             return pd.DataFrame({
                 "timestamp": pd.date_range(
                     "2026-02-01" if self.calls == 1 else "2026-02-02",
