@@ -48,8 +48,8 @@
 <label class="workspace-picker">Active workspace<select id="workspace-select"><option value="">Select workspace</option></select></label>
 <div class="autonomy-card" aria-labelledby="autonomy-heading">
  <div><div class="eyebrow">AUTONOMOUS OPERATION</div><h3 id="autonomy-heading">Let ETI run its research and training loop</h3>
- <p class="muted">One action starts public crypto spot and perpetual-swap scans plus scheduled model research. Dated futures can be scheduled with exact contract symbols; use a separate contract-symbol watchlist rather than mixing them with spot symbols. Research only: no orders and no live trading.</p></div>
- <label>Research market types<select id="autonomy-market-types" multiple size="3" aria-label="Research market types"><option value="spot" selected>Spot</option><option value="swap" selected>Perpetual swaps</option><option value="future">Dated futures</option></select></label>
+ <p class="muted">One action starts public crypto spot and perpetual-swap scans plus scheduled model research. Dated futures and other asset classes can be queued manually with their exact symbols in the research task form. Research only: no orders and no live trading.</p></div>
+ <label>Research market types<select id="autonomy-market-types" multiple size="2" aria-label="Research market types"><option value="spot" selected>Spot</option><option value="swap" selected>Perpetual swaps</option></select></label>
  <div class="workspace-actions"><button id="autonomy-toggle" type="button">Start autonomous operation</button><span id="autonomy-status" class="muted" role="status" aria-live="polite">Checking status…</span></div>
 </div>
 <div class="autonomy-card" aria-labelledby="training-heading">
