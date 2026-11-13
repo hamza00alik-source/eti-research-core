@@ -203,3 +203,12 @@ python -m eti.pipeline --exchange mexc --symbol BTC/USDT \
 ```
 
 If the calibration window has fewer than 30 rows, fewer than five examples of any class, or temperature scaling does not improve calibration-window log loss, the artifact remains `uncalibrated` and cannot be approved. A passing calibration report is not evidence of profitability and must be reviewed alongside out-of-sample trading metrics. The export does not register or approve the model; an independent evaluation report and reviewer approval are still required before inference. The export flag is explicit; API startup, CI and worker startup never train or export models.
+
+
+## Global market discovery and derivatives research
+
+- Authenticated dashboard discovery can list active Binance/MEXC spot, perpetual-swap and dated-future instruments, ranking by public quote volume when the venue supports bulk tickers.
+- Derivatives research can request current funding/open-interest values and historical funding/open-interest observations where CCXT and the selected venue expose those endpoints. Unsupported endpoints are reported explicitly; missing values are never synthesized.
+- When historical funding and open-interest data are available, ETI aligns them to completed OHLCV candles with backward-only as-of joins and trains dedicated funding-rate and open-interest-change features. No future observation is joined to an earlier candle.
+- Nested derivative evaluation applies a conservative absolute funding drag estimated from observed funding intervals, plus explicit fee and slippage assumptions. This approximation is not side-aware exchange settlement.
+- Derivative candidates remain blocked from approval because liquidation, contract-specific fee schedules, funding-side settlement, margin tiers, mark/index-price risk and venue execution controls are not yet independently validated. Live execution remains spot-only.
