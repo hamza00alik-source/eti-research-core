@@ -32,27 +32,37 @@ class AgentWorker:
         task = self.store.claim_next_agent_task(lease_seconds=self.lease_seconds)
         if task is None:
             return None
+        lease_token = task["lease_token"]
         try:
             result = self.registry.execute(task["target_capability"], task["input"])
-            status = "completed"
-            message_type = "task.completed"
-        except Exception as exc:
-            result = {
-                "error": {
-                    "type": type(exc).__name__,
-                    "message": str(exc)[:500],
-                }
-            }
-            status = "failed"
+        except LookupError as exc:
+            result = {"error": {"type": type(exc).__name__, "message": "Unsupported capability"}}
+            updated = self.store.fail_claimed_agent_task(
+                task["id"], lease_token, result, retryable=False
+            )
             message_type = "task.failed"
+        except ValueError as exc:
+            result = {"error": {"type": type(exc).__name__, "message": str(exc)[:300]}}
+            updated = self.store.fail_claimed_agent_task(
+                task["id"], lease_token, result, retryable=False
+            )
+            message_type = "task.failed"
+        except Exception as exc:
+            result = {"error": {"type": type(exc).__name__, "message": "Temporary capability failure"}}
+            updated = self.store.fail_claimed_agent_task(
+                task["id"], lease_token, result, retryable=True
+            )
+            message_type = "task.requeued" if updated["status"] == "queued" else "task.failed"
+        else:
+            updated = self.store.complete_claimed_agent_task(
+                task["id"], lease_token, result
+            )
+            message_type = "task.completed"
 
-        updated = self.store.update_agent_task(
-            task["owner_id"], task["workspace_id"], task["id"], status, result
-        )
         self.store.send_agent_message(
             task["owner_id"], task["workspace_id"], "eti.worker",
             task["requester"], message_type,
-            {"task_id": task["id"], "status": status, "result": result},
+            {"task_id": task["id"], "status": updated["status"], "result": result},
             task["id"],
         )
         return updated
