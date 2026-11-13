@@ -17,8 +17,9 @@ def test_strategy_walk_forward_selects_on_validation_and_reports_test_only():
         sample_close(), min_history=100, validation_size=100,
         test_size=80, step_size=80, purge_bars=2,
     )
-    assert report["method"] == "validation_selected_rule_based_walk_forward_v2"
-    assert report["candidate_count"] == 6
+    assert report["method"] == "validation_selected_rule_based_walk_forward_v3"
+    assert report["candidate_count"] == 10
+    assert set(report["candidate_families"]) == {"ma", "momentum", "breakout", "mean_reversion"}
     assert report["fold_count"] >= 2
     assert report["safety"]["is_trained_model"] is False
     assert report["safety"]["places_orders"] is False
@@ -26,8 +27,10 @@ def test_strategy_walk_forward_selects_on_validation_and_reports_test_only():
     for fold in report["folds"]:
         assert fold["boundaries"]["validation_end"] <= fold["boundaries"]["test_start"] - 2
         assert fold["test"]["bars"] == 80
-        assert len(fold["validation_candidates"]) == 6
-        assert fold["selected_candidate"]["name"] in {"ma", "momentum", "cash"}
+        assert len(fold["validation_candidates"]) == 10
+        assert fold["selected_candidate"]["name"] in {
+            "ma", "momentum", "breakout", "mean_reversion", "cash"
+        }
         if fold["selected_candidate"]["name"] == "cash":
             assert fold["test"]["no_trade"] is True
             assert fold["selection_status"] == "cash_fallback_no_active_candidate"
