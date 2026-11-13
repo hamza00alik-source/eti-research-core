@@ -110,6 +110,12 @@ class AgentWorker:
             return None
         lease_token = task["lease_token"]
         try:
+            if task["target_capability"] == "model.train_research":
+                # Nested walk-forward training is bounded but can exceed the normal
+                # 120-second task lease on a small production worker.
+                self.store.renew_agent_task_lease(
+                    task["id"], lease_token, lease_seconds=3600
+                )
             result = self.registry.execute(task["target_capability"], task["input"])
             if task["target_capability"] == "model.train_research":
                 result = self._register_model_candidate(result)
