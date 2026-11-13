@@ -145,7 +145,7 @@ def test_worker_renews_lease_during_long_running_capability(tmp_path):
     assert result["result"] == {"value": 9}
 
 
-def test_worker_registers_model_training_result_as_unapproved_candidate(tmp_path):
+def test_worker_keeps_quality_failed_model_as_unapproved_candidate(tmp_path):
     store = MemoryStore(tmp_path / "candidate-registration.sqlite3")
     workspace = _workspace(store)
     worker = AgentWorker(store, registry=AgentCapabilityRegistry())
@@ -158,7 +158,7 @@ def test_worker_registers_model_training_result_as_unapproved_candidate(tmp_path
         },
         "input_schema": {"features": ["ret_1", "volatility"]},
         "evaluation": {"fold_count": 4, "mean_test_balanced_accuracy": 0.56},
-        "evaluation_passed": True,
+        "evaluation_passed": False,
         "quality_checks": {"calibration_passed": True},
         "calibration_status": "calibrated",
     }
@@ -168,7 +168,7 @@ def test_worker_registers_model_training_result_as_unapproved_candidate(tmp_path
     assert model is not None
     assert model["lifecycle"] == "candidate"
     assert model["created_by"] == "eti.worker"
-    assert model["evaluation_report"]["passed"] is True
+    assert model["evaluation_report"]["passed"] is False
     assert registered["registry"]["approval_required"] is True
     assert registered["lifecycle"] == "candidate"
 
@@ -211,3 +211,47 @@ def test_user_created_live_execution_task_is_rejected_by_worker(tmp_path):
     assert result["id"] == task["id"]
     assert result["status"] == "failed"
     assert result["result"]["error"]["type"] == "ValueError"
+
+
+def test_worker_auto_approves_only_quality_passed_calibrated_artifact(tmp_path, monkeypatch):
+    import eti.worker as worker_module
+
+    store = MemoryStore(tmp_path / "auto-promotion.sqlite3")
+    store.create_workspace("owner-1", "worker tests")
+    worker = AgentWorker(store, registry=AgentCapabilityRegistry())
+
+    class FakeEstimator:
+        feature_names_in_ = ["ret_1", "volatility"]
+
+    class FakeModel:
+        estimator = FakeEstimator()
+        def has_valid_calibration(self):
+            return True
+
+    class FakeArtifacts:
+        def load_model(self, uri, digest):
+            assert digest == "b" * 64
+            return FakeModel()
+
+    monkeypatch.setattr(worker_module, "ModelArtifactStore", FakeArtifacts)
+    result = {
+        "venue": "mexc", "symbol": "ETH/USDT", "timeframe": "1h",
+        "training_data_ref": "ccxt:mexc:ETH/USDT:1h:3000:" + "b" * 64,
+        "candidate_artifact": {
+            "artifact_uri": "artifact://sha256/" + "b" * 64,
+            "artifact_sha256": "b" * 64,
+        },
+        "input_schema": {"features": ["ret_1", "volatility"]},
+        "evaluation": {"fold_count": 4, "mean_test_balanced_accuracy": 0.60},
+        "evaluation_passed": True,
+        "quality_checks": {"all_checks_passed": True},
+        "calibration_status": "calibrated",
+    }
+    registered = worker._register_model_candidate(result)
+    model = store.get_model_version(registered["registry"]["model_id"],
+                                    registered["registry"]["version"])
+    assert model["lifecycle"] == "approved"
+    assert model["created_by"] == "eti.worker"
+    assert model["approved_by"] == "eti.quality_gate"
+    assert registered["registry"]["approval_required"] is False
+    assert registered["registry"]["promotion_authority"] == "eti.quality_gate"
