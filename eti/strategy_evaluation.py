@@ -1,9 +1,7 @@
 """Autonomous rule-based strategy selection with untouched walk-forward tests.
 
-Candidate choice is made exclusively on each chronological validation window.
-Inactive candidates are not misrepresented as trading strategies: if no candidate
-meets minimum activity requirements, the evaluator explicitly selects cash.
-This is research tooling, not a live-trading signal or profitability claim.
+Candidates are selected only on validation windows. If none is sufficiently
+active, the evaluator explicitly selects cash. Research only; no live trading.
 """
 from __future__ import annotations
 
@@ -15,21 +13,10 @@ import pandas as pd
 
 from .backtest import backtest_positions
 from .evaluation import walk_forward_folds
-from .evolution import candidate_set, evaluate_candidate
-from .strategies import moving_average_signal, momentum_signal
+from .evolution import build_signal, candidate_set, evaluate_candidate
 
 MIN_VALIDATION_EXPOSURE = 0.10
 MIN_VALIDATION_POSITION_CHANGES = 2
-
-
-def _signal(close: pd.Series, name: str, parameters: dict[str, int]) -> pd.Series:
-    if name == "ma":
-        return moving_average_signal(close, **parameters)
-    if name == "momentum":
-        return momentum_signal(close, **parameters)
-    if name == "cash":
-        return pd.Series(0.0, index=close.index)
-    raise ValueError(f"Unsupported strategy candidate: {name}")
 
 
 def run_strategy_walk_forward(
@@ -43,12 +30,7 @@ def run_strategy_walk_forward(
     fee_bps: float = 6.0,
     slippage_bps: float = 2.0,
 ) -> dict[str, Any]:
-    """Select active MA/momentum candidates on validation, otherwise select cash.
-
-    The first test position starts flat. Signals are causal and shifted one bar by
-    the backtester, so a close-time decision cannot earn the same bar's return.
-    Validation and test use identical configured transaction-cost assumptions.
-    """
+    """Select on validation and evaluate frozen choice on subsequent test windows."""
     if not isinstance(close, pd.Series):
         raise ValueError("close must be a pandas Series")
     if len(close) < 2 or not close.index.is_unique or not close.index.is_monotonic_increasing:
@@ -100,11 +82,16 @@ def run_strategy_walk_forward(
             selected = candidates[selected_index]
             selected_name, selected_parameters = selected.name, selected.parameters
         else:
-            # Explicit no-position fallback: do not call an inactive MA rule a strategy.
             selected_name, selected_parameters = "cash", {}
-        
+
         through_test = close.iloc[:fold.test_end]
-        test_signal = _signal(through_test, selected_name, selected_parameters).iloc[fold.test_start:fold.test_end]
+        if selected_name == "cash":
+            test_signal = pd.Series(0.0, index=through_test.index).iloc[fold.test_start:fold.test_end]
+        else:
+            from .evolution import Candidate
+            test_signal = build_signal(through_test, Candidate(selected_name, selected_parameters)).iloc[
+                fold.test_start:fold.test_end
+            ]
         test_close = close.iloc[fold.test_start:fold.test_end]
         tested = backtest_positions(
             test_close, test_signal, fee_bps=float(fee_bps),
@@ -143,8 +130,9 @@ def run_strategy_walk_forward(
     returns = [item["test"]["net_return"] for item in reports]
     drawdowns = [item["test"]["max_drawdown"] for item in reports]
     return {
-        "method": "validation_selected_rule_based_walk_forward_v2",
+        "method": "validation_selected_rule_based_walk_forward_v3",
         "candidate_count": len(candidates),
+        "candidate_families": ["ma", "momentum", "breakout", "mean_reversion"],
         "fold_count": len(reports),
         "folds": reports,
         "summary": {
