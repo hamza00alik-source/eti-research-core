@@ -24,3 +24,10 @@ def test_embedded_worker_survives_one_transient_iteration_error(monkeypatch):
 
     assert calls["count"] == 1
     assert stop.stopped is True
+
+
+def test_fastapi_app_uses_production_runtime_lifespan():
+    from eti.api import app
+    from eti.runtime import runtime_lifespan
+
+    assert app.router.lifespan_context is runtime_lifespan
