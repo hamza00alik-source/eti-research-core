@@ -170,7 +170,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(symbol, str) or not 3 <= len(symbol) <= 40 or "/" not in symbol:
         raise ValueError("symbol must be a valid spot pair such as BTC/USDT")
     if timeframe not in {"1h", "4h", "1d"}:
-        raise ValueError("model training supports 1h, 4h, or 1d candles")
+        raise ValueError("timeframe must be one of: 1h, 4h, or 1d")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1500 <= limit <= 5000:
         raise ValueError("training limit must be an integer from 1500 to 5000")
     if isinstance(horizon, bool) or not isinstance(horizon, int) or not 2 <= horizon <= 24:
@@ -214,7 +214,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         "available_candles": len(frame),
         "data_start": timestamps.iloc[0].isoformat(),
         "data_end": timestamps.iloc[-1].isoformat(),
-        "model_family": "HistGradientBoostingClassifier",
+        "model_family": "ETI BaselineModel",
         "training_method": "from_scratch_purged_nested_walk_forward_v1",
         "training_performed": True,
         "evaluation": {
