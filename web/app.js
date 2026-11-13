@@ -37,8 +37,30 @@ function clearSession(){
 }
 async function acceptSession(data){
  accessToken=data.access_token;sessionStorage.setItem(TOKEN_KEY,accessToken);
- showAccount(data.account);await loadWorkspaces();
+ showAccount(data.account);await loadWorkspaces();await loadAutonomy();
 }
+let autonomyEnabled=false;
+async function loadAutonomy(){
+ const status=$('#autonomy-status'),button=$('#autonomy-toggle');
+ if(!status||!button)return;
+ try{
+  const data=await api('/v1/autonomy');autonomyEnabled=Boolean(data.profile?.enabled);
+  status.textContent=autonomyEnabled?'Autonomous research is ON · research only':'Autonomous research is OFF';
+  button.textContent=autonomyEnabled?'Pause autonomous research':'Enable autonomous research';
+ }catch(error){status.textContent='Autonomy status unavailable: '+error.message;button.disabled=true}
+}
+$('#autonomy-toggle')?.addEventListener('click',async()=>{
+ const button=$('#autonomy-toggle'),status=$('#autonomy-status');
+ button.disabled=true;status.textContent='Updating…';
+ try{
+  const data=await api('/v1/autonomy',{method:'PUT',body:JSON.stringify({enabled:!autonomyEnabled,workspace_id:activeWorkspace||null})});
+  autonomyEnabled=Boolean(data.profile.enabled);
+  status.textContent=autonomyEnabled?'Autonomous research is ON · scans run every 15 minutes':'Autonomous research is OFF';
+  button.textContent=autonomyEnabled?'Pause autonomous research':'Enable autonomous research';
+  await loadWorkspaceData();
+ }catch(error){status.textContent='Could not update autonomy: '+error.message}
+ finally{button.disabled=false}
+});
 async function loadCapabilities(){
  const select=$('#capability-select');
  if(!select)return;
@@ -73,8 +95,10 @@ async function loadWorkspaces(){
   const saved=data.items.find(item=>item.id===activeWorkspace);
   activeWorkspace=(saved||data.items[0]).id;select.value=activeWorkspace;
   await loadWorkspaceData();
+  await loadAutonomy();
  }else{
   activeWorkspace='';$('#workspace-tools').hidden=true;
+  if($('#autonomy-status'))$('#autonomy-status').textContent='Create or select a workspace to enable research.';
   $('#memory-list').textContent='Create a workspace to begin storing research memory.';
   $('#task-list').textContent='No workspace selected.';
   $('#audit-list').textContent='No audit events yet.';
@@ -114,7 +138,7 @@ $('#register-form').addEventListener('submit',async event=>{
   const data=await api('/v1/auth/register',{method:'POST',body:JSON.stringify({
    username:form.get('username'),password:form.get('password'),invite_code:form.get('invite_code')
   })});
-  await acceptSession(data);event.currentTarget.reset();
+  await acceptSession(data);formElement.reset();
  }catch(error){showAuth(error.message)}
 });
 $('#signout').addEventListener('click',()=>{
