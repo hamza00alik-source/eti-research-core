@@ -432,4 +432,111 @@ window.addEventListener('hashchange',updateNav);updateNav();
 if('serviceWorker'in navigator){
  window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 }
+
+// Live public Binance spot chart. No API keys or trading permissions are used.
+(()=>{
+ const canvas=$('#market-chart');
+ if(!canvas)return;
+ const ctx=canvas.getContext('2d');
+ const symbolSelect=$('#chart-symbol'),timeframeSelect=$('#chart-timeframe');
+ const status=$('#chart-feed-status'),priceLabel=$('#chart-last-price'),changeLabel=$('#chart-price-change');
+ let candles=[],socket=null,reconnectTimer=null,pollTimer=null,activeSymbol='',activeTimeframe='',destroyed=false;
+ const fmtPrice=value=>value>=1000?value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):value>=1?value.toFixed(4):value.toPrecision(5);
+ function setStatus(message,connected=false){status.textContent=message;status.classList.toggle('connected',connected)}
+ function updatePrice(){
+  if(!candles.length)return;
+  const last=candles[candles.length-1],first=candles[Math.max(0,candles.length-2)];
+  priceLabel.textContent=fmtPrice(last.c);
+  const pct=first.o?((last.c-first.o)/first.o)*100:0;
+  changeLabel.textContent=(pct>=0?'+':'')+pct.toFixed(2)+'% · '+activeSymbol.replace('USDT',' / USDT');
+  changeLabel.classList.toggle('positive',pct>=0);changeLabel.classList.toggle('negative',pct<0);
+ }
+ function draw(){
+  if(!canvas||!ctx)return;
+  const rect=canvas.getBoundingClientRect(),dpr=Math.min(window.devicePixelRatio||1,2);
+  const width=Math.max(300,rect.width),height=Math.max(220,rect.height);
+  canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,width,height);
+  if(!candles.length){ctx.fillStyle='#9eacc2';ctx.font='13px system-ui';ctx.fillText('Loading market candles…',18,32);return}
+  const left=10,right=72,top=14,volumeHeight=48,bottom=24,plotBottom=height-volumeHeight-bottom,plotHeight=plotBottom-top;
+  const visible=candles.slice(-100),high=Math.max(...visible.map(x=>x.h)),low=Math.min(...visible.map(x=>x.l));
+  const spread=Math.max(high-low,high*0.0005),max=high+spread*.06,min=low-spread*.06;
+  const y=value=>top+(max-value)/(max-min)*plotHeight;
+  ctx.font='10px system-ui';ctx.textAlign='right';ctx.textBaseline='middle';
+  for(let i=0;i<=4;i++){
+   const value=max-(max-min)*i/4,yy=top+plotHeight*i/4;
+   ctx.strokeStyle='#263750';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(left,yy);ctx.lineTo(width-right,yy);ctx.stroke();
+   ctx.fillStyle='#9eacc2';ctx.fillText(fmtPrice(value),width-7,yy);
+  }
+  const maxVol=Math.max(1,...visible.map(x=>x.v)),slot=(width-left-right)/visible.length,body=Math.max(2,Math.min(11,slot*.62));
+  visible.forEach((c,i)=>{
+   const x=left+i*slot+slot/2,up=c.c>=c.o,color=up?'#72d6bd':'#f07883';
+   ctx.strokeStyle=color;ctx.lineWidth=1.2;ctx.beginPath();ctx.moveTo(x,y(c.h));ctx.lineTo(x,y(c.l));ctx.stroke();
+   ctx.fillStyle=color;const topBody=Math.min(y(c.o),y(c.c)),bodyHeight=Math.max(1.5,Math.abs(y(c.o)-y(c.c)));
+   ctx.fillRect(x-body/2,topBody,body,bodyHeight);
+   const vh=(c.v/maxVol)*(volumeHeight-5);ctx.globalAlpha=.55;ctx.fillRect(x-body/2,height-bottom-vh,body,vh);ctx.globalAlpha=1;
+  });
+  const last=visible[visible.length-1],lastY=y(last.c);
+  ctx.setLineDash([4,4]);ctx.strokeStyle='#86a9c7';ctx.beginPath();ctx.moveTo(left,lastY);ctx.lineTo(width-right,lastY);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='#86a9c7';ctx.textAlign='left';ctx.fillText(new Date(last.t).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}),left,height-8);
+  ctx.textAlign='right';ctx.fillText('VOL',width-right,height-8);
+ }
+ function closeFeed(){
+  if(reconnectTimer)clearTimeout(reconnectTimer);if(pollTimer)clearInterval(pollTimer);
+  reconnectTimer=null;pollTimer=null;
+  if(socket){socket.onclose=null;socket.close();socket=null}
+ }
+ async function loadHistory(){
+  const symbol=symbolSelect.value,timeframe=timeframeSelect.value;
+  activeSymbol=symbol;activeTimeframe=timeframe;setStatus('Loading history…');
+  const url='https://api.binance.com/api/v3/klines?symbol='+encodeURIComponent(symbol)+'&interval='+encodeURIComponent(timeframe)+'&limit=180';
+  const response=await fetch(url,{cache:'no-store'});
+  if(!response.ok)throw new Error('Binance history request failed ('+response.status+')');
+  const rows=await response.json();
+  candles=rows.map(row=>({t:Number(row[0]),o:Number(row[1]),h:Number(row[2]),l:Number(row[3]),c:Number(row[4]),v:Number(row[5])}));
+  updatePrice();draw();
+ }
+ function connectFeed(){
+  closeFeed();if(destroyed)return;
+  const stream=activeSymbol.toLowerCase()+'@kline_'+activeTimeframe;
+  setStatus('Connecting live stream…');
+  socket=new WebSocket('wss://stream.binance.com:9443/ws/'+stream);
+  socket.onopen=()=>setStatus('Live · Binance WebSocket',true);
+  socket.onmessage=event=>{
+   try{
+    const msg=JSON.parse(event.data),k=msg.k;if(!k)return;
+    const candle={t:Number(k.t),o:Number(k.o),h:Number(k.h),l:Number(k.l),c:Number(k.c),v:Number(k.v)};
+    const last=candles[candles.length-1];
+    if(last&&last.t===candle.t)candles[candles.length-1]=candle;
+    else if(!last||candle.t>last.t)candles.push(candle);
+    if(candles.length>240)candles=candles.slice(-240);
+    updatePrice();draw();
+   }catch(error){setStatus('Live data message error')}
+  };
+  socket.onerror=()=>setStatus('Live stream interrupted · retrying');
+  socket.onclose=()=>{
+   if(destroyed)return;
+   setStatus('Reconnecting live stream…');
+   reconnectTimer=setTimeout(connectFeed,3500);
+  };
+  pollTimer=setInterval(async()=>{
+   if(socket&&socket.readyState===WebSocket.OPEN)return;
+   try{await loadHistory();setStatus('Polling public data · live stream unavailable')}
+   catch(error){setStatus('Feed unavailable: '+error.message)}
+  },15000);
+ }
+ async function start(){
+  closeFeed();
+  try{await loadHistory();connectFeed()}
+  catch(error){setStatus('Could not load chart: '+error.message);priceLabel.textContent='—'}
+ }
+ symbolSelect.addEventListener('change',start);timeframeSelect.addEventListener('change',start);
+ $('#chart-refresh').addEventListener('click',start);
+ if('ResizeObserver'in window)new ResizeObserver(draw).observe(canvas.parentElement);
+ else window.addEventListener('resize',draw);
+ document.addEventListener('visibilitychange',()=>{if(document.hidden){closeFeed()}else if(!destroyed)connectFeed()});
+ window.addEventListener('beforeunload',()=>{destroyed=true;closeFeed()},{once:true});
+ start();
+})();
+
 loadStatus();restoreSession();
