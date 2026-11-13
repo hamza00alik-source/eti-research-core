@@ -54,8 +54,9 @@ class MemoryStore:
     def __init__(self, database_path: str | os.PathLike[str] | None = None):
         configured = database_path or os.environ.get("ETI_DATABASE_PATH", "data/eti.sqlite3")
         self.database_path = str(configured)
-        if self.database_path != ":memory:":
-            Path(self.database_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+        if self.database_path == ":memory:":
+            raise ValueError("Use a file-backed database so connections share persistent state")
+        Path(self.database_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
     @contextmanager
@@ -75,8 +76,7 @@ class MemoryStore:
 
     def _initialize(self) -> None:
         with self._connection() as conn:
-            if self.database_path != ":memory:":
-                conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA journal_mode = WAL")
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS workspaces (
