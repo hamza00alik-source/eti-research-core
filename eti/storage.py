@@ -490,13 +490,13 @@ class MemoryStore:
 
 
     def renew_agent_task_lease(
-        self, task_id: str, lease_token: str, lease_seconds: int = 120
+        self, task_id: str, lease_token: str, lease_seconds: int = 120, now: int | None = None
     ) -> str:
         task_id = _required_text(task_id, "task_id")
         lease_token = _required_text(lease_token, "lease_token")
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be an integer from 5 to 3600")
-        current = datetime.now(timezone.utc)
+        current = datetime.now(timezone.utc) if now is None else datetime.fromtimestamp(now, timezone.utc)
         now_text = current.isoformat(timespec="microseconds").replace("+00:00", "Z")
         lease_text = (current + timedelta(seconds=lease_seconds)).isoformat(
             timespec="microseconds"
@@ -519,12 +519,13 @@ class MemoryStore:
         return lease_text
 
     def complete_claimed_agent_task(
-        self, task_id: str, lease_token: str, result: Any
+        self, task_id: str, lease_token: str, result: Any, now: int | None = None
     ) -> dict[str, Any]:
         task_id = _required_text(task_id, "task_id")
         lease_token = _required_text(lease_token, "lease_token")
         encoded = _encode_json(result)
-        now = _utc_now()
+        now_dt = datetime.now(timezone.utc) if now is None else datetime.fromtimestamp(now, timezone.utc)
+        now = now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
         with self._connection() as conn:
             row = conn.execute(
                 "SELECT owner_id, workspace_id, status, lease_token, lease_expires_at "
@@ -551,14 +552,16 @@ class MemoryStore:
         return self.get_agent_task(row["owner_id"], row["workspace_id"], task_id)  # type: ignore[return-value]
 
     def fail_claimed_agent_task(
-        self, task_id: str, lease_token: str, error: Any, *, retryable: bool = True
+        self, task_id: str, lease_token: str, error: Any, *, retryable: bool = True,
+        now: int | None = None
     ) -> dict[str, Any]:
         task_id = _required_text(task_id, "task_id")
         lease_token = _required_text(lease_token, "lease_token")
         if not isinstance(retryable, bool):
             raise ValueError("retryable must be a boolean")
         encoded = _encode_json(error)
-        now = _utc_now()
+        now_dt = datetime.now(timezone.utc) if now is None else datetime.fromtimestamp(now, timezone.utc)
+        now = now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
         with self._connection() as conn:
             row = conn.execute(
                 "SELECT owner_id, workspace_id, status, lease_token, lease_expires_at, "
