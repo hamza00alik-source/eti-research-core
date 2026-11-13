@@ -90,23 +90,24 @@ class YahooFinanceProvider:
     def fetch_ohlcv(self, symbol: str, timeframe: str = "1h", limit: int = 1500) -> pd.DataFrame:
         if not isinstance(symbol, str) or not symbol.strip() or len(symbol) > 40:
             raise ValueError("A valid Yahoo Finance symbol is required")
-        if timeframe not in {"1m", "5m", "15m", "30m", "1h", "1d"}:
-            raise ValueError("Yahoo Finance timeframe must be 1m, 5m, 15m, 30m, 1h or 1d")
+        if timeframe not in {"1m", "5m", "15m", "30m", "1h", "4h", "1d"}:
+            raise ValueError("Yahoo Finance timeframe must be 1m, 5m, 15m, 30m, 1h, 4h or 1d")
         if isinstance(limit, bool) or not isinstance(limit, int) or not 50 <= limit <= 10000:
             raise ValueError("limit must be an integer from 50 to 10000")
         try:
             import yfinance as yf
         except ImportError as exc:
             raise RuntimeError("Install yfinance to use the Yahoo Finance public-data adapter") from exc
+        download_interval = "1h" if timeframe == "4h" else timeframe
         data = yf.download(
-            symbol.strip(), period="max", interval=timeframe, auto_adjust=False,
+            symbol.strip(), period="max", interval=download_interval, auto_adjust=False,
             actions=False, progress=False, threads=False,
         )
         if data is None or data.empty:
             raise RuntimeError(f"No Yahoo Finance OHLCV history returned for {symbol}")
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
-        data = data.rename(columns={str(column).lower(): str(column).lower() for column in data.columns})
+        data = data.rename(columns={column: str(column).lower() for column in data.columns})
         required = {"open", "high", "low", "close"}
         if not required.issubset(set(data.columns)):
             raise ValueError("Yahoo Finance response is missing OHLC price columns")
@@ -117,4 +118,10 @@ class YahooFinanceProvider:
             "low": data["low"].to_numpy(), "close": data["close"].to_numpy(),
             "volume": volume.to_numpy(),
         })
+        frame = validate_ohlcv(frame)
+        if timeframe == "4h":
+            frame = frame.set_index("timestamp").resample("4h").agg({
+                "open": "first", "high": "max", "low": "min",
+                "close": "last", "volume": "sum",
+            }).dropna().reset_index()
         return validate_ohlcv(frame).tail(limit).reset_index(drop=True)
