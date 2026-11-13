@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .features import build_features
-from .providers import CcxtPublicProvider, YahooFinanceProvider
+from .providers import CcxtPublicProvider, YahooFinanceProvider, enrich_ohlcv_with_derivatives
 from .opportunities import rank_spot_opportunity
 from .strategy_evaluation import run_strategy_walk_forward
 
@@ -87,6 +87,9 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("limit must be an integer from 50 to 500")
 
     frame = provider.fetch_ohlcv(symbol, timeframe, limit)
+    derivative_context = None
+    if asset_class == "crypto" and market_type in {"swap", "future"}:
+        derivative_context = provider.fetch_derivatives_context(symbol, timeframe, min(100, limit))
     if len(frame) < 40:
         raise ValueError("provider returned too few completed candles for indicator calculation")
     features = build_features(frame)
@@ -125,6 +128,12 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         "trend_context": trend,
         "indicators": indicators,
         "research_ranking": rank_spot_opportunity(indicators) if asset_class == "crypto" and market_type == "spot" else None,
+        "derivatives_context": ({
+            "current_funding": derivative_context.get("current_funding"),
+            "current_open_interest": derivative_context.get("current_open_interest"),
+            "history_coverage": derivative_context.get("history_coverage"),
+            "availability": derivative_context.get("availability"),
+        } if derivative_context else None),
         "limitations": limitations,
     }
 
@@ -195,6 +204,29 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("horizon must be an integer from 2 to 24")
 
     frame = provider.fetch_ohlcv(symbol, timeframe, limit)
+    derivative_context = None
+    funding_bps_per_bar = 0.0
+    derivative_feature_coverage = None
+    if asset_class == "crypto" and market_type in {"swap", "future"}:
+        derivative_context = provider.fetch_derivatives_context(symbol, timeframe, min(1000, limit))
+        frame = enrich_ohlcv_with_derivatives(frame, derivative_context, timeframe)
+        funding_rows = derivative_context.get("funding_history") or []
+        if len(funding_rows) >= 2:
+            rates = pd.to_numeric(pd.Series([item["funding_rate"] for item in funding_rows]), errors="coerce").dropna()
+            times = pd.to_numeric(pd.Series([item["timestamp"] for item in funding_rows]), errors="coerce").dropna().sort_values()
+            if len(rates) and len(times) >= 2:
+                interval_ms = float(times.diff().dropna().median())
+                bar_ms = float(pd.Timedelta(timeframe).total_seconds() * 1000)
+                if interval_ms > 0:
+                    # Absolute average funding is used as a conservative, direction-neutral research drag.
+                    funding_bps_per_bar = float(rates.abs().mean()) * 10000.0 * bar_ms / interval_ms
+        derivative_feature_coverage = {
+            "funding_observations": len(funding_rows),
+            "open_interest_observations": len(derivative_context.get("open_interest_history") or []),
+            "funding_feature_rows": int(frame.get("funding_rate", pd.Series(dtype=float)).notna().sum()),
+            "open_interest_feature_rows": int(frame.get("open_interest", pd.Series(dtype=float)).notna().sum()),
+            "funding_bps_per_bar_conservative": round(funding_bps_per_bar, 8),
+        }
     timestamps = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
     if timestamps.isna().any() or timestamps.duplicated().any() or not timestamps.is_monotonic_increasing:
         raise ValueError("provider timestamps must be valid, unique, and chronological")
@@ -206,6 +238,9 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         frame, horizon=horizon, min_train=500, validation_size=100,
         test_size=100, step_size=250, timeframe=timeframe,
         allow_short=(market_type in {"swap", "future"} or asset_class in {"forex", "index"}),
+        funding_bps_per_bar=funding_bps_per_bar,
+        fee_bps=float(payload.get("fee_bps", 8.0 if market_type in {"swap", "future"} else 6.0)),
+        slippage_bps=float(payload.get("slippage_bps", 5.0 if market_type in {"swap", "future"} else 2.0)),
     )
     model, schema = fit_deployable_model(frame, horizon=horizon)
     from .artifacts import ModelArtifactStore
@@ -227,8 +262,10 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     )
     quality_checks = {
         "at_least_three_test_folds": fold_count >= 3,
-        "derivative_funding_history_available": not (asset_class == "crypto" and market_type in {"swap", "future"}),
+        "derivative_funding_history_available": not (asset_class == "crypto" and market_type in {"swap", "future"}) or bool(derivative_context and derivative_context.get("history_coverage", {}).get("has_historical_funding")),
+        "derivative_open_interest_history_available": not (asset_class == "crypto" and market_type in {"swap", "future"}) or bool(derivative_context and derivative_context.get("history_coverage", {}).get("has_historical_open_interest")),
         "instrument_cost_model_supported": asset_class == "crypto" and market_type == "spot",
+        "derivative_cost_model_independently_validated": asset_class == "crypto" and market_type == "spot",
         "balanced_accuracy_at_least_0_52": isinstance(mean_score, (int, float)) and mean_score >= 0.52,
         "confidence_interval_lower_above_chance": isinstance(score_ci.get("lower"), (int, float)) and score_ci["lower"] > 0.50,
         "model_selected_in_majority_of_folds": selected_model_folds > fold_count / 2 if fold_count else False,
@@ -267,8 +304,10 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         "data_start": timestamps.iloc[0].isoformat(),
         "data_end": timestamps.iloc[-1].isoformat(),
         "model_family": "HistGradientBoostingClassifier via ETI BaselineModel",
-        "training_method": "from_scratch_purged_nested_walk_forward_v1",
+        "training_method": "from_scratch_purged_nested_walk_forward_v2_multimodal_market_features",
         "training_performed": True,
+        "derivative_feature_coverage": derivative_feature_coverage,
+        "derivatives_context_availability": derivative_context.get("availability") if derivative_context else None,
         "evaluation": {
             "fold_count": evaluation.get("fold_count", 0),
             "passed": evaluation_passed,
@@ -294,7 +333,9 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
             "Nested test folds are held out from candidate selection; final artifact calibration uses a separate chronological holdout.",
             "Calibration failure blocks approval; no automatic promotion occurs.",
             "Single-market evaluation is not a portfolio backtest and does not establish future profitability.",
-            "Yahoo Finance and non-spot instruments are research-only candidates until provider-specific financing, funding, roll, corporate-action and contract costs are modeled. Unsupported cost models block approval.",
+            "Funding and open-interest features are used only when the exchange returns historical observations; missing observations are never synthesized.",
+            "Derivative funding drag is conservatively approximated from absolute observed funding rates and median settlement intervals; it is not a substitute for side-aware exchange settlement and contract fee modelling.",
+            "Yahoo Finance and non-spot instruments remain research-only until provider-specific financing, funding, roll, corporate-action and contract costs are independently validated. Unsupported cost models block approval.",
         ],
     }
 
