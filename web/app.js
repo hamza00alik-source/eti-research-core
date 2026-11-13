@@ -186,6 +186,30 @@ async function loadPaperSessions(){
   }
  }catch(error){list.textContent='Paper sessions unavailable: '+error.message}
 }
+async function loadExchangeCredentials(){
+ const list=$('#exchange-credential-list');
+ if(!list)return;
+ try{
+  const data=await api('/v1/exchanges/credentials');
+  list.replaceChildren();
+  if(!data.items.length){list.textContent='No exchange credentials connected.';return}
+  for(const item of data.items){
+   const row=document.createElement('div');row.className='exchange-credential-item';
+   const detail=document.createElement('span');
+   detail.textContent=item.venue.toUpperCase()+' · '+item.masked_api_key+' · encrypted at rest';
+   const remove=document.createElement('button');remove.type='button';remove.className='secondary-button';
+   remove.textContent='Remove';remove.addEventListener('click',async()=>{
+    if(!window.confirm('Remove the saved '+item.venue.toUpperCase()+' API credentials from ETI?'))return;
+    remove.disabled=true;
+    try{await api('/v1/exchanges/credentials/'+encodeURIComponent(item.venue),{method:'DELETE'});await loadExchangeCredentials()}
+    catch(error){$('#exchange-credential-message').textContent='Could not remove credentials: '+error.message}
+    finally{remove.disabled=false}
+   });
+   row.append(detail,remove);list.append(row);
+  }
+ }catch(error){list.textContent='Exchange connection list unavailable: '+error.message}
+}
+
 async function loadWorkspaces(){
  await loadCapabilities();
  const data=await api('/v1/workspaces');
@@ -204,6 +228,7 @@ async function loadWorkspaces(){
   $('#audit-list').textContent='No audit events yet.';
  }
  await loadModels();
+ await loadExchangeCredentials();
 }
 async function loadWorkspaceData(){
  if(!activeWorkspace)return;
@@ -327,6 +352,24 @@ $('#model-retire-form').addEventListener('submit',async event=>{
   await loadModels();
  }catch(error){$('#model-message').textContent='Retirement failed: '+error.message}
 });
+$('#exchange-credential-form')?.addEventListener('submit',async event=>{
+ event.preventDefault();
+ const formElement=event.currentTarget,form=new FormData(formElement);
+ const message=$('#exchange-credential-message'),button=formElement.querySelector('button[type="submit"]');
+ button.disabled=true;message.textContent='Verifying private read access and encrypting credentials…';
+ try{
+  const result=await api('/v1/exchanges/credentials',{method:'POST',body:JSON.stringify({
+   venue:form.get('venue'),api_key:form.get('api_key'),api_secret:form.get('api_secret')
+  })});
+  formElement.reset();
+  message.textContent=result.verification.read_access_verified
+   ?'Private read access verified and credentials encrypted. Trading permission remains unverified; live orders are still disabled.'
+   :'Credentials saved, but exchange permissions need review.';
+  await loadExchangeCredentials();
+ }catch(error){message.textContent='Could not connect exchange: '+error.message}
+ finally{button.disabled=false}
+});
+
 $('#paper-session-form')?.addEventListener('submit',async event=>{
  event.preventDefault();
  const form=new FormData(event.currentTarget);

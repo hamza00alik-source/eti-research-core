@@ -1,4 +1,4 @@
-"""Research API and PWA host. No exchange order routes exist."""
+"""Research API and PWA host. No live order placement routes exist."""
 from __future__ import annotations
 from pathlib import Path
 import math
@@ -11,12 +11,13 @@ import pandas as pd
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from .runtime import runtime_lifespan
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from .agents import default_capabilities
 from .artifacts import ModelArtifactError, ModelArtifactStore
 from .auth import AuthManager, AuthenticationError, RateLimitExceeded, RegistrationDisabled
 from .config import AppConfig
+from .credentials import CredentialVault, CredentialVaultError, verify_exchange_credentials
 from .decision import build_research_decision
 from .portfolio import assess_portfolio
 from .risk import RiskEngine, RiskRequest
@@ -72,6 +73,12 @@ class AutonomyConfigPayload(BaseModel):
     interval_seconds: int = Field(default=900, ge=300, le=86400)
     model_training_enabled: bool = False
     model_training_interval_seconds: int = Field(default=86400, ge=86400, le=604800)
+
+
+class ExchangeCredentialsPayload(BaseModel):
+    venue: str = Field(pattern="^(binance|mexc)$")
+    api_key: SecretStr = Field(min_length=8, max_length=256)
+    api_secret: SecretStr = Field(min_length=8, max_length=256)
 
 
 class MemoryPayload(BaseModel):
@@ -220,6 +227,53 @@ def set_autonomy_config(payload: AutonomyConfigPayload,
             "live_execution_enabled": False,
             "note": "The worker schedules public research scans and, when explicitly enabled, bounded daily model training. Training artifacts remain unapproved candidates. No exchange credentials or orders are used."}
 
+
+
+
+
+@app.get("/v1/exchanges/credentials")
+def list_exchange_credentials(account: dict[str, str] = Depends(current_account)):
+    _require_model_admin(account)
+    return {"items": _memory_store().list_exchange_credentials(account["id"]),
+            "note": "Credential secrets are encrypted at rest and are never returned by this API. Trading permission is not verified by the read-only connection test."}
+
+
+@app.post("/v1/exchanges/credentials", status_code=201)
+def save_exchange_credentials(payload: ExchangeCredentialsPayload,
+                              account: dict[str, str] = Depends(current_account)):
+    _require_model_admin(account)
+    try:
+        vault = CredentialVault()
+    except CredentialVaultError as exc:
+        raise HTTPException(status_code=503, detail="Server credential encryption is not configured") from exc
+    api_key = payload.api_key.get_secret_value()
+    api_secret = payload.api_secret.get_secret_value()
+    try:
+        verification = verify_exchange_credentials(payload.venue, api_key, api_secret)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CredentialVaultError as exc:
+        raise HTTPException(status_code=422, detail="Exchange rejected the credentials or private read permission check") from exc
+    stored = _memory_store().upsert_exchange_credential(
+        account["id"], payload.venue,
+        vault.encrypt(api_key, account["id"], payload.venue, "api_key"),
+        vault.encrypt(api_secret, account["id"], payload.venue, "api_secret"),
+        api_key[-4:],
+    )
+    return {"credential": stored, "verification": verification,
+            "note": "Read access verified only. ETI has not verified trading permission and cannot place orders from this connection yet."}
+
+
+@app.delete("/v1/exchanges/credentials/{venue}")
+def delete_exchange_credentials(venue: str,
+                                account: dict[str, str] = Depends(current_account)):
+    _require_model_admin(account)
+    if venue not in {"binance", "mexc"}:
+        raise HTTPException(status_code=422, detail="unsupported exchange venue")
+    deleted = _memory_store().delete_exchange_credential(account["id"], venue)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="exchange credentials not found")
+    return {"deleted": True, "venue": venue}
 
 
 @app.get("/v1/paper/sessions")

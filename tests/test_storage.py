@@ -367,3 +367,29 @@ def test_model_training_schedule_is_bounded_and_disabled_by_default(tmp_path):
             symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT"],
             timeframes=["1h"], model_training_enabled=True,
         )
+
+
+def test_exchange_credentials_are_owner_scoped_masked_and_audited(tmp_path):
+    store = MemoryStore(tmp_path / "credentials.sqlite3")
+    saved = store.upsert_exchange_credential(
+        "owner-a", "binance", "encrypted-key", "encrypted-secret", "7890"
+    )
+    assert saved["venue"] == "binance"
+    assert store.list_exchange_credentials("owner-a") == [{
+        "venue": "binance",
+        "masked_api_key": "••••7890",
+        "created_at": saved["created_at"],
+        "updated_at": saved["updated_at"],
+    }]
+    stored = store.get_exchange_credential("owner-a", "binance")
+    assert stored["api_key_ciphertext"] == "encrypted-key"
+    assert stored["api_secret_ciphertext"] == "encrypted-secret"
+    assert store.get_exchange_credential("owner-b", "binance") is None
+    assert store.list_exchange_credentials("owner-b") == []
+    assert store.delete_exchange_credential("owner-a", "binance") is True
+    assert store.delete_exchange_credential("owner-a", "binance") is False
+    events = store.list_audit_events("owner-a")
+    assert [event["event_type"] for event in events] == [
+        "exchange.credentials.deleted", "exchange.credentials.saved"
+    ]
+    assert all("encrypted-secret" not in str(event["payload"]) for event in events)

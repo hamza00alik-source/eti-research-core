@@ -4,11 +4,20 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 
 ## Safety status
 
-- Research-only: no live order placement routes or authenticated exchange actions exist.
+- Research-only: no live order placement routes exist. Owner-only Binance/MEXC credentials can be stored encrypted and tested for private read access; live trading permission and order execution are not enabled.
 - Training is not automatic: model fitting is an explicit CLI action and is not part of startup or CI.
 - No profitability claim: backtests do not establish future performance.
 - Independent risk: model decisions must pass deterministic risk and portfolio checks; defaults disable shorts and leverage above 1x.
-- No API secrets: market discovery uses public CCXT endpoints only.
+- Exchange credentials: owner-only Binance/MEXC keys are encrypted with AES-256-GCM using a server-side key; the API never returns plaintext credentials. Connection verification checks private read access only.
+
+## Owner-managed exchange credential vault
+
+- Only usernames configured in `ETI_ADMIN_USERNAMES` can add or remove exchange credentials.
+- Initial adapters are Binance and MEXC spot. The connection test calls private `fetch_balance` only; it does not place orders and does not prove that trading permission is enabled.
+- API keys and secrets are encrypted with AES-256-GCM before they reach SQLite. Each ciphertext is authenticated against the owner, venue and credential field. The API returns only a masked key suffix.
+- Configure `ETI_CREDENTIAL_ENCRYPTION_KEY` as URL-safe base64 of 32 cryptographically random bytes. Generate it with `python -c 'import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())'`. Keep a secure offline copy: losing or rotating this key without re-encrypting the stored credentials makes them unrecoverable.
+- Use exchange keys with withdrawals disabled and IP restrictions enabled. Do not paste exchange keys into chat.
+- This vault is connection groundwork only. It does not enable live execution; the autonomous order gateway, owner authorization, independent risk checks and order reconciliation must be completed and tested separately.
 
 ## Architecture implemented
 
