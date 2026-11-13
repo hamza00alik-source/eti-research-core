@@ -336,7 +336,7 @@ def test_autonomy_schedules_separate_daily_model_training_tasks(tmp_path):
     assert profile["model_training_enabled"] is True
     assert profile["model_training_interval_seconds"] == 86400
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert store.enqueue_due_autonomy_tasks(start) == 12
+    assert store.enqueue_due_autonomy_tasks(start) == 15
     tasks = store.list_agent_tasks("owner-a", workspace["id"], status="queued")
     assert {task["target_capability"] for task in tasks} == {
         "market.snapshot", "market.discover", "model.train_research"
@@ -361,7 +361,7 @@ def test_autonomy_schedules_separate_daily_model_training_tasks(tmp_path):
     ) == 5
     assert store.enqueue_due_autonomy_tasks(
         datetime(2026, 1, 2, tzinfo=timezone.utc)
-    ) == 12
+    ) == 15
     all_tasks = store.list_agent_tasks("owner-a", workspace["id"])
     assert sum(t["target_capability"] == "model.train_research" for t in all_tasks) == 8
     assert sum(t["target_capability"] == "market.discover" for t in all_tasks) == 12
