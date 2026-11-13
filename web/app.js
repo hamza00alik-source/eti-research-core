@@ -52,6 +52,7 @@ async function saveAutonomyConfig(patch={}){
   venues:next.venues||['mexc'],
   symbols:next.symbols||['BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT'],
   timeframes:next.timeframes||['1h'],
+  market_types:next.market_types||['spot','swap'],
   interval_seconds:next.interval_seconds||900,
   model_training_enabled:next.model_training_enabled??modelTrainingEnabled,
   model_training_interval_seconds:next.model_training_interval_seconds||modelTrainingIntervalSeconds
@@ -476,9 +477,9 @@ $('#paper-session-form')?.addEventListener('submit',async event=>{
  }catch(error){message.textContent='Paper session creation failed: '+error.message}
 });
 const taskInputTemplates={
- 'market.snapshot':{venue:'mexc',symbol:'BTC/USDT',timeframe:'1h',limit:200},
- 'strategy.walk_forward':{venue:'mexc',symbol:'BTC/USDT',timeframe:'1h',limit:500,min_history:120,validation_size:80,test_size:80,step_size:80,purge_bars:2,fee_bps:6,slippage_bps:2},
- 'model.train_research':{venue:'mexc',symbol:'BTC/USDT',timeframe:'1h',limit:3000,horizon:6}
+ 'market.snapshot':{venue:'mexc',market_type:'spot',symbol:'BTC/USDT',timeframe:'1h',limit:200},
+ 'strategy.walk_forward':{venue:'mexc',market_type:'spot',symbol:'BTC/USDT',timeframe:'1h',limit:500,min_history:120,validation_size:80,test_size:80,step_size:80,purge_bars:2,fee_bps:6,slippage_bps:2},
+ 'model.train_research':{venue:'mexc',market_type:'spot',symbol:'BTC/USDT',timeframe:'1h',limit:3000,horizon:6}
 };
 function updateTaskInputTemplate(){
  const capability=$('#capability-select')?.value;
@@ -495,10 +496,10 @@ $('#task-form').addEventListener('submit',async event=>{
   $('#task-list').textContent='Task input must be a JSON object.';return;
  }
  if(capability==='model.train_research'){
-  if(!['binance','mexc'].includes(input.venue)||typeof input.symbol!=='string'||!input.symbol.includes('/')||
+  if(!['binance','mexc'].includes(input.venue)||!['spot','swap','future'].includes(input.market_type||'spot')||typeof input.symbol!=='string'||!input.symbol.includes('/')||
      !['1h','4h','1d'].includes(input.timeframe)||!Number.isInteger(input.limit)||input.limit<1500||input.limit>5000||
      !Number.isInteger(input.horizon)||input.horizon<2||input.horizon>24){
-   $('#task-list').textContent='Model training requires venue binance/mexc, a spot pair, timeframe 1h/4h/1d, limit 1500–5000 candles, and horizon 2–24. Use the suggested template.';
+   $('#task-list').textContent='Model training requires Binance/MEXC, market_type spot/swap/future, a valid CCXT symbol, timeframe 1h/4h/1d, 1500–5000 candles and horizon 2–24. For derivatives, use the exchange-specific unified contract symbol.';
    return;
   }
  }
