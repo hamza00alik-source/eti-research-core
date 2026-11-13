@@ -12,6 +12,7 @@ import numpy as np
 
 from .features import build_features
 from .providers import CcxtPublicProvider
+from .opportunities import rank_spot_opportunity
 
 
 AgentHandler = Callable[[dict[str, Any]], dict[str, Any]]
@@ -96,10 +97,11 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         "last_close": round(float(frame.iloc[-1]["close"]), 10),
         "trend_context": trend,
         "indicators": indicators,
+        "research_ranking": rank_spot_opportunity(indicators),
         "limitations": [
-            "Descriptive market research only; not a trade signal or recommendation.",
+            "Descriptive market research and a transparent heuristic ranking only; not a forecast or trade signal.",
             "Public spot OHLCV only; no private account data or order execution.",
-            "No model training is performed by this capability.",
+            "The ranking is not a trained AI model; model training is performed separately.",
         ],
     }
 
