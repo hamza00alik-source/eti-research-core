@@ -138,3 +138,60 @@ def test_completed_agent_task_requires_result(tmp_path):
     store.update_agent_task("owner", workspace["id"], task["id"], "running")
     with pytest.raises(ValueError, match="require a result"):
         store.update_agent_task("owner", workspace["id"], task["id"], "completed")
+
+
+def test_model_registry_requires_checksum_and_registers_immutable_candidate(tmp_path):
+    store = MemoryStore(tmp_path / "models.sqlite3")
+    args = ("eti-core", "0.1.0", "artifact://eti-core/0.1.0", "a" * 64,
+            {"features": ["close", "volume"]}, ["crypto_spot"], "dataset:train-001",
+            {"passed": True, "balanced_accuracy": 0.61}, "calibrated", "trainer")
+    with pytest.raises(ValueError, match="SHA-256"):
+        store.register_model_version(*args[:3], "bad", *args[4:])
+    model = store.register_model_version(*args)
+    assert model["lifecycle"] == "candidate"
+    assert model["artifact_sha256"] == "a" * 64
+    with pytest.raises(Exception):
+        store.register_model_version(*args)
+
+
+def test_model_promotion_requires_pass_calibration_and_independent_approval(tmp_path):
+    store = MemoryStore(tmp_path / "models.sqlite3")
+    common = ("eti-core", "1.0", "artifact://eti-core/1.0", "b" * 64,
+              {"features": ["close"]}, ["crypto_spot"], "dataset:1")
+    store.register_model_version(*common, {"passed": False}, "calibrated", "trainer")
+    with pytest.raises(ValueError, match="must explicitly pass"):
+        store.approve_model_version("eti-core", "1.0", "reviewer")
+
+    store.register_model_version(
+        "eti-core", "1.1", "artifact://eti-core/1.1", "c" * 64,
+        {"features": ["close"]}, ["crypto_spot"], "dataset:2",
+        {"passed": True}, "unknown", "trainer"
+    )
+    with pytest.raises(ValueError, match="calibrated"):
+        store.approve_model_version("eti-core", "1.1", "reviewer")
+
+    store.register_model_version(
+        "eti-core", "1.2", "artifact://eti-core/1.2", "d" * 64,
+        {"features": ["close"]}, ["crypto_spot"], "dataset:3",
+        {"passed": True}, "calibrated", "trainer"
+    )
+    with pytest.raises(ValueError, match="cannot approve their own"):
+        store.approve_model_version("eti-core", "1.2", "trainer")
+    approved = store.approve_model_version("eti-core", "1.2", "independent-reviewer")
+    assert approved["lifecycle"] == "approved"
+    assert approved["approved_by"] == "independent-reviewer"
+
+
+def test_model_retirement_is_guarded_and_registry_is_queryable(tmp_path):
+    store = MemoryStore(tmp_path / "models.sqlite3")
+    store.register_model_version(
+        "eti-core", "1.0", "artifact://eti-core/1.0", "e" * 64,
+        {"features": ["close"]}, ["crypto_spot"], "dataset:1",
+        {"passed": True}, "calibrated", "trainer"
+    )
+    with pytest.raises(ValueError, match="approved model"):
+        store.retire_model_version("eti-core", "1.0")
+    store.approve_model_version("eti-core", "1.0", "reviewer")
+    retired = store.retire_model_version("eti-core", "1.0")
+    assert retired["lifecycle"] == "retired"
+    assert store.list_model_versions("retired")[0]["version"] == "1.0"

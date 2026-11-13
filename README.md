@@ -104,3 +104,10 @@ The storage layer now includes owner/workspace-scoped agent task and message led
 - Task and message creation/state changes append audit events.
 - Reads and writes enforce workspace ownership; tests cover cross-owner isolation and persistence.
 - This is a durable ledger, not an autonomous scheduler or running agent network. Authenticated API routes, permission policies, worker dispatch, retries, timeout enforcement and agent implementations remain separate work.
+
+
+## Versioned model registry foundation
+
+A persistent metadata registry now records immutable model versions, artifact SHA-256 checksums, input schemas, supported asset classes, training-data references, evaluation reports and calibration state. New versions enter as candidates. Approval requires an explicit passing evaluation, calibrated status and an approver different from the creator; approved versions can be retired but not silently overwritten.
+
+The registry stores artifact references and metadata, not model binaries, and is not yet exposed through authenticated inference APIs. Model execution, artifact hosting, evaluation pipeline integration and access-controlled promotion remain separate work.

@@ -143,6 +143,27 @@ class MemoryStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_messages_task
                     ON agent_messages(owner_id, workspace_id, task_id, created_at);
+
+                CREATE TABLE IF NOT EXISTS model_versions (
+                    id TEXT PRIMARY KEY,
+                    model_id TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    artifact_uri TEXT NOT NULL,
+                    artifact_sha256 TEXT NOT NULL,
+                    input_schema_json TEXT NOT NULL,
+                    supported_classes_json TEXT NOT NULL,
+                    training_data_ref TEXT NOT NULL,
+                    evaluation_report_json TEXT NOT NULL,
+                    calibration_status TEXT NOT NULL CHECK(calibration_status IN ('unknown','calibrated','failed')),
+                    lifecycle TEXT NOT NULL CHECK(lifecycle IN ('candidate','approved','retired')),
+                    created_by TEXT NOT NULL,
+                    approved_by TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(model_id, version)
+                );
+                CREATE INDEX IF NOT EXISTS idx_model_versions_lifecycle
+                    ON model_versions(model_id, lifecycle);
                 """
             )
 
@@ -464,3 +485,120 @@ class MemoryStore:
              "created_at": row["created_at"]}
             for row in rows
         ]
+
+
+    def register_model_version(
+        self, model_id: str, version: str, artifact_uri: str, artifact_sha256: str,
+        input_schema: Any, supported_classes: list[str], training_data_ref: str,
+        evaluation_report: Any, calibration_status: str, created_by: str
+    ) -> dict[str, Any]:
+        """Register immutable model metadata as a candidate; never promotes it."""
+        import re
+        model_id = _required_text(model_id, "model_id", 120)
+        version = _required_text(version, "version", 80)
+        artifact_uri = _required_text(artifact_uri, "artifact_uri", 500)
+        training_data_ref = _required_text(training_data_ref, "training_data_ref", 300)
+        created_by = _required_text(created_by, "created_by", 128)
+        if not isinstance(artifact_sha256, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", artifact_sha256):
+            raise ValueError("artifact_sha256 must be a 64-character SHA-256 hex digest")
+        if not isinstance(supported_classes, list) or not supported_classes:
+            raise ValueError("supported_classes must be a non-empty list")
+        normalized_classes = sorted({_required_text(item, "supported_class", 80) for item in supported_classes})
+        if calibration_status not in {"unknown", "calibrated", "failed"}:
+            raise ValueError("invalid calibration_status")
+        if not isinstance(input_schema, dict):
+            raise ValueError("input_schema must be a JSON object")
+        if not isinstance(evaluation_report, dict):
+            raise ValueError("evaluation_report must be a JSON object")
+        schema_json, classes_json = _encode_json(input_schema), _encode_json(normalized_classes)
+        evaluation_json = _encode_json(evaluation_report)
+        model_version_id, now = str(uuid4()), _utc_now()
+        with self._connection() as conn:
+            conn.execute(
+                "INSERT INTO model_versions(id, model_id, version, artifact_uri, artifact_sha256, "
+                "input_schema_json, supported_classes_json, training_data_ref, evaluation_report_json, "
+                "calibration_status, lifecycle, created_by, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?, ?, ?)",
+                (model_version_id, model_id, version, artifact_uri, artifact_sha256.lower(),
+                 schema_json, classes_json, training_data_ref, evaluation_json,
+                 calibration_status, created_by, now, now),
+            )
+        return self.get_model_version(model_id, version)
+
+    def get_model_version(self, model_id: str, version: str) -> dict[str, Any] | None:
+        model_id = _required_text(model_id, "model_id", 120)
+        version = _required_text(version, "version", 80)
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM model_versions WHERE model_id = ? AND version = ?",
+                (model_id, version),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"], "model_id": row["model_id"], "version": row["version"],
+            "artifact_uri": row["artifact_uri"], "artifact_sha256": row["artifact_sha256"],
+            "input_schema": json.loads(row["input_schema_json"]),
+            "supported_classes": json.loads(row["supported_classes_json"]),
+            "training_data_ref": row["training_data_ref"],
+            "evaluation_report": json.loads(row["evaluation_report_json"]),
+            "calibration_status": row["calibration_status"], "lifecycle": row["lifecycle"],
+            "created_by": row["created_by"], "approved_by": row["approved_by"],
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+        }
+
+    def approve_model_version(self, model_id: str, version: str, approver: str) -> dict[str, Any]:
+        """Approve only independently evaluated and calibrated candidates."""
+        model_id = _required_text(model_id, "model_id", 120)
+        version = _required_text(version, "version", 80)
+        approver = _required_text(approver, "approver", 128)
+        now = _utc_now()
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM model_versions WHERE model_id = ? AND version = ?",
+                (model_id, version),
+            ).fetchone()
+            if row is None:
+                raise LookupError("model version not found")
+            if row["lifecycle"] != "candidate":
+                raise ValueError("only candidate model versions can be approved")
+            report = json.loads(row["evaluation_report_json"])
+            if report.get("passed") is not True:
+                raise ValueError("model evaluation must explicitly pass before approval")
+            if row["calibration_status"] != "calibrated":
+                raise ValueError("model must be calibrated before approval")
+            if approver == row["created_by"]:
+                raise ValueError("model creator cannot approve their own model version")
+            conn.execute(
+                "UPDATE model_versions SET lifecycle = 'approved', approved_by = ?, updated_at = ? "
+                "WHERE model_id = ? AND version = ? AND lifecycle = 'candidate'",
+                (approver, now, model_id, version),
+            )
+        return self.get_model_version(model_id, version)
+
+    def retire_model_version(self, model_id: str, version: str) -> dict[str, Any]:
+        model_id = _required_text(model_id, "model_id", 120)
+        version = _required_text(version, "version", 80)
+        now = _utc_now()
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE model_versions SET lifecycle = 'retired', updated_at = ? "
+                "WHERE model_id = ? AND version = ? AND lifecycle = 'approved'",
+                (now, model_id, version),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("only an approved model version can be retired")
+        return self.get_model_version(model_id, version)
+
+    def list_model_versions(self, lifecycle: str | None = None) -> list[dict[str, Any]]:
+        if lifecycle is not None and lifecycle not in {"candidate", "approved", "retired"}:
+            raise ValueError("invalid lifecycle filter")
+        query = "SELECT model_id, version FROM model_versions"
+        params: tuple[Any, ...] = ()
+        if lifecycle is not None:
+            query += " WHERE lifecycle = ?"
+            params = (lifecycle,)
+        query += " ORDER BY model_id, version"
+        with self._connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self.get_model_version(row["model_id"], row["version"]) for row in rows]
