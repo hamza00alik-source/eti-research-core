@@ -116,3 +116,22 @@ def test_temperature_calibration_fails_closed_for_small_or_missing_class_samples
     assert missing_class["passed"] is False
     assert missing_class["reason"] == "each_class_requires_at_least_five_calibration_samples"
     assert not model.has_valid_calibration()
+
+
+def test_model_missing_training_class_cannot_be_calibrated():
+    class TwoClassEstimator:
+        classes_ = np.array([0, 1])
+
+        def predict_proba(self, frame):
+            return np.tile(np.array([[0.3, 0.7]]), (len(frame), 1))
+
+    model = BaselineModel()
+    model.estimator = TwoClassEstimator()
+    model.classes_ = np.array([0, 1])
+    labels = np.tile(np.array([0, 1, 2]), 20)
+    report = model.fit_temperature_calibration(
+        pd.DataFrame({"x": np.arange(len(labels), dtype=float)}), labels
+    )
+    assert report["passed"] is False
+    assert report["reason"] == "training_model_missing_one_or_more_classes"
+    assert model.calibration_status == "uncalibrated"
