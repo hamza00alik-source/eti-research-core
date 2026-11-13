@@ -88,3 +88,13 @@ The PWA now includes sign-in, invite-only account creation, workspace selection,
 The service worker caches only the static app shell. It bypasses all `/v1/` endpoints, and the API sends `Cache-Control: no-store` for authenticated and dynamic routes. Security headers include a restrictive same-origin Content Security Policy, frame protection and MIME sniffing protection.
 
 The PWA still requires a deployed HTTPS backend and configured server secrets before sign-in can work from a public URL. A native Android application is not yet implemented.
+
+
+## Authenticated model registry API
+
+- Signed-in accounts can list approved model versions and retrieve approved metadata.
+- Mutating the shared registry requires a username explicitly listed in server-only `ETI_ADMIN_USERNAMES` (comma-separated).
+- Admins can register candidate metadata, request independent approval and retire approved versions. Promotion still requires a passing evaluation report, calibrated status and an approver different from the creator.
+- The API derives creator and approver identities from the verified account token; clients cannot set these fields.
+- Candidate and retired versions are hidden from ordinary accounts.
+- The registry remains metadata-only: it does not host/download model binaries, run inference, train models or auto-promote candidates.
