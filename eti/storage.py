@@ -7,7 +7,7 @@ No unauthenticated HTTP routes expose this store.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -124,6 +124,10 @@ class MemoryStore:
                     input_json TEXT NOT NULL,
                     result_json TEXT,
                     deadline_at TEXT,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    max_attempts INTEGER NOT NULL DEFAULT 3,
+                    lease_expires_at TEXT,
+                    lease_token TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -166,6 +170,17 @@ class MemoryStore:
                     ON model_versions(model_id, lifecycle);
                 """
             )
+            task_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(agent_tasks)").fetchall()
+            }
+            for column, definition in (
+                ("attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+                ("max_attempts", "INTEGER NOT NULL DEFAULT 3"),
+                ("lease_expires_at", "TEXT"),
+                ("lease_token", "TEXT"),
+            ):
+                if column not in task_columns:
+                    conn.execute(f"ALTER TABLE agent_tasks ADD COLUMN {column} {definition}")
 
     def create_workspace(self, owner_id: str, name: str) -> dict[str, str]:
         owner_id = _required_text(owner_id, "owner_id")
@@ -329,7 +344,8 @@ class MemoryStore:
 
     def create_agent_task(
         self, owner_id: str, workspace_id: str, requester: str,
-        target_capability: str, input_data: Any, deadline_at: str | None = None
+        target_capability: str, input_data: Any, deadline_at: str | None = None,
+        max_attempts: int = 3
     ) -> dict[str, Any]:
         """Queue a typed task; this records work but does not execute an agent."""
         owner_id = _required_text(owner_id, "owner_id")
@@ -339,16 +355,18 @@ class MemoryStore:
         encoded = _encode_json(input_data)
         if deadline_at is not None:
             deadline_at = _required_text(deadline_at, "deadline_at", 40)
+        if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or not 1 <= max_attempts <= 10:
+            raise ValueError("max_attempts must be an integer from 1 to 10")
         task_id, now = str(uuid4()), _utc_now()
         with self._connection() as conn:
             if not self._owns_workspace(conn, owner_id, workspace_id):
                 raise LookupError("workspace not found")
             conn.execute(
                 "INSERT INTO agent_tasks(id, owner_id, workspace_id, requester, target_capability, "
-                "status, input_json, deadline_at, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)",
+                "status, input_json, deadline_at, max_attempts, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)",
                 (task_id, owner_id, workspace_id, requester, target_capability,
-                 encoded, deadline_at, now, now),
+                 encoded, deadline_at, max_attempts, now, now),
             )
             conn.execute(
                 "INSERT INTO audit_events(id, owner_id, workspace_id, event_type, payload_json, created_at) "
@@ -359,7 +377,8 @@ class MemoryStore:
         return {"id": task_id, "owner_id": owner_id, "workspace_id": workspace_id,
                 "requester": requester, "target_capability": target_capability,
                 "status": "queued", "input": json.loads(encoded), "result": None,
-                "deadline_at": deadline_at, "created_at": now, "updated_at": now}
+                "deadline_at": deadline_at, "attempt_count": 0, "max_attempts": max_attempts,
+                "lease_expires_at": None, "created_at": now, "updated_at": now}
 
     def list_agent_tasks(
         self, owner_id: str, workspace_id: str, status: str | None = None,
@@ -385,10 +404,192 @@ class MemoryStore:
              "requester": row["requester"], "target_capability": row["target_capability"],
              "status": row["status"], "input": json.loads(row["input_json"]),
              "result": json.loads(row["result_json"]) if row["result_json"] is not None else None,
-             "deadline_at": row["deadline_at"], "created_at": row["created_at"],
-             "updated_at": row["updated_at"]}
+             "deadline_at": row["deadline_at"], "attempt_count": row["attempt_count"],
+             "max_attempts": row["max_attempts"], "lease_expires_at": row["lease_expires_at"],
+             "created_at": row["created_at"], "updated_at": row["updated_at"]}
             for row in rows
         ]
+
+    def claim_next_agent_task(
+        self, lease_seconds: int = 120, now: int | None = None
+    ) -> dict[str, Any] | None:
+        """Atomically lease the oldest queued task and recover expired worker leases."""
+        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
+            raise ValueError("lease_seconds must be an integer from 5 to 3600")
+        current = datetime.now(timezone.utc) if now is None else datetime.fromtimestamp(now, timezone.utc)
+        now_text = current.isoformat(timespec="microseconds").replace("+00:00", "Z")
+        lease_text = (current + timedelta(seconds=lease_seconds)).isoformat(
+            timespec="microseconds"
+        ).replace("+00:00", "Z")
+        with sqlite3.connect(self.database_path, timeout=10) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA busy_timeout = 10000")
+            conn.execute("BEGIN IMMEDIATE")
+
+            expired = conn.execute(
+                "SELECT id, owner_id, workspace_id, attempt_count, max_attempts "
+                "FROM agent_tasks WHERE status = 'running' "
+                "AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
+                (now_text,),
+            ).fetchall()
+            for row in expired:
+                exhausted = row["attempt_count"] >= row["max_attempts"]
+                next_status = "failed" if exhausted else "queued"
+                error = {"error": "worker lease expired", "attempt_count": row["attempt_count"]}
+                conn.execute(
+                    "UPDATE agent_tasks SET status = ?, lease_expires_at = NULL, lease_token = NULL, "
+                    "result_json = CASE WHEN ? = 1 THEN ? ELSE result_json END, updated_at = ? "
+                    "WHERE id = ? AND status = 'running'",
+                    (next_status, int(exhausted), _encode_json(error), now_text, row["id"]),
+                )
+                conn.execute(
+                    "INSERT INTO audit_events(id, owner_id, workspace_id, event_type, payload_json, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (str(uuid4()), row["owner_id"], row["workspace_id"],
+                     "agent.task.lease_expired", _encode_json({
+                         "task_id": row["id"], "requeued": not exhausted
+                     }), now_text),
+                )
+
+            row = conn.execute(
+                "SELECT * FROM agent_tasks WHERE status = 'queued' "
+                "ORDER BY created_at, id LIMIT 1"
+            ).fetchone()
+            if row is None:
+                conn.commit()
+                return None
+            lease_token = str(uuid4())
+            conn.execute(
+                "UPDATE agent_tasks SET status = 'running', attempt_count = attempt_count + 1, "
+                "lease_expires_at = ?, lease_token = ?, updated_at = ? "
+                "WHERE id = ? AND status = 'queued'",
+                (lease_text, lease_token, now_text, row["id"]),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id, owner_id, workspace_id, event_type, payload_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (str(uuid4()), row["owner_id"], row["workspace_id"], "agent.task.claimed",
+                 _encode_json({"task_id": row["id"], "attempt": row["attempt_count"] + 1}), now_text),
+            )
+            claimed = conn.execute(
+                "SELECT * FROM agent_tasks WHERE id = ?", (row["id"],)
+            ).fetchone()
+            conn.commit()
+        return {
+            "id": claimed["id"], "owner_id": claimed["owner_id"],
+            "workspace_id": claimed["workspace_id"], "requester": claimed["requester"],
+            "target_capability": claimed["target_capability"], "status": claimed["status"],
+            "input": json.loads(claimed["input_json"]),
+            "result": json.loads(claimed["result_json"]) if claimed["result_json"] else None,
+            "deadline_at": claimed["deadline_at"], "attempt_count": claimed["attempt_count"],
+            "max_attempts": claimed["max_attempts"], "lease_expires_at": claimed["lease_expires_at"],
+            "lease_token": lease_token,
+            "created_at": claimed["created_at"], "updated_at": claimed["updated_at"],
+        }
+
+
+    def renew_agent_task_lease(
+        self, task_id: str, lease_token: str, lease_seconds: int = 120, now: int | None = None
+    ) -> str:
+        task_id = _required_text(task_id, "task_id")
+        lease_token = _required_text(lease_token, "lease_token")
+        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
+            raise ValueError("lease_seconds must be an integer from 5 to 3600")
+        current = datetime.now(timezone.utc) if now is None else datetime.fromtimestamp(now, timezone.utc)
+        now_text = current.isoformat(timespec="microseconds").replace("+00:00", "Z")
+        lease_text = (current + timedelta(seconds=lease_seconds)).isoformat(
+            timespec="microseconds"
+        ).replace("+00:00", "Z")
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT status, lease_token, lease_expires_at FROM agent_tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                raise LookupError("task not found")
+            if (row["status"] != "running" or row["lease_token"] != lease_token
+                    or row["lease_expires_at"] is None or row["lease_expires_at"] <= now_text):
+                raise ValueError("task lease is invalid or expired")
+            conn.execute(
+                "UPDATE agent_tasks SET lease_expires_at = ?, updated_at = ? "
+                "WHERE id = ? AND status = 'running' AND lease_token = ?",
+                (lease_text, now_text, task_id, lease_token),
+            )
+        return lease_text
+
+    def complete_claimed_agent_task(
+        self, task_id: str, lease_token: str, result: Any, now: int | None = None
+    ) -> dict[str, Any]:
+        task_id = _required_text(task_id, "task_id")
+        lease_token = _required_text(lease_token, "lease_token")
+        encoded = _encode_json(result)
+        now_dt = datetime.now(timezone.utc) if now is None else datetime.fromtimestamp(now, timezone.utc)
+        now = now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT owner_id, workspace_id, status, lease_token, lease_expires_at "
+                "FROM agent_tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                raise LookupError("task not found")
+            if (row["status"] != "running" or row["lease_token"] != lease_token
+                    or row["lease_expires_at"] is None or row["lease_expires_at"] <= now):
+                raise ValueError("task lease is invalid or expired")
+            conn.execute(
+                "UPDATE agent_tasks SET status = 'completed', result_json = ?, "
+                "lease_expires_at = NULL, lease_token = NULL, updated_at = ? "
+                "WHERE id = ? AND status = 'running' AND lease_token = ?",
+                (encoded, now, task_id, lease_token),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id, owner_id, workspace_id, event_type, payload_json, created_at) "
+                "VALUES (?, ?, ?, 'agent.task.completed', ?, ?)",
+                (str(uuid4()), row["owner_id"], row["workspace_id"],
+                 _encode_json({"task_id": task_id}), now),
+            )
+        return self.get_agent_task(row["owner_id"], row["workspace_id"], task_id)  # type: ignore[return-value]
+
+    def fail_claimed_agent_task(
+        self, task_id: str, lease_token: str, error: Any, *, retryable: bool = True,
+        now: int | None = None
+    ) -> dict[str, Any]:
+        task_id = _required_text(task_id, "task_id")
+        lease_token = _required_text(lease_token, "lease_token")
+        if not isinstance(retryable, bool):
+            raise ValueError("retryable must be a boolean")
+        encoded = _encode_json(error)
+        now_dt = datetime.now(timezone.utc) if now is None else datetime.fromtimestamp(now, timezone.utc)
+        now = now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT owner_id, workspace_id, status, lease_token, lease_expires_at, "
+                "attempt_count, max_attempts FROM agent_tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                raise LookupError("task not found")
+            if (row["status"] != "running" or row["lease_token"] != lease_token
+                    or row["lease_expires_at"] is None or row["lease_expires_at"] <= now):
+                raise ValueError("task lease is invalid or expired")
+            should_retry = retryable and row["attempt_count"] < row["max_attempts"]
+            next_status = "queued" if should_retry else "failed"
+            conn.execute(
+                "UPDATE agent_tasks SET status = ?, result_json = ?, "
+                "lease_expires_at = NULL, lease_token = NULL, updated_at = ? "
+                "WHERE id = ? AND status = 'running' AND lease_token = ?",
+                (next_status, encoded, now, task_id, lease_token),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id, owner_id, workspace_id, event_type, payload_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (str(uuid4()), row["owner_id"], row["workspace_id"],
+                 "agent.task.requeued" if should_retry else "agent.task.failed",
+                 _encode_json({"task_id": task_id, "retryable": retryable,
+                               "attempt_count": row["attempt_count"]}), now),
+            )
+        return self.get_agent_task(row["owner_id"], row["workspace_id"], task_id)  # type: ignore[return-value]
 
     def get_agent_task(self, owner_id: str, workspace_id: str, task_id: str) -> dict[str, Any] | None:
         owner_id = _required_text(owner_id, "owner_id")
@@ -405,8 +606,39 @@ class MemoryStore:
                 "requester": row["requester"], "target_capability": row["target_capability"],
                 "status": row["status"], "input": json.loads(row["input_json"]),
                 "result": json.loads(row["result_json"]) if row["result_json"] is not None else None,
-                "deadline_at": row["deadline_at"], "created_at": row["created_at"],
-                "updated_at": row["updated_at"]}
+                "deadline_at": row["deadline_at"], "attempt_count": row["attempt_count"],
+                "max_attempts": row["max_attempts"], "lease_expires_at": row["lease_expires_at"],
+                "created_at": row["created_at"], "updated_at": row["updated_at"]}
+
+    def cancel_agent_task(
+        self, owner_id: str, workspace_id: str, task_id: str
+    ) -> dict[str, Any]:
+        """Atomically cancel only a queued task; running work belongs to the worker."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        task_id = _required_text(task_id, "task_id")
+        now = _utc_now()
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE agent_tasks SET status = 'cancelled', lease_expires_at = NULL, updated_at = ? "
+                "WHERE id = ? AND owner_id = ? AND workspace_id = ? AND status = 'queued'",
+                (now, task_id, owner_id, workspace_id),
+            )
+            if cursor.rowcount != 1:
+                exists = conn.execute(
+                    "SELECT status FROM agent_tasks WHERE id = ? AND owner_id = ? AND workspace_id = ?",
+                    (task_id, owner_id, workspace_id),
+                ).fetchone()
+                if exists is None:
+                    raise LookupError("task not found")
+                raise ValueError("only queued tasks can be cancelled")
+            conn.execute(
+                "INSERT INTO audit_events(id, owner_id, workspace_id, event_type, payload_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (str(uuid4()), owner_id, workspace_id, "agent.task.cancelled",
+                 _encode_json({"task_id": task_id}), now),
+            )
+        return self.get_agent_task(owner_id, workspace_id, task_id)  # type: ignore[return-value]
 
     def update_agent_task(
         self, owner_id: str, workspace_id: str, task_id: str,
@@ -438,7 +670,8 @@ class MemoryStore:
             if status == "completed" and encoded_result is None:
                 raise ValueError("completed tasks require a result")
             conn.execute(
-                "UPDATE agent_tasks SET status = ?, result_json = COALESCE(?, result_json), updated_at = ? "
+                "UPDATE agent_tasks SET status = ?, result_json = COALESCE(?, result_json), "
+                "lease_expires_at = NULL, lease_token = NULL, updated_at = ? "
                 "WHERE id = ? AND owner_id = ? AND workspace_id = ?",
                 (status, encoded_result, now, task_id, owner_id, workspace_id),
             )

@@ -58,13 +58,13 @@ Open `http://localhost:8000`; health check is `/health`.
   ```
 - The account identity in protected routes comes from a verified bearer token, never a client-supplied owner id.
 - This is a foundation, not public-production identity management. Before public signup/deployment, add email verification, edge-level rate limiting (in addition to the application throttle), trusted-proxy configuration, HTTPS, secure secret management, backups, monitoring, and PostgreSQL for multi-instance use.
-- Workspace memory, agent task/message and model registry HTTP routes are intentionally not exposed until their authorization policies are implemented and tested.
+- Workspace memory and agent task/message routes are protected by account-scoped bearer authentication. Model registry mutations require the server-configured administrator allowlist.
 
 ## Existing research workflow
 
 Training remains an explicit CLI action and is not started by API startup or CI. No live order placement endpoints exist. Current live public market discovery is crypto spot on Binance/MEXC only; other labelled asset classes are available only through validated local CSV OHLCV data.
 
-The model registry currently stores immutable version metadata and checksums, not model binaries. Agent tasks/messages are durable ledgers, not an autonomous running agent network. The PWA remains an undeployed frontend shell until a backend and HTTPS host are configured.
+The model registry stores immutable version metadata and checksums, not model binaries. A separate allowlisted worker can execute the first deterministic public-market research capability; this is not yet a general LLM agent network. The PWA remains an undeployed frontend shell until a backend and HTTPS host are configured.
 
 
 ## Authenticated workspace and agent APIs (new)
@@ -79,7 +79,7 @@ All routes in this section require `Authorization: Bearer <access_token>`. The a
 - `GET/POST /v1/workspaces/{workspace_id}/agents/messages`: list or append typed JSON messages.
 - `GET /v1/audit/events`: list the authenticated account's audit history.
 
-Every workspace route checks account ownership and returns not-found for another account's workspace. Agent tasks/messages remain a durable ledger only: creating a task does not run an agent, and message payloads are stored as data, never executed as code or instructions. Model registry APIs, worker dispatch, permissioned agent capabilities and production deployment remain future work.
+Every workspace route checks account ownership and returns not-found for another account's workspace. Task and message payloads are stored as typed JSON data, never executed as code or instructions. Task records can be processed by the separately started allowlisted worker described below.
 
 
 ## PWA account workspace
@@ -101,4 +101,23 @@ The PWA still requires a deployed HTTPS backend and configured server secrets be
 - The registry remains metadata-only: it does not host/download model binaries, run inference, train models or auto-promote candidates.
 
 
-The mobile PWA displays the authenticated account's audit trail alongside its workspace memory and agent task ledger.
+## Durable agent worker (first execution capability)
+
+The API exposes the authenticated capability list at `GET /v1/agents/capabilities`. The first built-in capability is `market.snapshot`: it fetches completed public crypto spot candles from Binance or MEXC and returns a descriptive snapshot with causal technical indicators. It does not train a model, recommend a trade, access private exchange accounts or place orders.
+
+Start a worker explicitly from the same server environment and database as the API:
+
+```bash
+python -m eti.worker --once
+python -m eti.worker --poll-seconds 2
+```
+
+- `--once` claims and processes at most one queued task; the polling mode runs continuously until stopped.
+- Task claiming uses an atomic SQLite transaction and a lease. Expired worker leases are requeued until the task's configured attempt limit (default 3, maximum 10); exhausted tasks fail closed.
+- Unknown capability names fail as tasks; user payloads cannot register new handlers or execute code.
+- The worker is not started automatically by FastAPI. Deploy it as a separate process only after configuring the shared persistent database and monitoring.
+- SQLite remains a local/single-instance foundation. Multi-instance worker fleets require a PostgreSQL-backed queue and operational monitoring before production use.
+- This is deterministic tool execution, not yet an LLM-driven agent planner, multi-agent reasoning system or autonomous trading system.
+
+
+The PWA also displays the authenticated account's audit trail alongside its workspace memory and task ledger.
