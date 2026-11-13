@@ -4,11 +4,11 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .auth import AuthManager, AuthenticationError, RegistrationDisabled
+from .auth import AuthManager, AuthenticationError, RateLimitExceeded, RegistrationDisabled
 from .config import AppConfig
 from .decision import build_research_decision
 from .portfolio import assess_portfolio
@@ -89,6 +89,22 @@ def _memory_store() -> MemoryStore:
     return MemoryStore()
 
 
+def _client_subject(request) -> str:
+    # Use the ASGI peer address only; do not trust arbitrary X-Forwarded-For headers.
+    return request.client.host if request.client and request.client.host else "unknown-client"
+
+
+def _apply_auth_rate_limits(manager: AuthManager, request, action: str, username: str | None = None):
+    ip = _client_subject(request)
+    if action == "login":
+        manager.consume_rate_limit("login-ip", ip, limit=20, window_seconds=900)
+        if username:
+            manager.consume_rate_limit("login-user", username.strip().lower(), limit=10,
+                                       window_seconds=900)
+    elif action == "register":
+        manager.consume_rate_limit("register-ip", ip, limit=5, window_seconds=3600)
+
+
 def current_account(authorization: str | None = Header(default=None)) -> dict[str, str]:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required",
@@ -107,10 +123,13 @@ def _require_workspace(store: MemoryStore, account: dict[str, str], workspace_id
 
 
 @app.post("/v1/auth/register", status_code=201)
-def register(payload: RegisterPayload):
+def register(payload: RegisterPayload, request: Request):
     manager = _auth_manager()
     try:
+        _apply_auth_rate_limits(manager, request, "register")
         account = manager.register(payload.username, payload.password, payload.invite_code)
+    except RateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc), headers={"Retry-After": str(exc.retry_after)}) from exc
     except RegistrationDisabled as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except AuthenticationError as exc:
@@ -122,10 +141,14 @@ def register(payload: RegisterPayload):
 
 
 @app.post("/v1/auth/token")
-def login(payload: LoginPayload):
+def login(payload: LoginPayload, request: Request):
     manager = _auth_manager()
     try:
+        _apply_auth_rate_limits(manager, request, "login", payload.username)
         account = manager.authenticate(payload.username, payload.password)
+    except RateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc),
+                            headers={"Retry-After": str(exc.retry_after)}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=401, detail="invalid username or password",
                             headers={"WWW-Authenticate": "Bearer"}) from exc

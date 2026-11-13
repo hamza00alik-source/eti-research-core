@@ -32,6 +32,14 @@ class AuthenticationError(ValueError):
     """Invalid credentials or bearer token."""
 
 
+class RateLimitExceeded(RuntimeError):
+    """A persistent authentication attempt bucket has reached its limit."""
+
+    def __init__(self, retry_after: int):
+        self.retry_after = max(1, int(retry_after))
+        super().__init__("too many authentication attempts; retry later")
+
+
 class RegistrationDisabled(RuntimeError):
     """Required server-side registration configuration is absent."""
 
@@ -82,6 +90,57 @@ class AuthManager:
                     password_hash BLOB NOT NULL,
                     created_at INTEGER NOT NULL
                 )"""
+            )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS auth_rate_limits (
+                    bucket_key TEXT NOT NULL,
+                    attempted_at INTEGER NOT NULL
+                )"""
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_auth_rate_limits_bucket "
+                "ON auth_rate_limits(bucket_key, attempted_at)"
+            )
+
+    def consume_rate_limit(
+        self, bucket: str, subject: str, *, limit: int, window_seconds: int,
+        now: int | None = None
+    ) -> None:
+        """Atomically count an auth attempt without storing raw IP/user identifiers."""
+        if not isinstance(bucket, str) or not bucket or len(bucket) > 40:
+            raise ValueError("invalid rate-limit bucket")
+        if not isinstance(subject, str) or not subject or len(subject) > 512:
+            raise ValueError("invalid rate-limit subject")
+        if (isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
+                or isinstance(window_seconds, bool) or not isinstance(window_seconds, int)
+                or window_seconds < 1):
+            raise ValueError("invalid rate-limit policy")
+        current = int(time.time()) if now is None else int(now)
+        digest = hmac.new(
+            self.secret.encode("utf-8"),
+            (bucket + ":" + subject).encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        cutoff = current - window_seconds
+        with sqlite3.connect(self.database_path, timeout=10) as conn:
+            conn.execute("PRAGMA busy_timeout = 10000")
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("DELETE FROM auth_rate_limits WHERE attempted_at <= ?",
+                         (current - 86400,))
+            conn.execute(
+                "DELETE FROM auth_rate_limits WHERE bucket_key = ? AND attempted_at <= ?",
+                (digest, cutoff),
+            )
+            row = conn.execute(
+                "SELECT COUNT(*), MIN(attempted_at) FROM auth_rate_limits WHERE bucket_key = ?",
+                (digest,),
+            ).fetchone()
+            count, oldest = row
+            if count >= limit:
+                raise RateLimitExceeded(max(1, int(oldest) + window_seconds - current))
+            conn.execute(
+                "INSERT INTO auth_rate_limits(bucket_key, attempted_at) VALUES (?, ?)",
+                (digest, current),
             )
 
     @staticmethod

@@ -124,3 +124,32 @@ def test_service_worker_does_not_cache_authenticated_api_routes():
         assert response.status_code == 200
         assert "url.pathname.startsWith('/v1/')" in response.text
         assert "cache:'no-store'" in response.text
+
+
+def test_login_and_registration_are_rate_limited(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "rate-limit.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        for _ in range(10):
+            response = client.post("/v1/auth/token", json={
+                "username": "limited_user", "password": "a-long-password-123"
+            })
+            assert response.status_code == 401
+        limited = client.post("/v1/auth/token", json={
+            "username": "limited_user", "password": "a-long-password-123"
+        })
+        assert limited.status_code == 429
+        assert int(limited.headers["retry-after"]) > 0
+
+        for index in range(5):
+            response = client.post("/v1/auth/register", json={
+                "username": f"register_{index}", "password": "a-long-password-123",
+                "invite_code": "wrong-invite-code",
+            })
+            assert response.status_code == 401
+        limited_register = client.post("/v1/auth/register", json={
+            "username": "register_final", "password": "a-long-password-123",
+            "invite_code": "wrong-invite-code",
+        })
+        assert limited_register.status_code == 429
