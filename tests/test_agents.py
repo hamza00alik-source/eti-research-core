@@ -86,3 +86,40 @@ def test_worker_retries_transient_errors_without_leaking_exception_text(tmp_path
     assert second["status"] == "completed"
     assert second["attempt_count"] == 2
     assert second["result"] == {"ok": True, "attempt": 2}
+
+
+def test_market_snapshot_defaults_to_mexc_public_feed(monkeypatch):
+    import pandas as pd
+    import eti.agents as agents
+
+    captured = {}
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=50, freq="h"),
+        "open": [100.0] * 50, "high": [102.0] * 50,
+        "low": [99.0] * 50, "close": [101.0] * 50,
+        "volume": [10.0] * 50,
+    })
+    names = (
+        "ret_1", "ret_3", "ret_6", "volatility_20",
+        "sma_gap_10", "sma_gap_30", "rsi_14", "range_pct", "atr_pct",
+    )
+
+    class FakeProvider:
+        def __init__(self, venue):
+            captured["venue"] = venue
+
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            captured["request"] = (symbol, timeframe, limit)
+            return frame
+
+    monkeypatch.setattr(agents, "CcxtPublicProvider", FakeProvider)
+    monkeypatch.setattr(
+        agents, "build_features",
+        lambda _frame: pd.DataFrame([{name: 0.1 for name in names}]),
+    )
+    result = agents.market_snapshot({"symbol": "BTC/USDT"})
+
+    assert captured["venue"] == "mexc"
+    assert captured["request"] == ("BTC/USDT", "1h", 200)
+    assert result["venue"] == "mexc"
+    assert result["market_type"] == "spot"
