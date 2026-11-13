@@ -147,3 +147,19 @@ The PWA also displays the authenticated account's audit trail alongside its work
 - `POST /v1/inference/{model_id}/{version}` serves approved versions only. Requests must specify a supported asset class and exactly the feature names in the registered schema; values and returned probabilities are validated. Requests are authenticated and rate-limited.
 - Inference returns short/flat/long probabilities only. It does not size a position, approve a trade, bypass the risk engine or place an order.
 - No production model is trained or promoted by this change. The training-to-artifact-to-registry workflow and model drift monitoring remain to be completed before paper autonomy.
+
+
+## Explicit model artifact export from the training CLI
+
+The normal research command does not export a deployable model. A separate opt-in flag, `--save-model`, runs only after the requested evaluation completes, fits one final model on all completed labelled rows, and writes it to the private `ETI_ARTIFACT_DIR` content-addressed store. The metrics report includes the artifact URI, SHA-256, feature schema, supported class and dataset reference.
+
+Example command shape (do not run until the project is ready for the planned training phase):
+
+```bash
+ETI_ARTIFACT_DIR=/srv/eti-private-artifacts \
+python -m eti.pipeline --exchange mexc --symbol BTC/USDT \
+  --timeframe 1h --evaluation nested --save-model \
+  --model-id eti-crypto-core --model-version 0.1.0
+```
+
+This does not register or approve the model. A configured registry administrator must register the metadata, and a different administrator must approve it after the server verifies the artifact. The export flag is explicit; API startup, CI and worker startup never train or export models.
