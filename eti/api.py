@@ -75,6 +75,12 @@ class AutonomyConfigPayload(BaseModel):
     model_training_interval_seconds: int = Field(default=86400, ge=86400, le=604800)
 
 
+class ExchangeCredentialsPayload(BaseModel):
+    venue: str = Field(pattern="^(binance|mexc)$")
+    api_key: SecretStr = Field(min_length=8, max_length=256)
+    api_secret: SecretStr = Field(min_length=8, max_length=256)
+
+
 class MemoryPayload(BaseModel):
     value: Any
 
@@ -518,12 +524,6 @@ class ModelVersionPayload(BaseModel):
     training_data_ref: str = Field(min_length=1, max_length=300)
     evaluation_report: dict[str, Any]
     calibration_status: str = Field(min_length=1, max_length=20)
-
-class ExchangeCredentialsPayload(BaseModel):
-    venue: str = Field(pattern="^(binance|mexc)$")
-    api_key: SecretStr = Field(min_length=8, max_length=256)
-    api_secret: SecretStr = Field(min_length=8, max_length=256)
-
 
 class PaperSessionPayload(BaseModel):
     model_id: str = Field(min_length=1, max_length=120)
