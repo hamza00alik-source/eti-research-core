@@ -82,6 +82,21 @@ All routes in this section require `Authorization: Bearer <access_token>`. The a
 Every workspace route checks account ownership and returns not-found for another account's workspace. Task and message payloads are stored as typed JSON data, never executed as code or instructions. Task records can be processed by the separately started allowlisted worker described below.
 
 
+
+## Self-hosted container deployment (private beta foundation)
+
+The repository includes a Docker image and Compose stack for a single-host deployment. It runs the FastAPI/PWA service and the durable worker as separate containers sharing one persistent SQLite volume.
+
+1. Install Docker Engine and the Docker Compose plugin on a Linux host.
+2. Copy `.env.example` to `.env` on the host and replace both placeholder secrets with independently generated random values. Keep `.env` private and out of Git.
+3. Keep `ETI_BIND_ADDRESS=127.0.0.1` when using a TLS reverse proxy on the same host. Do not expose the raw API port directly to the public internet.
+4. Run `docker compose up --build -d` from the repository directory.
+5. Check `docker compose ps` and `docker compose logs -f api worker`. The API health check is `/health`; the worker should appear in the signed-in PWA after its first heartbeat.
+
+The default binding is localhost intentionally. Configure a domain and HTTPS reverse proxy (for example, Caddy or Nginx) before remote access. Use a firewall, secure host updates, encrypted backups, and a recovery test. Invite-only registration requires sharing the registration key only with intended testers.
+
+**Deployment limits:** this is a single-host private-beta deployment template, not a managed public service. The API and worker share SQLite on one host; do not scale them across machines or replicas. There is no managed PostgreSQL, email verification, automated backup service, monitoring/alerting, or public Android app yet. Do not add exchange credentials or enable live trading. Before a public launch, complete a security review, TLS/domain setup, backup/restore test, email verification and edge rate limiting.
+
 ## PWA account workspace
 
 The PWA now includes sign-in, invite-only account creation, workspace selection, JSON memory editing and task queue visibility. The bearer token is held in browser `sessionStorage` for the current tab session and is not written into the service-worker cache. Sign out clears the token from the current session.
