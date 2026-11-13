@@ -19,7 +19,16 @@ class BaselineModel:
         self.calibration_report: dict | None = None
 
     def fit(self, x, y):
-        y = np.asarray(y, dtype=int)
+        labels = np.asarray(y)
+        if labels.ndim != 1 or len(labels) != len(x):
+            raise ValueError("Training features and labels must have matching row counts")
+        if not np.issubdtype(labels.dtype, np.number) or not np.isfinite(labels).all():
+            raise ValueError("Training labels must be finite numeric class IDs")
+        if not np.equal(labels, np.floor(labels)).all():
+            raise ValueError("Training labels must be integer class IDs")
+        y = labels.astype(int)
+        if not np.isin(y, CLASSES).all():
+            raise ValueError("Training labels must be in the short/flat/long class set")
         if len(np.unique(y)) < 2:
             raise ValueError("Training data contains fewer than two label classes")
         self.estimator.fit(x, y)
