@@ -134,3 +134,12 @@ def test_audit_provider_failure_is_unknown_not_pass():
     # is intentionally not swallowed: programming errors must remain visible.
     with pytest.raises(RuntimeError):
         audit_mint("Mint111", rpc=BrokenRpc(), rugcheck=FakeRugCheck())
+
+
+def test_solana_research_capabilities_are_allowlisted():
+    from eti.agents import default_capabilities
+
+    capabilities = default_capabilities().capabilities()
+    assert "solana.market.scan" in capabilities
+    assert "solana.token.audit" in capabilities
+    assert "live.tick" not in capabilities
