@@ -2786,6 +2786,46 @@ class MemoryStore:
                         )
         return [latest[label_id] for label_id in normalized if label_id in latest]
 
+    def list_latest_solana_transaction_attestations(
+        self, owner_id: str, workspace_id: str, label_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Return the newest receipt attestation per requested label."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if not isinstance(label_ids, list):
+            raise ValueError("label_ids must be a list")
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for label_id in label_ids:
+            value = _required_text(label_id, "label_id", 128)
+            if value not in seen:
+                normalized.append(value)
+                seen.add(value)
+        if not normalized:
+            with self._connection() as conn:
+                if not self._owns_workspace(conn, owner_id, workspace_id):
+                    raise LookupError("workspace not found")
+            return []
+        latest: dict[str, dict[str, Any]] = {}
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            for offset in range(0, len(normalized), 500):
+                batch = normalized[offset:offset + 500]
+                placeholders = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    "SELECT * FROM solana_transaction_attestations "
+                    f"WHERE owner_id=? AND workspace_id=? AND label_id IN ({placeholders}) "
+                    "ORDER BY label_id ASC,created_at DESC,id DESC",
+                    [owner_id, workspace_id, *batch],
+                ).fetchall()
+                for row in rows:
+                    if row["label_id"] not in latest:
+                        latest[row["label_id"]] = self._solana_transaction_attestation_dict(
+                            row, duplicate=False
+                        )
+        return [latest[label_id] for label_id in normalized if label_id in latest]
+
     def record_solana_transaction_attestation(
         self, owner_id: str, workspace_id: str, label_id: str,
         mint: str, pool_address: str, wallet_address: str,
