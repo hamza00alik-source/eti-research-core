@@ -646,6 +646,8 @@ def test_solana_transaction_verification_api_is_authenticated_and_workspace_scop
 
     signature = b58(bytes(range(1, 65)))
     mint = b58(bytes(range(65, 97)))
+    pool = b58(bytes(range(129, 161)))
+    wallet = b58(bytes(range(161, 193)))
 
     class FakeRpc:
         def call(self, method, params):
@@ -659,11 +661,20 @@ def test_solana_transaction_verification_api_is_authenticated_and_workspace_scop
                 return {
                     "slot": 123,
                     "blockTime": 1794672000,
-                    "transaction": {"signatures": [signature]},
+                    "transaction": {
+                        "signatures": [signature],
+                        "message": {"accountKeys": [{"pubkey": pool}, {"pubkey": wallet}]},
+                    },
                     "meta": {
                         "err": None,
-                        "preTokenBalances": [],
-                        "postTokenBalances": [{"mint": mint}],
+                        "preTokenBalances": [{
+                            "mint": mint, "owner": wallet,
+                            "uiTokenAmount": {"amount": "100", "decimals": 6},
+                        }],
+                        "postTokenBalances": [{
+                            "mint": mint, "owner": wallet,
+                            "uiTokenAmount": {"amount": "50", "decimals": 6},
+                        }],
                     },
                 }
             raise AssertionError(method)
@@ -678,7 +689,10 @@ def test_solana_transaction_verification_api_is_authenticated_and_workspace_scop
             "/v1/workspaces", headers=owner_headers, json={"name": "tx verification"}
         ).json()
         url = f"/v1/workspaces/{workspace['id']}/solana/transaction-verification"
-        payload = {"signature": signature, "mint": mint}
+        payload = {
+            "signature": signature, "mint": mint,
+            "expected_pool_address": pool, "wallet_address": wallet,
+        }
 
         assert client.post(url, json=payload).status_code == 401
         assert client.post(url, headers=other_headers, json=payload).status_code == 404
