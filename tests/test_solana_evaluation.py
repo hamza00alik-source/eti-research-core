@@ -537,6 +537,7 @@ def test_time_series_regimes_use_only_prior_same_mint_pool_prices():
         "volatility_low_pct": 0.1,
         "max_gap_seconds": 7200,
         "minimum_history_span_seconds": 3600,
+        "minimum_rows_per_regime_horizon": 5,
     }
     report = evaluate_solana_time_series_regimes(history, validation, config)
     assert report["status"] == "TIME_SERIES_PROXY_REGIME_DIAGNOSTICS_ONLY"
@@ -580,6 +581,7 @@ def test_time_series_regimes_withhold_sparse_and_conflicting_history():
         "volatility_low_pct": 0.2,
         "max_gap_seconds": 7200,
         "minimum_history_span_seconds": 3600,
+        "minimum_rows_per_regime_horizon": 5,
     }
     report = evaluate_solana_time_series_regimes(sparse, validation, config)
     assert report["classified_row_count"] == 0
@@ -636,6 +638,7 @@ def test_time_series_regimes_normalize_volatility_and_separate_horizons():
         "trend_abs_return_pct": 1.0, "volatility_high_pct": 1.0,
         "volatility_low_pct": 0.001, "max_gap_seconds": 7200,
         "minimum_history_span_seconds": 3600,
+        "minimum_rows_per_regime_horizon": 5,
     }
     report = evaluate_solana_time_series_regimes(history, validation, config)
     assert report["classified_row_count"] == 2
@@ -664,6 +667,7 @@ def test_time_series_regimes_reject_excessive_sampling_gaps():
         "trend_abs_return_pct": 1.0, "volatility_high_pct": 2.0,
         "volatility_low_pct": 0.2, "max_gap_seconds": 3600,
         "minimum_history_span_seconds": 3600,
+        "minimum_rows_per_regime_horizon": 5,
     }
     report = evaluate_solana_time_series_regimes(history, validation, config)
     assert report["classified_row_count"] == 0
