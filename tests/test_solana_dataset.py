@@ -165,3 +165,39 @@ def test_dataset_validator_flags_unknown_and_malformed_schema_versions():
     assert report["issue_counts"]["unsupported_schema_version"] == 2
     assert report["rows_with_issues"] == 2
     assert all("unsupported_schema_version" in row["issues"] for row in report["row_issues"])
+
+
+def test_dataset_export_flags_label_reference_identity_and_time_corruption(tmp_path):
+    import hashlib
+
+    store = MemoryStore(tmp_path / "label-reference-integrity.sqlite3")
+    workspace = store.create_workspace("owner-1", "integrity")
+    payload = '{"evidence":{"price_usd":1,"liquidity_usd":2,"volume_h24_usd":3,"txns_h1_buys":4,"txns_h1_sells":5}}'
+    digest = hashlib.sha256(payload.encode()).hexdigest()
+    with store._connection() as conn:
+        snapshots = [
+            ("base", "2026-01-01T00:00:00Z", "A" * 40, "PoolA"),
+            ("target", "2026-01-01T00:04:00Z", "B" * 40, "PoolB"),
+        ]
+        for snapshot_id, stamp, mint, pool in snapshots:
+            conn.execute(
+                "INSERT INTO solana_research_snapshots "
+                "(id,owner_id,workspace_id,task_id,capability,mint,pool_address,schema_version,"
+                "payload_json,payload_sha256,fetched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (snapshot_id, "owner-1", workspace["id"], "task-" + snapshot_id,
+                 "solana.market.scan", mint, pool, 1, payload, digest, stamp),
+            )
+        conn.execute(
+            "INSERT INTO solana_research_labels "
+            "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
+            "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("label-corrupt", "owner-1", workspace["id"], "A" * 40, "PoolA",
+             "base", "target", 300, '{"sampled_price_return_pct":10}',
+             "2026-01-01T00:04:00Z"),
+        )
+
+    exported = store.export_solana_research_dataset("owner-1", workspace["id"])
+    label = exported["labels"][0]
+    assert "target_identity_mismatch" in label["reference_issues"]
+    assert "target_before_label_horizon" in label["reference_issues"]
+    assert exported["validation"]["label_reference_issue_count"] == 1
