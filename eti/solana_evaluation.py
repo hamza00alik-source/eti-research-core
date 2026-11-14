@@ -326,7 +326,7 @@ def evaluate_solana_time_series_regimes(
         "lookback_observations", "minimum_observations",
         "trend_abs_return_pct", "volatility_high_pct", "volatility_low_pct",
         "max_gap_seconds", "minimum_history_span_seconds",
-        "minimum_rows_per_regime_horizon",
+        "minimum_rows_per_regime_horizon", "buy_pressure_threshold",
     }
     if not isinstance(config, dict) or set(config) != required:
         raise ValueError("time-series regime config must contain exactly: " + ", ".join(sorted(required)))
@@ -344,6 +344,9 @@ def evaluate_solana_time_series_regimes(
             raise ValueError(key + " must be a finite non-negative number")
     if config["volatility_low_pct"] >= config["volatility_high_pct"]:
         raise ValueError("volatility thresholds must satisfy low < high")
+    threshold = config["buy_pressure_threshold"]
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0.5 < threshold <= 1:
+        raise ValueError("buy_pressure_threshold must be greater than 0.5 and at most 1")
 
     def parse_stamp(row: dict[str, Any]) -> datetime | None:
         raw = row.get("baseline_at")
@@ -372,6 +375,7 @@ def evaluate_solana_time_series_regimes(
     groups: dict[str, list[float]] = {}
     horizon_groups: dict[str, dict[str, list[float]]] = {}
     horizon_cluster_groups: dict[str, dict[str, dict[str, list[float]]]] = {}
+    horizon_regime_rows: dict[str, dict[str, list[dict[str, Any]]]] = {}
     classified = 0
     unclassified = 0
     reason_counts: dict[str, int] = {}
@@ -461,6 +465,7 @@ def evaluate_solana_time_series_regimes(
         horizon_key = str(horizon) if isinstance(horizon, int) and not isinstance(horizon, bool) and horizon > 0 else "UNKNOWN"
         horizon_groups.setdefault(horizon_key, {}).setdefault(regime, []).append(value)
         horizon_cluster_groups.setdefault(horizon_key, {}).setdefault(regime, {}).setdefault(mint, []).append(value)
+        horizon_regime_rows.setdefault(horizon_key, {}).setdefault(regime, []).append(row)
         sampling["classified_history_span_seconds"].append(span)
         sampling["classified_median_gap_seconds"].append(sorted(gaps)[len(gaps) // 2] if len(gaps) % 2 else (sorted(gaps)[len(gaps)//2-1] + sorted(gaps)[len(gaps)//2]) / 2)
         sampling["classified_max_gap_seconds"].append(max(gaps))
@@ -495,6 +500,10 @@ def evaluate_solana_time_series_regimes(
                     "mint_cluster_bootstrap": _cluster_bootstrap_mean_interval(
                         horizon_cluster_groups[horizon][regime]
                     ),
+                    "fixed_benchmark_comparison": evaluate_solana_research_folds(
+                        [{"fold": 1, "validation": horizon_regime_rows[horizon][regime]}],
+                        buy_pressure_threshold=float(config["buy_pressure_threshold"]),
+                    ),
                 }
                 for regime, values in sorted(regimes.items())
             }
@@ -520,6 +529,9 @@ def evaluate_solana_time_series_regimes(
             "minimum_history_span_enforced": True,
             "ohlcv_candles_required": False,
             "minimum_rows_per_regime_horizon_enforced": True,
+            "fixed_benchmarks": ["no_trade", "always_long", "fixed_buy_pressure"],
+            "buy_pressure_threshold": float(config["buy_pressure_threshold"]),
+            "benchmark_threshold_fit_on_validation_data": False,
             "uncertainty_method": "mint_cluster_bootstrap_percentile_when_at_least_20_distinct_mints",
         },
         "limitations": [
