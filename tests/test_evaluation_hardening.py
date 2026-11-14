@@ -45,7 +45,19 @@ def test_nested_walk_forward_selects_on_validation_and_reports_outer_test():
     assert set(result["folds"][0]["test_candidate_metrics"]) == {"majority", "zero"}
     assert all(
         "balanced_accuracy" in metrics and "accuracy" in metrics
+        and "per_class" in metrics and "confusion_matrix" in metrics
         for metrics in result["folds"][0]["test_candidate_metrics"].values()
+    )
+    assert set(result["folds"][0]["test_candidate_metrics"]["majority"]["per_class"]) == {"0", "1"}
+    assert len(result["folds"][0]["test_candidate_metrics"]["majority"]["confusion_matrix"]) == 2
+    assert set(result["candidate_summary"]) == {"majority", "zero"}
+    assert sum(
+        item["selected_on_validation_count"] for item in result["candidate_summary"].values()
+    ) == result["fold_count"]
+    assert all(
+        "worst_outer_test_balanced_accuracy" in item
+        and "std_outer_test_balanced_accuracy" in item
+        for item in result["candidate_summary"].values()
     )
     assert result["folds"][0]["test_balanced_accuracy"] == result["folds"][0]["test_candidate_metrics"][
         result["folds"][0]["selected_candidate"]
