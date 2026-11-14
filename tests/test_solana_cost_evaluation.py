@@ -65,8 +65,9 @@ def _evidence(label):
 
 
 class FakeLedger:
-    def __init__(self, rows_by_label):
+    def __init__(self, rows_by_label, attestations_by_label=None):
         self.rows_by_label = rows_by_label
+        self.attestations_by_label = attestations_by_label or {}
         self.calls = []
 
     def list_latest_solana_execution_cost_evidence(self, owner, workspace, label_ids):
@@ -81,6 +82,14 @@ class FakeLedger:
             if records:
                 selected.append({**records[0], "label_id": label_id})
         return selected
+
+    def list_latest_solana_transaction_attestations(self, owner, workspace, label_ids):
+        self.calls.append((owner, workspace, tuple(label_ids), "attestations"))
+        return [
+            {**record, "label_id": label_id}
+            for label_id in label_ids
+            for record in self.attestations_by_label.get(label_id, [])
+        ]
 
 
 def test_stored_evaluation_uses_newest_intact_scoped_record():
@@ -153,3 +162,39 @@ def test_stored_evaluation_requires_string_label_ids():
             FakeLedger({}), "owner-1", "workspace-1",
             [{"id": 123}], {"status": "PREPARATION_ONLY", "training_authorized": False, "rows": []},
         )
+
+
+def test_receipt_attestations_are_reported_separately_from_cost_and_exit_evidence():
+    exported, prepared = _fixture()
+    attestations = {}
+    for label in exported:
+        attestations[label["id"]] = [{
+            "id": f"receipt-{label['id']}",
+            "created_at": "2026-11-14T12:00:00Z",
+            "integrity_valid": True,
+            "signature": f"signature-{label['id']}",
+            "mint": label["mint"],
+            "pool_address": label["pool_address"],
+            "wallet_address": "wallet",
+            "attestation": {
+                "status": "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED",
+                "transaction_receipt_verified": True,
+                "verified": False,
+                "signature": f"signature-{label['id']}",
+                "mint": label["mint"],
+                "expected_pool_address": label["pool_address"],
+                "wallet_address": "wallet",
+                "slot": 42,
+            },
+        }]
+    report = evaluate_stored_solana_walk_forward(
+        FakeLedger({}, attestations), "owner-1", "workspace-1", exported, prepared,
+        n_splits=2, min_train_groups=3, embargo_seconds=3600,
+    )
+    receipt = report["transaction_receipt_attestations"]
+    assert receipt["status"] == "RECEIPT_DIAGNOSTICS_ONLY"
+    assert receipt["positive_receipt_observation_count"] == receipt["validation_rows_checked"]
+    assert all(row["verified_swap"] is False for row in receipt["rows"])
+    assert all(row["realized_pnl_available"] is False for row in receipt["rows"])
+    assert report["execution_cost_evidence"]["complete_evidence_count"] == 0
+    assert report["execution_cost_evidence"]["realized_pnl_available"] is False
