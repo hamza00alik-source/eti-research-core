@@ -131,7 +131,7 @@ class SolanaWalkForwardEvaluationPayload(BaseModel):
 
 
 class SolanaTransactionVerificationPayload(BaseModel):
-    signature: str = Field(min_length=80, max_length=100)
+    signature: str = Field(min_length=64, max_length=88)
     mint: str = Field(min_length=32, max_length=44)
 
 
