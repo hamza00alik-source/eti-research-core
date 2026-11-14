@@ -172,4 +172,3 @@ def test_wallet_must_be_referenced_by_transaction():
     result = _verify(FakeRpc(_status(), tx))
     assert result["status"] == "WALLET_NOT_REFERENCED"
     assert result["verified"] is False
-\n
