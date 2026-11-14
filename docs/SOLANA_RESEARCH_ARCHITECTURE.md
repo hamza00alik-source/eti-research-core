@@ -130,7 +130,6 @@ The worker executes the allowlisted DexScreener market scan. An explicit
 a read-only `solana.token.audit` follow-up, carrying the source scan and event
 IDs. The audit remains conservative: missing critical evidence blocks a pass.
 No wallet, signing, swap, copy-trading, or live Solana execution capability is
-registered. Follow-up enqueueing checks for an existing task tied to the source
-scan to reduce replay duplicates; task completion and follow-up creation are
-not yet one atomic transaction, so a process crash in that narrow interval
-requires operational reconciliation.
+registered. The scan completion and audit-task insertion commit in one SQLite transaction,
+so a completed scan cannot be left without its eligible audit task due to a
+worker process crash between those operations.
