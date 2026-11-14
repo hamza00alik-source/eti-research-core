@@ -459,7 +459,13 @@ def test_solana_event_ledger_is_durable_idempotent_and_owner_scoped(tmp_path):
         "pumpportal", "new_token", "A" * 40, payload, "2026-11-14T12:00:00Z",
     )
     assert first["id"] == duplicate["id"]
+    assert first["scan_task_id"]
     assert duplicate["duplicate"] is True
+    assert "scan_task_id" not in duplicate
+    scan_tasks = store.list_agent_tasks("owner-a", workspace["id"])
+    assert len(scan_tasks) == 1
+    assert scan_tasks[0]["target_capability"] == "solana.market.scan"
+    assert scan_tasks[0]["input"]["mint"] == "A" * 40
     conflict = store.record_solana_research_event(
         "owner-a", workspace["id"], "pumpportal:sig-001",
         "pumpportal", "new_token", "A" * 40, {"signature": "sig-001", "slot": 99999},
