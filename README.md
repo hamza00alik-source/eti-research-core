@@ -216,3 +216,8 @@ If the calibration window has fewer than 30 rows, fewer than five examples of an
 - When historical funding and open-interest data are available, ETI aligns them to completed OHLCV candles with backward-only as-of joins and trains dedicated funding-rate and open-interest-change features. No future observation is joined to an earlier candle.
 - Nested derivative evaluation applies a conservative absolute funding drag estimated from observed funding intervals, plus explicit fee and slippage assumptions. This approximation is not side-aware exchange settlement.
 - Derivative candidates remain blocked from approval because liquidation, contract-specific fee schedules, funding-side settlement, margin tiers, mark/index-price risk and venue execution controls are not yet independently validated. Live execution remains spot-only.
+
+
+## OHLCV data-quality diagnostics
+
+Market snapshots now include a `data_quality` report with observed candle count, first/latest candle timestamps, elapsed-calendar coverage ratio, gap count, largest gap in candle intervals, latest-candle age and a freshness label. The diagnostic never fills missing candles or fabricates prices. It explicitly notes that elapsed-calendar gaps can reflect exchange sessions, weekends, holidays or maintenance; those calendars are not yet modeled, so the report is evidence for review rather than an automatic market rejection rule.
