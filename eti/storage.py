@@ -193,6 +193,22 @@ class MemoryStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_solana_cost_evidence_label
                     ON solana_execution_cost_evidence(owner_id, workspace_id, label_id, created_at);
+                CREATE TABLE IF NOT EXISTS solana_transaction_attestations (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    label_id TEXT NOT NULL,
+                    signature TEXT NOT NULL,
+                    mint TEXT NOT NULL,
+                    pool_address TEXT NOT NULL,
+                    wallet_address TEXT NOT NULL,
+                    attestation_json TEXT NOT NULL,
+                    attestation_sha256 TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(owner_id, workspace_id, label_id, signature, attestation_sha256)
+                );
+                CREATE INDEX IF NOT EXISTS idx_solana_tx_attestations_label
+                    ON solana_transaction_attestations(owner_id, workspace_id, label_id, created_at);
                 CREATE TABLE IF NOT EXISTS agent_tasks (
                     id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
@@ -2769,6 +2785,110 @@ class MemoryStore:
                             row, duplicate=False
                         )
         return [latest[label_id] for label_id in normalized if label_id in latest]
+
+    def record_solana_transaction_attestation(
+        self, owner_id: str, workspace_id: str, label_id: str,
+        mint: str, pool_address: str, wallet_address: str,
+        attestation: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Append an RPC-generated finalized receipt observation; never assert a verified swap."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        label_id = _required_text(label_id, "label_id", 128)
+        mint = _required_text(mint, "mint", 64)
+        pool_address = _required_text(pool_address, "pool_address", 128)
+        wallet_address = _required_text(wallet_address, "wallet_address", 64)
+        if not isinstance(attestation, dict):
+            raise ValueError("attestation must be an object")
+        if (attestation.get("transaction_receipt_verified") is not True
+                or attestation.get("verified") is not False
+                or attestation.get("status") != "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED"):
+            raise ValueError("only finalized receipt observations may be attested")
+        signature = _required_text(attestation.get("signature"), "signature", 88)
+        for key, expected in (
+            ("mint", mint), ("expected_pool_address", pool_address),
+            ("wallet_address", wallet_address),
+        ):
+            if attestation.get(key) != expected:
+                raise ValueError(f"attestation {key} does not match requested identity")
+        encoded = _encode_json(attestation)
+        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        now = _utc_now()
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            label = conn.execute(
+                "SELECT mint,pool_address FROM solana_research_labels "
+                "WHERE owner_id=? AND workspace_id=? AND id=?",
+                (owner_id, workspace_id, label_id),
+            ).fetchone()
+            if label is None or label["mint"] != mint or label["pool_address"] != pool_address:
+                raise LookupError("label not found")
+            existing = conn.execute(
+                "SELECT * FROM solana_transaction_attestations WHERE owner_id=? AND workspace_id=? "
+                "AND label_id=? AND signature=? AND attestation_sha256=?",
+                (owner_id, workspace_id, label_id, signature, digest),
+            ).fetchone()
+            if existing is not None:
+                return self._solana_transaction_attestation_dict(existing, duplicate=True)
+            record_id = str(uuid4())
+            conn.execute(
+                "INSERT INTO solana_transaction_attestations "
+                "(id,owner_id,workspace_id,label_id,signature,mint,pool_address,wallet_address,"
+                "attestation_json,attestation_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (record_id, owner_id, workspace_id, label_id, signature, mint, pool_address,
+                 wallet_address, encoded, digest, now),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (str(uuid4()), owner_id, workspace_id, "solana.transaction_receipt.attested",
+                 _encode_json({"attestation_id": record_id, "label_id": label_id,
+                               "signature": signature, "attestation_sha256": digest}), now),
+            )
+            row = conn.execute(
+                "SELECT * FROM solana_transaction_attestations WHERE id=?", (record_id,)
+            ).fetchone()
+        return self._solana_transaction_attestation_dict(row, duplicate=False)
+
+    @staticmethod
+    def _solana_transaction_attestation_dict(row: sqlite3.Row, *, duplicate: bool) -> dict[str, Any]:
+        raw = row["attestation_json"]
+        integrity_valid = hashlib.sha256(raw.encode("utf-8")).hexdigest() == row["attestation_sha256"]
+        try:
+            attestation = json.loads(raw)
+        except (TypeError, ValueError):
+            attestation = None
+            integrity_valid = False
+        return {
+            "id": row["id"], "label_id": row["label_id"], "signature": row["signature"],
+            "mint": row["mint"], "pool_address": row["pool_address"],
+            "wallet_address": row["wallet_address"], "attestation": attestation,
+            "attestation_sha256": row["attestation_sha256"], "integrity_valid": integrity_valid,
+            "created_at": row["created_at"], "duplicate": duplicate,
+        }
+
+    def list_solana_transaction_attestations(
+        self, owner_id: str, workspace_id: str, label_id: str | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("limit must be from 1 to 1000")
+        query = ("SELECT * FROM solana_transaction_attestations "
+                 "WHERE owner_id=? AND workspace_id=?")
+        params: list[Any] = [owner_id, workspace_id]
+        if label_id is not None:
+            query += " AND label_id=?"
+            params.append(_required_text(label_id, "label_id", 128))
+        query += " ORDER BY created_at DESC,id DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+        return [self._solana_transaction_attestation_dict(row, duplicate=False) for row in rows]
 
     def list_solana_research_labels(
         self, owner_id: str, workspace_id: str, mint: str | None = None, limit: int = 500,
