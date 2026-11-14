@@ -513,3 +513,12 @@ threshold nor the bootstrap interval is a significance test or evidence of
 predictive edge. Thresholds must be predeclared in the stated volatility unit
 before examining validation outcomes. This diagnostic does not fit thresholds,
 select strategies, authorize training, or enable live execution.
+
+
+## Chronological fold regime stability
+
+When caller-predeclared baseline flow/activity thresholds are supplied, the walk-forward report includes `fold_regime_stability`. Each chronological validation fold is classified independently into buy/sell/balanced-flow crossed with high/mid/low turnover-to-liquidity proxy strata. No threshold is fitted from validation outcomes.
+
+A fold/regime stratum is eligible for sign-stability aggregation only when it contains at least 5 valid rows, at least 3 distinct nonblank mint identities, and no missing mint identity. The report includes row count, distinct mint count, largest-mint row share, and fixed always-long/fixed-buy-pressure sampled-mark summaries. For each regime and comparator, it reports eligible-fold count, positive/negative fold-mean counts, and the fraction of eligible fold means sharing the majority sign. The thresholds are diagnostic defaults, not evidence that five rows or three mints are statistically sufficient.
+
+This is a descriptive stability screen, not a significance test, proof of predictive edge, independent holdout, or strategy-selection rule. Fold overlap, repeated mints across folds, common market shocks, and label dependence remain possible. Ineligible folds are excluded rather than pooled to conceal concentration. Training and execution remain unauthorized.
