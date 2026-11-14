@@ -51,7 +51,12 @@ def build_forward_labels(
     The baseline is a scan snapshot. A target must be timestamped at/after the
     horizon and no later than now. A label is omitted if that target is absent.
     """
-    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    if now is None:
+        current = datetime.now(timezone.utc)
+    elif now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    else:
+        current = now.astimezone(timezone.utc)
     if any(isinstance(h, bool) or not isinstance(h, int) or h <= 0 for h in horizons_seconds):
         raise ValueError("horizons_seconds must contain positive integers")
     grouped: dict[tuple[str, str], list[tuple[datetime, dict[str, Any]]]] = {}
