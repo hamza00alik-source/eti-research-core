@@ -522,3 +522,12 @@ When caller-predeclared baseline flow/activity thresholds are supplied, the walk
 A fold/regime stratum is eligible for sign-stability aggregation only when it contains at least 5 valid rows, at least 3 distinct nonblank mint identities, and no missing mint identity. The report includes row count, distinct mint count, largest-mint row share, and fixed always-long/fixed-buy-pressure sampled-mark summaries. For each regime and comparator, it reports eligible-fold count, positive/negative fold-mean counts, and the fraction of eligible fold means sharing the majority sign. The thresholds are diagnostic defaults, not evidence that five rows or three mints are statistically sufficient.
 
 This is a descriptive stability screen, not a significance test, proof of predictive edge, independent holdout, or strategy-selection rule. Fold overlap, repeated mints across folds, common market shocks, and label dependence remain possible. Ineligible folds are excluded rather than pooled to conceal concentration. Training and execution remain unauthorized.
+
+
+## Trend/volatility proxy stability across chronological folds
+
+When the explicit time-series regime configuration is supplied, the walk-forward report also includes `fold_time_series_regime_stability`. Each chronological validation fold is classified independently. For every validation row, trend and time-normalized volatility use only prior-or-same-time observations from that exact mint and pool; later history is excluded by the classifier's point-in-time cutoff. Regime results remain separated by forecast horizon.
+
+A fold/horizon/regime stratum is eligible for descriptive sign-stability aggregation only when it meets the configured minimum rows per regime/horizon and contains at least 3 distinct mints. Ineligible strata remain visible with counts but do not contribute to the fold sign-consistency calculation. The report includes per-fold fixed always-long and fixed-buy-pressure sampled-mark summaries and the positive/negative fold-mean counts.
+
+This is not a significance test, evidence of independent replication, proof of predictive edge, or a strategy-selection rule. Repeated mints, overlapping labels, common market shocks, and irregular snapshot sampling can still create dependence. No thresholds are fitted from validation outcomes. Training and execution remain unauthorized.
