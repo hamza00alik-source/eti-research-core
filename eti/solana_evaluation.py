@@ -224,6 +224,85 @@ def evaluate_solana_research_folds(
 
 
 
+def evaluate_solana_regime_diagnostics(
+    validation_rows: list[dict[str, Any]],
+    thresholds: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Stratify validation outcomes by predeclared baseline flow/activity proxies.
+
+    These are not trend or volatility regimes. Snapshot-only inputs cannot
+    establish realized volatility, candle structure, or a persistent trend.
+    Thresholds must be supplied before inspecting validation outcomes.
+    """
+    if thresholds is None:
+        return {
+            "status": "NOT_CONFIGURED",
+            "classified_row_count": 0,
+            "regimes": {},
+            "note": "No thresholds supplied; no regime labels were inferred.",
+        }
+    required = {
+        "buy_pressure_high", "buy_pressure_low",
+        "turnover_liquidity_ratio_high", "turnover_liquidity_ratio_low",
+    }
+    if not isinstance(thresholds, dict) or set(thresholds) != required:
+        raise ValueError("regime thresholds must contain exactly: " + ", ".join(sorted(required)))
+    values = {key: thresholds[key] for key in required}
+    if any(not _finite(value) for value in values.values()):
+        raise ValueError("regime thresholds must be finite numbers")
+    if not (0 <= values["buy_pressure_low"] < values["buy_pressure_high"] <= 1):
+        raise ValueError("buy-pressure thresholds must satisfy 0 <= low < high <= 1")
+    if not (0 <= values["turnover_liquidity_ratio_low"] < values["turnover_liquidity_ratio_high"]):
+        raise ValueError("turnover/liquidity thresholds must satisfy 0 <= low < high")
+    groups: dict[str, list[float]] = {}
+    excluded = 0
+    for row in validation_rows:
+        if not isinstance(row, dict) or not _finite(row.get("target_sampled_price_return_pct")):
+            excluded += 1
+            continue
+        features = row.get("features")
+        if not isinstance(features, dict):
+            excluded += 1
+            continue
+        buys, sells = features.get("txns_h1_buys"), features.get("txns_h1_sells")
+        volume, liquidity = features.get("volume_h24_usd"), features.get("liquidity_usd")
+        if (not all(_finite(x) for x in (buys, sells, volume, liquidity))
+                or buys < 0 or sells < 0 or volume < 0 or liquidity <= 0
+                or buys + sells <= 0):
+            excluded += 1
+            continue
+        pressure = buys / (buys + sells)
+        turnover = volume / liquidity
+        if pressure >= values["buy_pressure_high"]:
+            flow = "BUY_DOMINANT"
+        elif pressure <= values["buy_pressure_low"]:
+            flow = "SELL_DOMINANT"
+        else:
+            flow = "BALANCED_FLOW"
+        if turnover >= values["turnover_liquidity_ratio_high"]:
+            activity = "HIGH_TURNOVER_PROXY"
+        elif turnover <= values["turnover_liquidity_ratio_low"]:
+            activity = "LOW_TURNOVER_PROXY"
+        else:
+            activity = "MID_TURNOVER_PROXY"
+        groups.setdefault(flow + "__" + activity, []).append(
+            float(row["target_sampled_price_return_pct"])
+        )
+    return {
+        "status": "BASELINE_PROXY_REGIME_DIAGNOSTICS_ONLY",
+        "thresholds": values,
+        "classified_row_count": sum(len(items) for items in groups.values()),
+        "excluded_row_count": excluded,
+        "regimes": {name: _summarize(returns) for name, returns in sorted(groups.items())},
+        "interpretation": (
+            "Groups use only baseline 1h buy/sell flow and h24 volume-to-liquidity "
+            "snapshot proxies. They are not trend, realized-volatility, candle, "
+            "or market-wide regimes. Thresholds are caller-predeclared; results "
+            "are validation diagnostics, not strategy selection or approval."
+        ),
+    }
+
+
 def evaluate_prepared_solana_walk_forward(
     exported_labels: list[dict[str, Any]],
     prepared_dataset: dict[str, Any],
@@ -234,6 +313,7 @@ def evaluate_prepared_solana_walk_forward(
     buy_pressure_threshold: float = 0.55,
     execution_cost_evidence_by_label_id: dict[Any, dict[str, Any]] | None = None,
     transaction_attestations_by_label_id: dict[Any, list[dict[str, Any]]] | None = None,
+    regime_thresholds: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Join prepared rows to fixed chronological validation folds and benchmark.
 
@@ -430,6 +510,12 @@ def evaluate_prepared_solana_walk_forward(
     report = evaluate_solana_research_folds(
         benchmark_folds,
         buy_pressure_threshold=buy_pressure_threshold,
+    )
+    validation_rows_for_regimes = [
+        row for fold in benchmark_folds for row in fold["validation"]
+    ]
+    report["regime_diagnostics"] = evaluate_solana_regime_diagnostics(
+        validation_rows_for_regimes, regime_thresholds
     )
     by_horizon: dict[str, Any] = {}
     for horizon, entries in sorted(horizon_folds.items()):
