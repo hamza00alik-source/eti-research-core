@@ -89,3 +89,15 @@ def test_fetch_rejects_incompatible_timeframe_for_quality_calculation():
     hub = MarketDataHub([adapter])
     with pytest.raises(ValueError, match="fixed-duration"):
         hub.fetch(adapter.discover_instruments()[0], "1M", 5)
+
+
+def test_default_public_hub_registers_independent_crypto_and_reference_sources():
+    from eti.market_data_hub import build_public_market_hub
+
+    hub = build_public_market_hub()
+    sources = {row["venue"]: row for row in hub.available_sources()}
+    assert {"binance", "mexc", "coinbaseexchange", "kraken", "yahoo"} == set(sources)
+    assert sources["coinbaseexchange"]["market_types"] == ["spot"]
+    assert sources["kraken"]["market_types"] == ["spot"]
+    assert sources["yahoo"]["asset_classes"] == ["commodity", "equity", "forex", "index"]
+    assert all(row["order_execution"] is False for row in sources.values())
