@@ -137,3 +137,112 @@ def test_walk_forward_runner_rejects_duplicate_prepared_ids_and_non_preparation_
         evaluate_prepared_solana_walk_forward(
             [], {"status": "OTHER", "training_authorized": True, "rows": []}
         )
+
+
+def test_walk_forward_cost_evidence_is_applied_only_to_validation_rows():
+    from eti.solana_evaluation import evaluate_prepared_solana_walk_forward
+
+    exported, prepared, evidence_by_id = [], [], {}
+    for index in range(8):
+        day = 1 + index * 2
+        stamp = f"2026-01-{day:02d}T00:00:00Z"
+        label_id = f"cost-label-{index}"
+        exported.append({
+            "id": label_id,
+            "mint": f"cost-mint-{index}",
+            "pool_address": f"cost-pool-{index}",
+            "horizon_seconds": 3600,
+            "label": {
+                "baseline_at": stamp,
+                "target_at": f"2026-01-{day:02d}T01:00:00Z",
+            },
+        })
+        prepared.append({
+            "label_id": label_id,
+            "mint": f"cost-mint-{index}",
+            "pool_address": f"cost-pool-{index}",
+            "baseline_at": stamp,
+            "horizon_seconds": 3600,
+            "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
+            "target_sampled_price_return_pct": 5.0,
+        })
+        evidence_by_id[label_id] = {
+            "cost_components": {
+                name: {
+                    "cost_bps": 10,
+                    "unit": "bps_of_entry_notional",
+                    "measurement": "measured",
+                    "source_id": f"{label_id}-{name}",
+                    "observed_at": "2026-11-14T12:00:00Z",
+                }
+                for name in (
+                    "spread", "pool_price_impact", "protocol_fee",
+                    "priority_fee", "latency_slippage",
+                )
+            },
+            "exit_evidence": {
+                "status": "exit_observed",
+                "source_id": f"{label_id}-exit",
+                "transaction_id": f"{label_id}-tx",
+                "observed_at": "2026-11-14T12:01:00Z",
+            },
+        }
+
+    report = evaluate_prepared_solana_walk_forward(
+        exported,
+        {"status": "PREPARATION_ONLY", "training_authorized": False, "rows": prepared},
+        n_splits=2,
+        min_train_groups=3,
+        embargo_seconds=3600,
+        execution_cost_evidence_by_label_id=evidence_by_id,
+    )
+    costs = report["execution_cost_evidence"]
+    assert costs["status"] == "COST_EVIDENCE_DIAGNOSTICS_ONLY"
+    assert costs["validation_rows_checked"] > 0
+    assert costs["complete_evidence_count"] == costs["validation_rows_checked"]
+    assert costs["incomplete_evidence_count"] == 0
+    assert costs["cost_adjusted_sampled_mark_scenario_mean_pct"] == pytest.approx(4.5)
+    assert costs["net_return_pct"] is None
+    assert costs["realized_pnl_available"] is False
+    assert all(row["label_id"] in {item["id"] for item in exported} for row in costs["rows"])
+
+
+def test_walk_forward_reports_missing_cost_evidence_as_incomplete_not_zero():
+    from eti.solana_evaluation import evaluate_prepared_solana_walk_forward
+
+    exported, prepared = [], []
+    for index in range(8):
+        day = 1 + index * 2
+        stamp = f"2026-01-{day:02d}T00:00:00Z"
+        label_id = f"missing-cost-label-{index}"
+        exported.append({
+            "id": label_id,
+            "mint": f"missing-cost-mint-{index}",
+            "pool_address": f"missing-cost-pool-{index}",
+            "horizon_seconds": 3600,
+            "label": {"baseline_at": stamp, "target_at": f"2026-01-{day:02d}T01:00:00Z"},
+        })
+        prepared.append({
+            "label_id": label_id,
+            "mint": f"missing-cost-mint-{index}",
+            "pool_address": f"missing-cost-pool-{index}",
+            "baseline_at": stamp,
+            "horizon_seconds": 3600,
+            "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
+            "target_sampled_price_return_pct": 5.0,
+        })
+
+    report = evaluate_prepared_solana_walk_forward(
+        exported,
+        {"status": "PREPARATION_ONLY", "training_authorized": False, "rows": prepared},
+        n_splits=2,
+        min_train_groups=3,
+        embargo_seconds=3600,
+        execution_cost_evidence_by_label_id={},
+    )
+    costs = report["execution_cost_evidence"]
+    assert costs["validation_rows_checked"] > 0
+    assert costs["complete_evidence_count"] == 0
+    assert costs["incomplete_evidence_count"] == costs["validation_rows_checked"]
+    assert costs["cost_adjusted_sampled_mark_scenario_mean_pct"] is None
+    assert costs["net_return_pct"] is None
