@@ -150,6 +150,24 @@ def verify_finalized_transaction_for_mint(
             "reason": "Expected pool address is not present in transaction account keys",
         }
 
+    mint_balance_rows = []
+    for field in ("preTokenBalances", "postTokenBalances"):
+        entries = meta.get(field)
+        if isinstance(entries, list):
+            mint_balance_rows.extend(
+                item for item in entries
+                if isinstance(item, dict) and item.get("mint") == mint
+            )
+    if not mint_balance_rows:
+        return {
+            "status": "MINT_NOT_PRESENT",
+            "verified": False,
+            "signature": signature,
+            "mint": mint,
+            "slot": transaction.get("slot"),
+            "reason": "Transaction token balances do not reference the requested mint",
+        }
+
     def wallet_amount(field):
         entries = meta.get(field)
         if not isinstance(entries, list):
