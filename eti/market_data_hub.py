@@ -194,12 +194,13 @@ class MarketDataHub:
                 continue
             try:
                 discover_one = getattr(adapter, "discover_instruments_for", None)
-                discovered = (
-                    discover_one(market_type.lower())
-                    if market_type and callable(discover_one)
-                    else adapter.discover_instruments()
-                )
-                for item_error in getattr(adapter, "discovery_errors", []):
+                if market_type and callable(discover_one):
+                    discovered = discover_one(market_type.lower())
+                    item_errors = []
+                else:
+                    discovered = adapter.discover_instruments()
+                    item_errors = getattr(adapter, "discovery_errors", [])
+                for item_error in item_errors:
                     errors.append({
                         "venue": venue,
                         "error_type": item_error.get("error_type", "DiscoveryError"),
