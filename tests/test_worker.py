@@ -1,4 +1,6 @@
+import sqlite3
 import time
+from datetime import datetime, timezone
 
 import pytest
 
@@ -319,3 +321,68 @@ def test_solana_rejected_scan_does_not_queue_audit(tmp_path):
     result = worker.run_once()
     assert result["status"] == "completed"
     assert store.list_agent_tasks("owner-1", workspace["id"], status="queued") == []
+
+
+def test_solana_refresh_scheduler_is_idempotent_and_owner_scoped(tmp_path):
+    store = MemoryStore(tmp_path / "solana-refresh.sqlite3")
+    workspace = _workspace(store)
+    job = store.schedule_solana_research_refresh(
+        "owner-1", workspace["id"], "A" * 40, "Pool111", interval_seconds=300
+    )
+    with sqlite3.connect(store.database_path) as conn:
+        conn.execute(
+            "UPDATE solana_research_refresh_jobs SET next_due_at=? WHERE id=?",
+            ("2000-01-01T00:00:00Z", job["id"]),
+        )
+    assert store.enqueue_due_solana_research_refreshes() == 1
+    assert store.enqueue_due_solana_research_refreshes() == 0
+    queued = store.list_agent_tasks("owner-1", workspace["id"], status="queued")
+    assert len(queued) == 1
+    assert queued[0]["target_capability"] == "solana.market.scan"
+    assert queued[0]["requester"] == "eti.solana.refresh"
+    assert queued[0]["input"]["scheduled_by"] == "eti.solana.refresh"
+
+
+def test_solana_delayed_labels_are_persisted_once_and_only_after_future_sample(tmp_path):
+    store = MemoryStore(tmp_path / "solana-labels.sqlite3")
+    workspace = _workspace(store)
+    base_ms = 1760000000000
+    for index, observed_ms in enumerate((base_ms, base_ms + 301000)):
+        task = store.create_agent_task(
+            "owner-1", workspace["id"], "test.solver", "solana.market.scan",
+            {"mint": "B" * 40}, max_attempts=1,
+        )
+        claimed = store.claim_next_agent_task(lease_seconds=120, now=1760000001 + index * 301)
+        result = {
+            "mint": "B" * 40, "verdict": "PASS", "observed_at_ms": observed_ms,
+            "evidence": {
+                "pair_address": "Pool222", "price_usd": 1.0 + index * 0.2,
+                "liquidity_usd": 100000 - index * 10000, "volume_h24_usd": 50000,
+            },
+        }
+        store.complete_claimed_agent_task(
+            claimed["id"], claimed["lease_token"], result,
+            now=1760000002 + index * 301,
+        )
+    before_horizon = store.generate_solana_research_labels(
+        "owner-1", workspace["id"],
+        now=datetime.fromtimestamp((base_ms + 299000) / 1000, timezone.utc),
+    )
+    assert before_horizon["generated"] == 0
+    after_horizon = store.generate_solana_research_labels(
+        "owner-1", workspace["id"],
+        now=datetime.fromtimestamp((base_ms + 400000) / 1000, timezone.utc),
+    )
+    assert after_horizon["generated"] == 1
+    repeated = store.generate_solana_research_labels(
+        "owner-1", workspace["id"],
+        now=datetime.fromtimestamp((base_ms + 400000) / 1000, timezone.utc),
+    )
+    assert repeated["generated"] == 0
+    labels = store.list_solana_research_labels("owner-1", workspace["id"])
+    assert len(labels) == 1
+    label = labels[0]["label"]
+    assert label["baseline_snapshot_id"] != label["target_snapshot_id"]
+    assert label["sampled_price_return_pct"] == 20.0
+    assert label["liquidity_change_pct"] == -10.0
+    assert label["exitability_status"] == "UNKNOWN"
