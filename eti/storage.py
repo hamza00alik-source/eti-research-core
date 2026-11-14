@@ -2456,6 +2456,145 @@ class MemoryStore:
                 inserted += cursor.rowcount
         return {"generated": inserted, "available": len(labels)}
 
+    def get_solana_research_dataset_report(
+        self, owner_id: str, workspace_id: str,
+    ) -> dict[str, Any]:
+        """Return owner-scoped coverage diagnostics; never declares a model train-ready."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            snapshot_rows = conn.execute(
+                "SELECT capability,mint,pool_address,fetched_at,payload_json "
+                "FROM solana_research_snapshots WHERE owner_id=? AND workspace_id=? "
+                "ORDER BY fetched_at,id", (owner_id, workspace_id)
+            )
+            snapshot_count = market_count = audit_count = 0
+            mints: set[str] = set()
+            pools: set[tuple[str, str]] = set()
+            groups: dict[tuple[str, str], list[datetime]] = {}
+            feature_counts = {
+                "price_usd": 0, "liquidity_usd": 0, "volume_h24_usd": 0,
+                "buys_h1": 0, "sells_h1": 0,
+            }
+            first_at: datetime | None = None
+            last_at: datetime | None = None
+            malformed_payloads = 0
+            for row in snapshot_rows:
+                snapshot_count += 1
+                if row["capability"] == "solana.token.audit":
+                    audit_count += 1
+                    continue
+                if row["capability"] != "solana.market.scan":
+                    continue
+                market_count += 1
+                mint, pool = row["mint"], row["pool_address"]
+                if isinstance(mint, str) and mint:
+                    mints.add(mint)
+                if isinstance(mint, str) and mint and isinstance(pool, str) and pool and pool != "__pending__":
+                    pools.add((mint, pool))
+                    try:
+                        stamp = datetime.fromisoformat(row["fetched_at"].replace("Z", "+00:00"))
+                        if stamp.tzinfo is not None:
+                            stamp = stamp.astimezone(timezone.utc)
+                            groups.setdefault((mint, pool), []).append(stamp)
+                            first_at = stamp if first_at is None or stamp < first_at else first_at
+                            last_at = stamp if last_at is None or stamp > last_at else last_at
+                    except (AttributeError, TypeError, ValueError):
+                        pass
+                try:
+                    payload = json.loads(row["payload_json"])
+                except (TypeError, ValueError):
+                    malformed_payloads += 1
+                    continue
+                evidence = payload.get("evidence") if isinstance(payload, dict) else None
+                if not isinstance(evidence, dict):
+                    continue
+                for key in feature_counts:
+                    value = evidence.get(key)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+                        feature_counts[key] += 1
+            label_rows = conn.execute(
+                "SELECT horizon_seconds,label_json FROM solana_research_labels "
+                "WHERE owner_id=? AND workspace_id=? ORDER BY horizon_seconds",
+                (owner_id, workspace_id),
+            )
+            label_counts: dict[str, dict[str, int]] = {}
+            for row in label_rows:
+                key = str(row["horizon_seconds"])
+                stats = label_counts.setdefault(key, {"labels": 0, "distinct_mints": 0, "price_returns_available": 0})
+                stats["labels"] += 1
+                try:
+                    label = json.loads(row["label_json"])
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(label, dict):
+                    mint = label.get("mint")
+                    if isinstance(mint, str) and mint:
+                        # Keep a per-horizon set outside the public report.
+                        pass
+                    if isinstance(label.get("sampled_price_return_pct"), (int, float)):
+                        stats["price_returns_available"] += 1
+            # Count distinct mints with SQL, avoiding a potentially large in-memory set.
+            distinct_by_horizon = conn.execute(
+                "SELECT horizon_seconds,COUNT(DISTINCT mint) AS n FROM solana_research_labels "
+                "WHERE owner_id=? AND workspace_id=? GROUP BY horizon_seconds",
+                (owner_id, workspace_id),
+            ).fetchall()
+            for row in distinct_by_horizon:
+                label_counts.setdefault(str(row["horizon_seconds"]), {
+                    "labels": 0, "distinct_mints": 0, "price_returns_available": 0,
+                })["distinct_mints"] = row["n"]
+        intervals: list[float] = []
+        gaps_over_10m = 0
+        for stamps in groups.values():
+            stamps.sort()
+            for previous, current in zip(stamps, stamps[1:]):
+                seconds = (current - previous).total_seconds()
+                if seconds > 0:
+                    intervals.append(seconds)
+                    if seconds > 600:
+                        gaps_over_10m += 1
+        intervals.sort()
+        median_interval = (
+            intervals[len(intervals) // 2] if intervals else None
+        )
+        coverage = {
+            key: round(count / market_count, 6) if market_count else 0.0
+            for key, count in feature_counts.items()
+        }
+        return {
+            "scope": {"owner_id": owner_id, "workspace_id": workspace_id},
+            "snapshots": {
+                "total": snapshot_count, "market_scans": market_count,
+                "token_audits": audit_count, "distinct_mints": len(mints),
+                "distinct_mint_pool_pairs": len(pools),
+                "first_observation_at": first_at.isoformat().replace("+00:00", "Z") if first_at else None,
+                "last_observation_at": last_at.isoformat().replace("+00:00", "Z") if last_at else None,
+                "observation_span_seconds": round((last_at - first_at).total_seconds(), 3) if first_at and last_at else 0,
+                "median_sample_interval_seconds": median_interval,
+                "sample_gaps_over_10_minutes": gaps_over_10m,
+                "malformed_payloads": malformed_payloads,
+            },
+            "feature_coverage": {
+                key: {"count": feature_counts[key], "fraction": coverage[key]}
+                for key in feature_counts
+            },
+            "labels_by_horizon_seconds": label_counts,
+            "training_gate": {
+                "ready": False,
+                "status": "RESEARCH_DATA_COLLECTION",
+                "reason": "No independently approved sample-size, coverage, regime-diversity, execution-cost, and out-of-sample acceptance thresholds have been configured.",
+            },
+            "limitations": [
+                "Provider samples are not OHLCV candles or executable quotes.",
+                "Reported rolling 24-hour volume is not interval volume.",
+                "Missing observations during outages are not backfilled.",
+                "A dataset report is descriptive and does not establish predictive performance.",
+            ],
+        }
+
     def list_solana_research_labels(
         self, owner_id: str, workspace_id: str, mint: str | None = None, limit: int = 500,
     ) -> list[dict[str, Any]]:
