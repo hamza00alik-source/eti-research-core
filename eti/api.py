@@ -112,6 +112,13 @@ class AgentTaskPayload(BaseModel):
     deadline_at: str | None = Field(default=None, max_length=40)
     max_attempts: int = Field(default=3, ge=1, le=10)
 
+class SolanaCostEvidencePayload(BaseModel):
+    label_id: str = Field(min_length=1, max_length=128)
+    mint: str = Field(min_length=32, max_length=64)
+    pool_address: str = Field(min_length=1, max_length=128)
+    evidence: dict[str, Any]
+
+
 class SolanaResearchEventPayload(BaseModel):
     event_key: str = Field(min_length=1, max_length=200)
     source: str = Field(default="pumpportal", min_length=1, max_length=40)
@@ -629,6 +636,41 @@ def export_solana_research_dataset(
         return _memory_store().export_solana_research_dataset(
             account["id"], workspace_id, limit=limit, mint=mint
         )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/cost-evidence", status_code=201)
+def record_solana_execution_cost_evidence(
+    workspace_id: str,
+    payload: SolanaCostEvidencePayload,
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return _memory_store().record_solana_execution_cost_evidence(
+            account["id"], workspace_id, payload.label_id, payload.mint,
+            payload.pool_address, payload.evidence,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace or label not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/cost-evidence")
+def list_solana_execution_cost_evidence(
+    workspace_id: str,
+    label_id: str | None = Query(default=None, min_length=1, max_length=128),
+    limit: int = Query(default=500, ge=1, le=1000),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        items = _memory_store().list_solana_execution_cost_evidence(
+            account["id"], workspace_id, label_id=label_id, limit=limit
+        )
+        return {"items": items}
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
     except ValueError as exc:
