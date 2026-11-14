@@ -47,12 +47,34 @@ def export_model_to_onnx(
             "Install the optional mobile exporter dependencies: pip install -r requirements-mobile.txt"
         ) from exc
 
-    converted = convert_sklearn(
-        estimator,
-        initial_types=[("features", FloatTensorType([None, len(feature_names)]))],
-        options={id(estimator): {"zipmap": False}},
-        target_opset=target_opset,
-    )
+    # skl2onnx's HistGradientBoosting converter can emit Python bool values
+    # inside ONNX INT attributes (e.g. missing-value routing flags). ONNX's
+    # protobuf correctly rejects bool for repeated int fields. Normalize only
+    # those boolean attribute values at the converter boundary.
+    import skl2onnx.common._container as converter_container
+
+    original_make_node = converter_container.make_node
+
+    def _make_node_with_integer_boolean_attrs(op_type, inputs, outputs, **attrs):
+        normalized = {}
+        for key, value in attrs.items():
+            if isinstance(value, (list, tuple)) and any(type(item) is bool for item in value):
+                value = [int(item) if type(item) is bool else item for item in value]
+            elif isinstance(value, np.ndarray) and value.dtype == np.bool_:
+                value = value.astype(np.int64)
+            normalized[key] = value
+        return original_make_node(op_type, inputs, outputs, **normalized)
+
+    converter_container.make_node = _make_node_with_integer_boolean_attrs
+    try:
+        converted = convert_sklearn(
+            estimator,
+            initial_types=[("features", FloatTensorType([None, len(feature_names)]))],
+            options={id(estimator): {"zipmap": False}},
+            target_opset=target_opset,
+        )
+    finally:
+        converter_container.make_node = original_make_node
     onnx.checker.check_model(converted)
     model_bytes = converted.SerializeToString()
 
