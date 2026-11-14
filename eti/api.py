@@ -617,6 +617,24 @@ def solana_research_dataset_report(
         raise HTTPException(status_code=404, detail="workspace not found") from exc
 
 
+
+@app.get("/v1/workspaces/{workspace_id}/solana/dataset-export")
+def export_solana_research_dataset(
+    workspace_id: str,
+    limit: int = Query(default=5000, ge=1, le=5000),
+    mint: str | None = Query(default=None, min_length=32, max_length=64),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return _memory_store().export_solana_research_dataset(
+            account["id"], workspace_id, limit=limit, mint=mint
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.get("/v1/workspaces/{workspace_id}/solana/labels")
 def list_solana_research_labels(
     workspace_id: str,
