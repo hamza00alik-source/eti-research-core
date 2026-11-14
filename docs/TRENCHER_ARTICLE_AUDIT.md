@@ -100,3 +100,47 @@ Do not reproduce this mechanism.
 - RugCheck insider graph reference: https://fluxrpc.com/docs/rugcheck/getTokenInsiderGraph
 - TypeSafe Jev System One endpoint reference: https://api.typesafe.ai/v1/systemone (official endpoint; current request contract described in TypeSafe developer docs)
 - FOMO app/private API distinction: the article itself labels `prod-api.fomo.family` unofficial. Third-party FOMO API aggregators are not FOMO Labs' trading API and must be evaluated as separate vendors.
+
+
+## ETI repository comparison (verified against main on 2026-11-14)
+
+The current ETI main branch is substantially more advanced than the earlier baseline-only description. It contains:
+
+- Shared, venue-independent intelligence architecture and market adapters.
+- Public Binance/MEXC crypto research for spot, swaps and dated futures where listed, plus Yahoo Finance public reference data for forex/equities/commodities/indices.
+- Causal feature generation, baseline model training, purged nested walk-forward evaluation, calibration, immutable model artifacts and independent approval.
+- Durable authenticated agent tasks/messages, account-scoped workspace memory, allowlisted worker capabilities, and a PWA plus an Android project.
+- Paper trading and a separate owner-authorized live Binance/MEXC **spot-only** execution path.
+
+### What ETI already has versus the article
+
+| Article function | ETI today | Gap / action |
+|---|---|---|
+| Scanner | Market discovery, market snapshots, opportunity ranking, scheduled research tasks | No Pump.fun/Solana event stream, token/pool waiting room or mint dedupe. Add as an optional chain-specific provider. |
+| Auditor | Data-quality gates, model/data quality review, portfolio/risk controls | No Solana mint authority, Token-2022, holder, LP, creator, insider graph or delegate audit. Add evidence-based checks with PASS/FAIL/UNKNOWN. |
+| Analyst | Trained baseline models, calibrated inference, nested walk-forward and strategy comparison | No Solana labels/features/specialist head yet. Train a Solana-specific head only after point-in-time datasets and costs are available. Jev is optional, not a replacement. |
+| Executor | ETI already has paper simulation and a distinct owner-authorized Binance/MEXC spot live execution worker | The article's Executor only sends a manual FOMO link; it does not trade. For Solana research, add a Paper Sizer only. Do not reuse ETI live execution for Solana. |
+| Risk | Deterministic trade and portfolio risk gates, position/exposure/drawdown limits; live worker reconciliation and kill switch | No Solana AMM impact, token-specific exit liquidity, MEV/priority-fee, failed transaction or liquidity-pull model. |
+| App / notifications | Authenticated PWA and Android project; worker/task and model governance foundations | No Solana-specific research screens or event notifications. Add after backend evidence pipeline is stable. |
+| Copy bot | No equivalent FOMO session-token scraper | Do not add. Use public chain data and verified provider APIs only. |
+
+### ETI safety/documentation discrepancy discovered
+
+The current main branch contains actual live spot execution code:
+- `eti/execution.py` defines `run_live_tick` and calls CCXT `exchange.create_order(..., "market", ...)`.
+- `eti/worker.py` registers `live.tick`, schedules due live tasks, and requires requester/scheduler identity `eti.live.supervisor`.
+- `eti/api.py` has authenticated `/v1/execution/profile`, `PUT /v1/execution/profile`, `POST /v1/execution/authorize`, `POST /v1/execution/kill-switch`, and `GET /v1/execution/orders`.
+- The README describes live spot execution as disabled by default and requiring owner authorization.
+
+But other current files contradict this:
+- `eti/api.py`'s `/execution/status` reports `live_orders_implemented: false` and says no order routes exist.
+- The API module docstring says no live order placement routes exist.
+- The README's architecture table and "Existing research workflow" say no order route / no live order endpoints.
+- `PLATFORM_ARCHITECTURE.md` says no credential vault and no live order execution, although those components now exist.
+- `ARCHITECTURE.md` also says no authenticated order execution is exposed.
+
+This is a documentation/status correctness defect, not proof that the order path is safe or unsafe. The Solana work must remain paper-only regardless. Before any use of ETI live spot execution, reconcile these descriptions against the code, run dedicated exchange sandbox/testnet and failure-mode tests, review the credential/authorization flow, and ensure the displayed status is authoritative. Do not infer safety from "disabled by default".
+
+### Current CI observation
+
+The latest visible main-branch GitHub Actions run checked on 2026-11-14 completed successfully. Its test job passed dependency installation, Python compileall, frontend syntax checks, pytest, Compose validation and production container image build. This is useful evidence of repository test/build health, not proof of live exchange execution safety, profitability, or provider uptime.
