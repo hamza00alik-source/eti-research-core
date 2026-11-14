@@ -126,16 +126,37 @@ class YahooFinanceMarketAdapter:
             asset: YahooFinanceProvider(asset) for asset in assets
         }
 
-    def discover_instruments(self) -> list[InstrumentSpec]:
+    def discover_instruments_for(self, market_type: str) -> list[InstrumentSpec]:
+        """Discover only asset classes that support the requested market type."""
         found: list[InstrumentSpec] = []
+        self.discovery_errors: list[dict[str, str]] = []
         for asset_class, market_types in self._MARKET_TYPES.items():
-            provider = self._providers[asset_class]
-            for market_type in market_types:
-                for row in provider.discover_markets(limit=500, market_type=market_type):
+            if market_type not in market_types:
+                continue
+            try:
+                provider = self._providers[asset_class]
+                rows = provider.discover_markets(limit=500, market_type=market_type)
+                for row in rows:
                     found.append(InstrumentSpec(
                         symbol=row["symbol"], venue="yahoo", asset_class=asset_class,
                         market_type=market_type, active=True,
                     ))
+            except Exception as exc:
+                self.discovery_errors.append({
+                    "asset_class": asset_class, "error_type": type(exc).__name__,
+                    "message": str(exc)[:500],
+                })
+        return found
+
+    def discover_instruments(self) -> list[InstrumentSpec]:
+        found: list[InstrumentSpec] = []
+        self.discovery_errors: list[dict[str, str]] = []
+        for market_type in sorted({m for values in self._MARKET_TYPES.values() for m in values}):
+            found.extend(self.discover_instruments_for(market_type))
+            self.discovery_errors.extend(
+                error for error in getattr(self, "discovery_errors", [])
+                if error not in self.discovery_errors
+            )
         return found
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
@@ -201,10 +222,11 @@ class MarketDataHub:
                     discovered = adapter.discover_instruments()
                     item_errors = getattr(adapter, "discovery_errors", [])
                 for item_error in item_errors:
+                    dimension = item_error.get("market_type", item_error.get("asset_class", "unknown"))
                     errors.append({
                         "venue": venue,
                         "error_type": item_error.get("error_type", "DiscoveryError"),
-                        "message": f"{item_error.get('market_type', 'unknown')}: {item_error.get('message', '')}"[:500],
+                        "message": f"{dimension}: {item_error.get('message', '')}"[:500],
                     })
                 for instrument in discovered:
                     if asset_class and instrument.asset_class != asset_class.lower():
