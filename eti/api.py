@@ -123,7 +123,7 @@ class SolanaResearchEventPayload(BaseModel):
 
 
 class SolanaRefreshPayload(BaseModel):
-    mint: str = Field(min_length=32, max_length=64)
+    mint: str = Field(min_length=32, max_length=48)
     pool_address: str = Field(min_length=1, max_length=128)
     interval_seconds: int = Field(default=900, ge=300, le=86400)
 
@@ -573,7 +573,7 @@ def list_solana_research_snapshots(
 @app.get("/v1/workspaces/{workspace_id}/solana/refresh")
 def list_solana_research_refresh_jobs(
     workspace_id: str,
-    mint: str | None = Query(default=None, min_length=32, max_length=64),
+    mint: str | None = Query(default=None, min_length=32, max_length=48),
     account: dict[str, str] = Depends(current_account),
 ):
     try:
