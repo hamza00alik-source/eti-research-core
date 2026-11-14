@@ -538,6 +538,7 @@ def test_time_series_regimes_use_only_prior_same_mint_pool_prices():
         "max_gap_seconds": 7200,
         "minimum_history_span_seconds": 3600,
         "minimum_rows_per_regime_horizon": 5,
+        "buy_pressure_threshold": 0.55,
     }
     report = evaluate_solana_time_series_regimes(history, validation, config)
     assert report["status"] == "TIME_SERIES_PROXY_REGIME_DIAGNOSTICS_ONLY"
@@ -582,6 +583,7 @@ def test_time_series_regimes_withhold_sparse_and_conflicting_history():
         "max_gap_seconds": 7200,
         "minimum_history_span_seconds": 3600,
         "minimum_rows_per_regime_horizon": 5,
+        "buy_pressure_threshold": 0.55,
     }
     report = evaluate_solana_time_series_regimes(sparse, validation, config)
     assert report["classified_row_count"] == 0
@@ -639,6 +641,7 @@ def test_time_series_regimes_normalize_volatility_and_separate_horizons():
         "volatility_low_pct": 0.001, "max_gap_seconds": 7200,
         "minimum_history_span_seconds": 3600,
         "minimum_rows_per_regime_horizon": 5,
+        "buy_pressure_threshold": 0.55,
     }
     report = evaluate_solana_time_series_regimes(history, validation, config)
     assert report["classified_row_count"] == 2
@@ -672,6 +675,7 @@ def test_time_series_regimes_reject_excessive_sampling_gaps():
         "volatility_low_pct": 0.2, "max_gap_seconds": 3600,
         "minimum_history_span_seconds": 3600,
         "minimum_rows_per_regime_horizon": 5,
+        "buy_pressure_threshold": 0.55,
     }
     report = evaluate_solana_time_series_regimes(history, validation, config)
     assert report["classified_row_count"] == 0
@@ -701,6 +705,7 @@ def test_time_series_regime_horizon_summary_requires_predeclared_row_count():
         "volatility_low_pct": 0.2, "max_gap_seconds": 3600,
         "minimum_history_span_seconds": 3600,
         "minimum_rows_per_regime_horizon": 5,
+        "buy_pressure_threshold": 0.55,
     }
     report = evaluate_solana_time_series_regimes(history, validation, config)
     stratum = report["regimes_by_horizon_seconds"]["60"]["UPWARD_TREND_PROXY__LOW_TIME_NORMALIZED_VOLATILITY_PROXY"]
