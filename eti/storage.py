@@ -399,7 +399,7 @@ class MemoryStore:
     def configure_autonomy(
         self, owner_id: str, workspace_id: str, enabled: bool,
         venues: list[str] | None = None, symbols: list[str] | None = None,
-        timeframes: list[str] | None = None, interval_seconds: int = 900,
+        timeframes: list[str] | None = None, interval_seconds: int = 300,
         model_training_enabled: bool = False,
         model_training_interval_seconds: int = 86400,
         market_types: list[str] | None = None
@@ -1126,13 +1126,13 @@ class MemoryStore:
                         pending_pool = "__pending__"
                         refresh_now_dt = datetime.now(timezone.utc)
                         refresh_now = refresh_now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
-                        refresh_due = (refresh_now_dt + timedelta(seconds=900)).isoformat(
+                        refresh_due = (refresh_now_dt + timedelta(seconds=300)).isoformat(
                             timespec="microseconds"
                         ).replace("+00:00", "Z")
                         conn.execute(
                             "INSERT INTO solana_research_refresh_jobs(id,owner_id,workspace_id,mint,"
                             "pool_address,interval_seconds,next_due_at,created_at,updated_at) "
-                            "VALUES(?,?,?,?,?,900,?,?,?) ON CONFLICT(owner_id,workspace_id,mint,pool_address) "
+                            "VALUES(?,?,?,?,?,300,?,?,?) ON CONFLICT(owner_id,workspace_id,mint,pool_address) "
                             "DO UPDATE SET enabled=1,updated_at=excluded.updated_at",
                             (str(uuid4()), row["owner_id"], row["workspace_id"], mint,
                              pending_pool, refresh_due, refresh_now, refresh_now),
