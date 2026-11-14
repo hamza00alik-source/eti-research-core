@@ -34,9 +34,13 @@ class CcxtMarketAdapter:
 
     def __init__(self, venue: str, market_types: tuple[str, ...] = ("spot", "swap", "future")):
         allowed = {"spot", "swap", "future"}
-        if not market_types or not set(market_types).issubset(allowed):
-            raise ValueError("CCXT market_types must be a non-empty subset of spot, swap and future")
         self.venue = venue.strip().lower()
+        if self.venue in {"coinbaseexchange", "kraken"}:
+            allowed = {"spot"}
+        if not market_types or not set(market_types).issubset(allowed):
+            raise ValueError(
+                f"{self.venue} market_types must be a non-empty subset of {sorted(allowed)}"
+            )
         self.market_types = tuple(market_types)
         self.capabilities = AdapterCapabilities(
             venue=self.venue, asset_classes=("crypto",), market_types=self.market_types,
@@ -127,8 +131,13 @@ class YahooFinanceMarketAdapter:
     ) -> pd.DataFrame:
         try:
             provider = self._providers[instrument.asset_class]
+            allowed_types = self._MARKET_TYPES[instrument.asset_class]
         except KeyError as exc:
             raise LookupError(f"Yahoo does not support {instrument.asset_class}") from exc
+        if instrument.market_type not in allowed_types:
+            raise LookupError(
+                f"Yahoo does not support {instrument.asset_class}/{instrument.market_type}"
+            )
         return provider.fetch_ohlcv(instrument.symbol, timeframe, limit)
 
 
