@@ -441,3 +441,10 @@ The authenticated walk-forward evaluation service selects the newest stored rece
 ### Transaction receipt verification semantics
 
 The public-RPC verifier reports `FINALIZED_MINT_BALANCE_DEBIT_OBSERVED` and `transaction_receipt_verified=true` only for finalized successful transactions with the requested mint, expected pool and wallet referenced, and an owner-attributed net wallet token-balance decrease. The generic `verified` flag remains false: this evidence does not decode and prove the swap instruction, pool causality, fill price, or realized P&L. It must not be promoted to a verified exit or used to authorize training or execution.
+
+
+### Interpretation of pooled walk-forward metrics
+
+The evaluator's compounded sampled return and sequential drawdown are ordering-dependent diagnostics over pooled validation observations. They are **not** a portfolio equity curve, a sequence of executable trades, or realized P&L: labels can overlap, repeat the same mint, and represent different horizons. The report marks each summary with `compounding_interpretation=POOLED_SAMPLED_OBSERVATION_DIAGNOSTIC_NOT_PORTFOLIO_PNL` and includes an aggregate interpretation warning. Do not use these values to infer deployable strategy returns or capital growth.
+
+Validation-dependence counts are scoped to prepared validation rows whose baseline/target intervals parse as timezone-aware and have positive duration. The report separately exposes the total fold validation-label count and unprepared validation-label count so the interval-based dependence denominator is not mistaken for all validation labels. Overlap and repeated-mint counts are descriptive only; they do not establish statistical significance or independence.
