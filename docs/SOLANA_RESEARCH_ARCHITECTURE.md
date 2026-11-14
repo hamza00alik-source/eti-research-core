@@ -215,3 +215,17 @@ boundary. It fails closed if there are too few distinct pools or if purging
 leaves an empty fold. This is a validation primitive, not evidence that a model
 is ready to train; minimum sample size, class balance, launch-regime coverage,
 and independent test periods still need to be assessed before training.
+
+
+A new-token event that arrives before DexScreener has indexed a pair is not
+dropped from longitudinal collection. ETI creates a pending-pool refresh record
+(`pool_address=__pending__`) and rechecks the mint every 15 minutes. When a
+pair appears, the pending schedule is disabled and replaced by the discovered
+pool schedule. If a scan returns a definitive REJECT, active refresh schedules
+for that mint are disabled. This prevents a missing initial pair from silently
+ending observation collection.
+
+Refresh schedules can be inspected or configured through authenticated routes:
+- `GET /v1/workspaces/{workspace_id}/solana/refresh`
+- `POST /v1/workspaces/{workspace_id}/solana/refresh` with `mint`,
+  `pool_address`, and `interval_seconds` (300–86400; default 900).
