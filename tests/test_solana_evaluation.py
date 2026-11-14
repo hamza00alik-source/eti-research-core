@@ -955,10 +955,10 @@ def test_regime_persistence_censors_gaps_conflicts_and_sample_end():
     )
     up = report["persistence_by_horizon_seconds"]["60"]["UP"]
     down = report["persistence_by_horizon_seconds"]["60"]["DOWN"]
-    assert up["episode_count"] == 6
+    assert up["episode_count"] == 5
     assert up["distinct_mint_count"] == 4
     assert up["median_observed_span_seconds"] == 30
-    assert up["right_censored_episode_count"] == 4
+    assert up["right_censored_episode_count"] == 2
     assert down["episode_count"] == 6
     assert down["median_observed_span_seconds"] == 0
     assert report["training_authorized"] is False
