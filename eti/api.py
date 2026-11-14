@@ -546,6 +546,24 @@ def list_solana_research_events(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.get("/v1/workspaces/{workspace_id}/solana/snapshots")
+def list_solana_research_snapshots(
+    workspace_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    mint: str | None = Query(default=None, min_length=32, max_length=64),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        items = _memory_store().list_solana_research_snapshots(
+            account["id"], workspace_id, limit=limit, mint=mint
+        )
+        return {"items": items}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.post("/v1/workspaces/{workspace_id}/solana/events", status_code=201)
 def record_solana_research_event(
     workspace_id: str,
