@@ -551,9 +551,10 @@ def test_solana_cost_evidence_rejects_wrong_label_identity_and_foreign_label(tmp
         store.record_solana_execution_cost_evidence(
             "owner-a", workspace["id"], label_id, "C" * 32, pool, good
         )
+    foreign_workspace = store.create_workspace("owner-b", "solana")
     with pytest.raises(LookupError, match="label not found"):
         store.record_solana_execution_cost_evidence(
-            "owner-b", workspace["id"], label_id, mint, pool, good
+            "owner-b", foreign_workspace["id"], label_id, mint, pool, good
         )
     with pytest.raises(ValueError, match="label_id"):
         store.record_solana_execution_cost_evidence(
