@@ -49,27 +49,28 @@ def validate_snapshot_rows(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
             issue_counts["malformed_payload"] += 1
             problems.append("malformed_payload")
             payload = {}
-        evidence = payload.get("evidence")
-        if not isinstance(evidence, dict):
-            issue_counts["missing_evidence"] += 1
-            problems.append("missing_evidence")
-            evidence = {}
-        for field in NUMERIC_FIELDS:
-            value = evidence.get(field)
-            if value is None:
-                issue_counts["missing_feature_values"] += 1
-                problems.append("missing:" + field)
-                continue
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not _is_finite_number(value):
-                issue_counts["non_finite_feature_values"] += 1
-                problems.append("invalid_numeric:" + field)
-                continue
-            if value < 0:
-                issue_counts["negative_feature_values"] += 1
-                problems.append("negative:" + field)
-            if value == 0 and field in {"price_usd", "liquidity_usd"}:
-                issue_counts["zero_price_or_liquidity"] += 1
-                problems.append("zero:" + field)
+        if row.get("capability") == "solana.market.scan":
+            evidence = payload.get("evidence")
+            if not isinstance(evidence, dict):
+                issue_counts["missing_evidence"] += 1
+                problems.append("missing_evidence")
+                evidence = {}
+            for field in NUMERIC_FIELDS:
+                value = evidence.get(field)
+                if value is None:
+                    issue_counts["missing_feature_values"] += 1
+                    problems.append("missing:" + field)
+                    continue
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not _is_finite_number(value):
+                    issue_counts["non_finite_feature_values"] += 1
+                    problems.append("invalid_numeric:" + field)
+                    continue
+                if value < 0:
+                    issue_counts["negative_feature_values"] += 1
+                    problems.append("negative:" + field)
+                if value == 0 and field in {"price_usd", "liquidity_usd"}:
+                    issue_counts["zero_price_or_liquidity"] += 1
+                    problems.append("zero:" + field)
         stamp = _timestamp(row.get("fetched_at"))
         if stamp is None:
             issue_counts["invalid_timestamp"] += 1
