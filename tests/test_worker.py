@@ -257,3 +257,50 @@ def test_worker_auto_approves_only_quality_passed_calibrated_artifact(tmp_path, 
     assert model["approved_by"] == "eti.quality_gate"
     assert registered["registry"]["approval_required"] is False
     assert registered["registry"]["promotion_authority"] == "eti.quality_gate"
+
+
+def test_solana_scan_completion_queues_read_only_audit(tmp_path):
+    store = MemoryStore(tmp_path / "solana-followup.sqlite3")
+    workspace = _workspace(store)
+    store.create_agent_task(
+        "owner-1", workspace["id"], "eti.solana.ingest", "solana.market.scan",
+        {"mint": "A" * 40, "source_event_id": "event-1",
+         "scheduled_by": "eti.solana.ingest"}, max_attempts=2,
+    )
+    registry = AgentCapabilityRegistry()
+    registry.register("solana.market.scan", lambda payload: {
+        "mint": payload["mint"], "verdict": "PASS",
+    })
+    registry.register("solana.token.audit", lambda payload: {
+        "mint": payload["mint"], "passed": False, "blocked": True,
+    })
+    worker = AgentWorker(store, registry=registry)
+
+    scan = worker.run_once()
+    assert scan["status"] == "completed"
+    queued = store.list_agent_tasks("owner-1", workspace["id"], status="queued")
+    assert len(queued) == 1
+    assert queued[0]["target_capability"] == "solana.token.audit"
+    assert queued[0]["input"]["source_scan_task_id"] == scan["id"]
+
+    audit = worker.run_once()
+    assert audit["status"] == "completed"
+    assert audit["result"]["blocked"] is True
+    assert store.list_agent_tasks("owner-1", workspace["id"], status="queued") == []
+
+
+def test_solana_rejected_scan_does_not_queue_audit(tmp_path):
+    store = MemoryStore(tmp_path / "solana-rejected.sqlite3")
+    workspace = _workspace(store)
+    store.create_agent_task(
+        "owner-1", workspace["id"], "eti.solana.ingest", "solana.market.scan",
+        {"mint": "B" * 40, "scheduled_by": "eti.solana.ingest"}, max_attempts=2,
+    )
+    registry = AgentCapabilityRegistry()
+    registry.register("solana.market.scan", lambda payload: {
+        "mint": payload["mint"], "verdict": "REJECT",
+    })
+    worker = AgentWorker(store, registry=registry)
+    result = worker.run_once()
+    assert result["status"] == "completed"
+    assert store.list_agent_tasks("owner-1", workspace["id"], status="queued") == []
