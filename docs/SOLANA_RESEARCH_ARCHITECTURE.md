@@ -524,6 +524,12 @@ A fold/regime stratum is eligible for sign-stability aggregation only when it co
 This is a descriptive stability screen, not a significance test, proof of predictive edge, independent holdout, or strategy-selection rule. Fold overlap, repeated mints across folds, common market shocks, and label dependence remain possible. Ineligible folds are excluded rather than pooled to conceal concentration. Training and execution remain unauthorized.
 
 
+## Point-in-time regime transitions
+
+The time-series regime diagnostic emits classified validation-row metadata (mint, pool, baseline timestamp, horizon and regime) separately from target outcomes. A transition summary compares only adjacent classified observations for the same mint, pool and horizon. Contradictory regime assignments at the same timestamp are excluded. A transition stratum is marked threshold-met only when both predeclared minimum transition and distinct-mint counts are satisfied.
+
+These counts remain descriptive, not independent samples: forward labels can overlap and different mints share market-wide shocks. Transition frequencies are not live-ready transition probabilities, do not establish predictive value or executable performance, and do not authorize model fitting, training or execution. Classification continues to use only same-mint/pool history at or before each validation baseline timestamp.
+
 ## Trend/volatility proxy stability across chronological folds
 
 When the explicit time-series regime configuration is supplied, the walk-forward report also includes `fold_time_series_regime_stability`. Each chronological validation fold is classified independently. For every validation row, trend and time-normalized volatility use only prior-or-same-time observations from that exact mint and pool; later history is excluded by the classifier's point-in-time cutoff. Regime results remain separated by forecast horizon.
