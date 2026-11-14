@@ -782,3 +782,78 @@ def test_fold_regime_stability_is_not_configured_without_predeclared_thresholds(
     )
     assert report["status"] == "NOT_CONFIGURED"
     assert report["regimes"] == {}
+
+
+def test_fold_time_series_regime_stability_uses_point_in_time_history_and_mint_gates():
+    from datetime import datetime, timedelta, timezone
+    from eti.solana_evaluation import evaluate_solana_fold_time_series_regime_stability
+
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    history = []
+    for mint in ("mint-a", "mint-b", "mint-c", "mint-z"):
+        for index, price in enumerate((100.0, 101.0, 102.0)):
+            history.append({
+                "mint": mint,
+                "pool_address": "pool-" + mint,
+                "baseline_at": (start + timedelta(hours=index)).isoformat(),
+                "features": {"price_usd": price},
+            })
+
+    def validation(mint, outcome):
+        return {
+            "mint": mint,
+            "pool_address": "pool-" + mint,
+            "baseline_at": (start + timedelta(hours=2)).isoformat(),
+            "horizon_seconds": 60,
+            "target_sampled_price_return_pct": outcome,
+            "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
+        }
+
+    config = {
+        "lookback_observations": 3,
+        "minimum_observations": 3,
+        "trend_abs_return_pct": 1.0,
+        "volatility_high_pct": 2.0,
+        "volatility_low_pct": 0.1,
+        "max_gap_seconds": 3600,
+        "minimum_history_span_seconds": 3600,
+        "minimum_rows_per_regime_horizon": 5,
+        "buy_pressure_threshold": 0.55,
+    }
+    folds = [
+        {"fold": 1, "validation": [
+            validation("mint-a", 2.0), validation("mint-a", 1.0),
+            validation("mint-b", 3.0), validation("mint-b", 2.0),
+            validation("mint-c", 1.0), validation("mint-c", 2.0),
+        ]},
+        {"fold": 2, "validation": [
+            validation("mint-z", -2.0) for _ in range(5)
+        ]},
+    ]
+    report = evaluate_solana_fold_time_series_regime_stability(
+        history, folds, config
+    )
+    regime = "UPWARD_TREND_PROXY__LOW_TIME_NORMALIZED_VOLATILITY_PROXY"
+    first = report["folds"][0]["regimes_by_horizon_seconds"]["60"][regime]
+    second = report["folds"][1]["regimes_by_horizon_seconds"]["60"][regime]
+    assert first["stability_eligible"] is True
+    assert first["row_count"] == 6
+    assert first["distinct_mint_count"] == 3
+    assert second["stability_eligible"] is False
+    assert second["distinct_mint_count"] == 1
+    stability = report["regimes_by_horizon_seconds"]["60"][regime]["always_long"]
+    assert stability["eligible_fold_count"] == 1
+    assert stability["positive_mean_fold_count"] == 1
+    assert stability["mean_return_sign_consistency"] == 1.0
+    assert report["future_history_excluded_per_validation_row"] is True
+    assert report["training_authorized"] is False
+
+
+def test_fold_time_series_regime_stability_requires_explicit_config():
+    from eti.solana_evaluation import evaluate_solana_fold_time_series_regime_stability
+
+    report = evaluate_solana_fold_time_series_regime_stability(
+        [], [{"fold": 1, "validation": []}], None
+    )
+    assert report["status"] == "NOT_CONFIGURED"
+    assert report["regimes_by_horizon_seconds"] == {}
