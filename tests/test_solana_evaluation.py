@@ -77,6 +77,27 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
             "target_sampled_price_return_pct": 3.0,
         })
 
+    # A second overlapping horizon for the same mint must be visible as dependence.
+    exported.append({
+        "id": "label-0-longer",
+        "mint": "mint-0",
+        "pool_address": "pool-0",
+        "horizon_seconds": 7200,
+        "label": {
+            "baseline_at": "2026-01-01T00:00:00Z",
+            "target_at": "2026-01-01T02:00:00Z",
+        },
+    })
+    prepared.append({
+        "label_id": "label-0-longer",
+        "mint": "mint-0",
+        "pool_address": "pool-0",
+        "baseline_at": "2026-01-01T00:00:00Z",
+        "horizon_seconds": 7200,
+        "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
+        "target_sampled_price_return_pct": 4.0,
+    })
+
     report = evaluate_prepared_solana_walk_forward(
         exported,
         {"status": "PREPARATION_ONLY", "training_authorized": False, "rows": prepared},
@@ -89,8 +110,9 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
     assert report["walk_forward"]["training_rows_used_for_metrics"] is False
     assert "3600" in report["by_horizon_seconds"]
     assert report["by_horizon_seconds"]["3600"]["aggregate"]["always_long"]["trade_count"] > 0
-    assert report["validation_dependence"]["distinct_validation_mint_count"] == report["validation_dependence"]["validation_label_count"]
-    assert report["validation_dependence"]["overlapping_interval_pair_count"] == 0
+    assert report["validation_dependence"]["repeated_mint_label_count"] >= 1
+    assert report["validation_dependence"]["overlapping_interval_pair_count"] >= 1
+    assert "7200" in report["by_horizon_seconds"]
     assert len(report["walk_forward"]["fold_metadata"]) == 2
     assert all(
         item["prepared_validation_count"] + item["unprepared_validation_count"]
