@@ -76,7 +76,7 @@ jobs:
               Path("notebooks/ETI_v0_1_Training.ipynb").read_bytes()
           )
           (out / "kernel-metadata.json").write_text(
-              json.dumps(metadata, indent=2) + "\\n"
+              json.dumps(metadata, indent=2) + "\n"
           )
           check = json.loads((out / "kernel-metadata.json").read_text())
           assert check["id"] == expected_id
