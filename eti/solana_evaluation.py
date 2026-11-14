@@ -760,13 +760,17 @@ def evaluate_solana_regime_transitions(
     conflicting_timestamps = 0
     duplicate_timestamps_collapsed = 0
     for (mint, pool, horizon), timeline in sorted(grouped.items()):
-        ordered: list[tuple[datetime, str]] = []
+        ordered: list[tuple[datetime, str | None]] = []
         for stamp, regimes in sorted(timeline.items()):
             if len(regimes) != 1:
                 conflicting_timestamps += 1
+                ordered.append((stamp, None))
                 continue
             ordered.append((stamp, next(iter(regimes))))
         for (previous_at, previous_regime), (current_at, current_regime) in zip(ordered, ordered[1:]):
+            # A conflicting timestamp is a continuity break; never bridge over it.
+            if previous_regime is None or current_regime is None:
+                continue
             if current_at <= previous_at or current_regime == previous_regime:
                 continue
             key = previous_regime + " -> " + current_regime
