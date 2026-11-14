@@ -308,10 +308,11 @@ def evaluate_solana_time_series_regimes(
     validation_rows: list[dict[str, Any]],
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Classify each validation row using only its own mint/pool baseline history.
+    """Classify validation rows from point-in-time same-mint/pool history.
 
-    Volatility is the standard deviation of adjacent sampled log returns per
-    observation, not time-normalized realized volatility from market candles.
+    Volatility is the sample standard deviation of interval-normalized log
+    returns, expressed as percent per square-root-hour. This is a sampling-
+    adjusted proxy, not candle-based realized volatility.
     """
     if config is None:
         return {
@@ -319,19 +320,23 @@ def evaluate_solana_time_series_regimes(
             "classified_row_count": 0,
             "unclassified_row_count": len(validation_rows),
             "regimes": {},
-            "note": "Explicit lookback and thresholds are required; no outcomes are used to set them.",
+            "note": "Explicit lookback, sampling controls and thresholds are required.",
         }
     required = {
         "lookback_observations", "minimum_observations",
         "trend_abs_return_pct", "volatility_high_pct", "volatility_low_pct",
+        "max_gap_seconds", "minimum_history_span_seconds",
     }
     if not isinstance(config, dict) or set(config) != required:
         raise ValueError("time-series regime config must contain exactly: " + ", ".join(sorted(required)))
     lookback = config["lookback_observations"]
     minimum = config["minimum_observations"]
-    if (isinstance(lookback, bool) or not isinstance(lookback, int)
-            or isinstance(minimum, bool) or not isinstance(minimum, int)
-            or minimum < 3 or lookback < minimum):
+    for key in ("lookback_observations", "minimum_observations",
+                "max_gap_seconds", "minimum_history_span_seconds"):
+        value = config[key]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(key + " must be a positive integer")
+    if minimum < 3 or lookback < minimum:
         raise ValueError("lookback_observations must be >= minimum_observations >= 3")
     for key in ("trend_abs_return_pct", "volatility_high_pct", "volatility_low_pct"):
         if not _finite(config[key]) or config[key] < 0:
@@ -364,92 +369,143 @@ def evaluate_solana_time_series_regimes(
         histories.setdefault((mint, pool), []).append((stamp, float(price)))
 
     groups: dict[str, list[float]] = {}
+    horizon_groups: dict[str, dict[str, list[float]]] = {}
     classified = 0
     unclassified = 0
     reason_counts: dict[str, int] = {}
+    sampling = {
+        "classified_history_span_seconds": [],
+        "classified_median_gap_seconds": [],
+        "classified_max_gap_seconds": [],
+    }
+
+    def reject(reason: str) -> None:
+        nonlocal unclassified
+        unclassified += 1
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+
     for row in validation_rows:
         if not isinstance(row, dict):
-            unclassified += 1
-            reason_counts["malformed_validation_row"] = reason_counts.get("malformed_validation_row", 0) + 1
+            reject("malformed_validation_row")
             continue
         mint, pool = row.get("mint"), row.get("pool_address")
         stamp = parse_stamp(row)
         outcome = row.get("target_sampled_price_return_pct")
-        if (not isinstance(mint, str) or not isinstance(pool, str)
+        if (not isinstance(mint, str) or not mint.strip()
+                or not isinstance(pool, str) or not pool.strip()
                 or stamp is None or not _finite(outcome)):
-            unclassified += 1
-            reason_counts["invalid_validation_identity_time_or_outcome"] = reason_counts.get("invalid_validation_identity_time_or_outcome", 0) + 1
+            reject("invalid_validation_identity_time_or_outcome")
             continue
         eligible = sorted(
             (time, price) for time, price in histories.get((mint, pool), [])
             if time <= stamp
         )
-        # Duplicate timestamps are ambiguous unless every duplicate carries
-        # exactly the same price. Conflicts are not silently averaged.
         by_time: dict[datetime, set[float]] = {}
         for time, price in eligible:
             by_time.setdefault(time, set()).add(price)
         if any(len(prices) != 1 for prices in by_time.values()):
-            unclassified += 1
-            reason_counts["conflicting_prices_at_same_timestamp"] = reason_counts.get("conflicting_prices_at_same_timestamp", 0) + 1
+            reject("conflicting_prices_at_same_timestamp")
             continue
         points = [(time, next(iter(prices))) for time, prices in sorted(by_time.items())]
         points = points[-lookback:]
         if len(points) < minimum:
-            unclassified += 1
-            reason_counts["insufficient_prior_baseline_observations"] = reason_counts.get("insufficient_prior_baseline_observations", 0) + 1
+            reject("insufficient_prior_baseline_observations")
             continue
-        log_returns = [
-            math.log(points[index][1] / points[index - 1][1]) * 100.0
+        gaps = [
+            (points[index][0] - points[index - 1][0]).total_seconds()
             for index in range(1, len(points))
         ]
-        if not log_returns or not all(math.isfinite(value) for value in log_returns):
-            unclassified += 1
-            reason_counts["invalid_sampled_price_path"] = reason_counts.get("invalid_sampled_price_path", 0) + 1
+        span = (points[-1][0] - points[0][0]).total_seconds()
+        if not gaps or any(gap <= 0 for gap in gaps):
+            reject("invalid_sampling_intervals")
+            continue
+        if span < config["minimum_history_span_seconds"]:
+            reject("insufficient_history_time_span")
+            continue
+        if max(gaps) > config["max_gap_seconds"]:
+            reject("sampling_gap_exceeds_configured_maximum")
+            continue
+
+        # Normalize each log return by sqrt(elapsed hours). Thresholds therefore
+        # use percent per square-root-hour, not percent per observation.
+        normalized_returns = [
+            math.log(points[index][1] / points[index - 1][1]) * 100.0
+            / math.sqrt(gaps[index - 1] / 3600.0)
+            for index in range(1, len(points))
+        ]
+        if not normalized_returns or not all(math.isfinite(value) for value in normalized_returns):
+            reject("invalid_sampled_price_path")
             continue
         trend_return = (points[-1][1] / points[0][1] - 1.0) * 100.0
-        mean_log_return = sum(log_returns) / len(log_returns)
-        variance = sum((value - mean_log_return) ** 2 for value in log_returns) / (len(log_returns) - 1)
+        mean_return = sum(normalized_returns) / len(normalized_returns)
+        variance = sum((value - mean_return) ** 2 for value in normalized_returns) / (len(normalized_returns) - 1)
         volatility = math.sqrt(variance)
         if volatility >= config["volatility_high_pct"]:
-            vol_regime = "HIGH_SAMPLED_VOLATILITY"
+            vol_regime = "HIGH_TIME_NORMALIZED_VOLATILITY_PROXY"
         elif volatility <= config["volatility_low_pct"]:
-            vol_regime = "LOW_SAMPLED_VOLATILITY"
+            vol_regime = "LOW_TIME_NORMALIZED_VOLATILITY_PROXY"
         else:
-            vol_regime = "MID_SAMPLED_VOLATILITY"
+            vol_regime = "MID_TIME_NORMALIZED_VOLATILITY_PROXY"
         if trend_return >= config["trend_abs_return_pct"]:
             trend_regime = "UPWARD_TREND_PROXY"
         elif trend_return <= -config["trend_abs_return_pct"]:
             trend_regime = "DOWNWARD_TREND_PROXY"
         else:
             trend_regime = "RANGE_BOUND_RETURN_PROXY"
-        groups.setdefault(trend_regime + "__" + vol_regime, []).append(float(outcome))
+        regime = trend_regime + "__" + vol_regime
+        value = float(outcome)
+        groups.setdefault(regime, []).append(value)
+        horizon = row.get("horizon_seconds")
+        horizon_key = str(horizon) if isinstance(horizon, int) and not isinstance(horizon, bool) and horizon > 0 else "UNKNOWN"
+        horizon_groups.setdefault(horizon_key, {}).setdefault(regime, []).append(value)
+        sampling["classified_history_span_seconds"].append(span)
+        sampling["classified_median_gap_seconds"].append(sorted(gaps)[len(gaps) // 2] if len(gaps) % 2 else (sorted(gaps)[len(gaps)//2-1] + sorted(gaps)[len(gaps)//2]) / 2)
+        sampling["classified_max_gap_seconds"].append(max(gaps))
         classified += 1
+
+    def summarize_groups(source: dict[str, list[float]]) -> dict[str, Any]:
+        return {name: _summarize(values) for name, values in sorted(source.items())}
+
     return {
         "status": "TIME_SERIES_PROXY_REGIME_DIAGNOSTICS_ONLY",
         "config": dict(config),
         "classified_row_count": classified,
         "unclassified_row_count": unclassified,
         "unclassified_reasons": reason_counts,
-        "regimes": {name: _summarize(values) for name, values in sorted(groups.items())},
+        "regimes": summarize_groups(groups),
+        "regimes_by_horizon_seconds": {
+            horizon: summarize_groups(regimes)
+            for horizon, regimes in sorted(horizon_groups.items())
+        },
+        "sampling_quality": {
+            "maximum_allowed_gap_seconds": config["max_gap_seconds"],
+            "minimum_required_history_span_seconds": config["minimum_history_span_seconds"],
+            "classified_rows": classified,
+            "mean_history_span_seconds": sum(sampling["classified_history_span_seconds"]) / classified if classified else None,
+            "mean_median_gap_seconds": sum(sampling["classified_median_gap_seconds"]) / classified if classified else None,
+            "mean_max_gap_seconds": sum(sampling["classified_max_gap_seconds"]) / classified if classified else None,
+        },
         "method": {
             "history_scope": "same_mint_and_pool_only",
             "future_baseline_observations_excluded": True,
             "same_timestamp_conflicts": "excluded_not_averaged",
             "trend_proxy": "first_to_last_percent_change_over_sampled_baseline_prices",
-            "volatility_proxy": "sample_standard_deviation_of_adjacent_log_returns_per_observation",
-            "time_normalized": False,
+            "volatility_proxy": "sample_standard_deviation_of_log_return_pct_divided_by_sqrt_elapsed_hours",
+            "volatility_unit": "percent_per_sqrt_hour",
+            "time_normalized": True,
+            "maximum_gap_enforced": True,
+            "minimum_history_span_enforced": True,
             "ohlcv_candles_required": False,
         },
         "limitations": [
             "These are sampled-price path proxies, not exchange-candle trend or realized volatility.",
-            "Volatility is per observation and is not comparable across irregular sampling intervals without time normalization.",
+            "Interval normalization reduces cadence dependence but does not recover intraperiod paths or make irregular provider sampling unbiased.",
+            "Rows with gaps above the predeclared maximum or insufficient time span are withheld.",
             "Sparse snapshots can miss intraperiod jumps, wicks, liquidity events and market-wide shocks.",
-            "Classification thresholds and lookback must be predeclared independently of validation outcomes.",
+            "Thresholds are percent per square-root-hour and must be predeclared independently of validation outcomes.",
             "Regime-stratified outcomes remain sampled-mark diagnostics, not executable returns, net P&L, or training authorization.",
         ],
     }
-
 
 def evaluate_prepared_solana_walk_forward(
     exported_labels: list[dict[str, Any]],
