@@ -182,7 +182,7 @@ Authenticated endpoints:
 Labels expose sampled price return, liquidity change and change in the
 provider's rolling 24-hour volume field. That last metric is explicitly not
 volume traded during the selected horizon. No future values are read from the
-baseline feature record. Evaluation must split by time and group by mint/pool;
+baseline feature record. Evaluation must split by time and group by mint across all its pools;
 overlapping horizons from the same launch must not be randomly scattered across
 train and test sets. Use chronological walk-forward splits with purging/embargo
 at least as long as the maximum label horizon, and fit all transforms only on
