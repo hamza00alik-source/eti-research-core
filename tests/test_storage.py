@@ -460,6 +460,13 @@ def test_solana_event_ledger_is_durable_idempotent_and_owner_scoped(tmp_path):
     )
     assert first["id"] == duplicate["id"]
     assert duplicate["duplicate"] is True
+    conflict = store.record_solana_research_event(
+        "owner-a", workspace["id"], "pumpportal:sig-001",
+        "pumpportal", "new_token", "A" * 40, {"signature": "sig-001", "slot": 99999},
+        "2026-11-14T12:00:00Z",
+    )
+    assert conflict["duplicate"] is True
+    assert conflict["payload_conflict"] is True
     reopened = MemoryStore(path)
     items = reopened.list_solana_research_events("owner-a", workspace["id"])
     assert len(items) == 1
