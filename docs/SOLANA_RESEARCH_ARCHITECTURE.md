@@ -150,3 +150,58 @@ filter and bounded limit. These snapshots are point-in-time observations, not
 OHLCV candles or proof of executable liquidity. Future labels must be generated
 only after their prediction horizon has elapsed, and sampled price marks must
 remain clearly distinguished from exchange or pool candle data.
+
+
+## Recurring observations and delayed outcome labels (implemented)
+
+A successful scan that identifies a pool creates an owner/workspace-scoped refresh
+schedule. The worker checks due schedules and enqueues repeat
+`solana.market.scan` tasks on a configurable 5-minute to 24-hour cadence
+(default 15 minutes). Scheduling and enqueueing are transactional and repeated
+worker polls do not duplicate a due scan. Each completed scan remains an
+immutable point-in-time snapshot. Refreshes are not backfills: ETI does not
+fabricate observations for periods when the worker or provider was unavailable.
+
+The scanner now records the DexScreener sampled `priceUsd`, USD liquidity,
+reported rolling 24-hour volume, 1-hour buy/sell counts, DEX identifier and
+quote-token address when supplied. Missing fields remain null. These are
+provider-reported sampled marks; they are not a continuous trade tape, OHLCV
+candles, order-book depth, or executable quotes. Pool identity is preserved so
+observations from different pools are never compared as if they were one market.
+
+The delayed label module supports 5-minute, 15-minute, 1-hour, 6-hour and
+24-hour horizons. A label is created only when (a) its horizon has elapsed,
+(b) a later observation exists at or beyond that horizon, and (c) the baseline
+and target have the same mint and non-empty pool address. The first qualifying
+future observation is used. A unique baseline-snapshot/horizon key makes label
+persistence idempotent. Missing future observations do not produce a label.
+Authenticated endpoints:
+- `POST /v1/workspaces/{workspace_id}/solana/labels/generate`
+- `GET /v1/workspaces/{workspace_id}/solana/labels`
+
+Labels expose sampled price return, liquidity change and change in the
+provider's rolling 24-hour volume field. That last metric is explicitly not
+volume traded during the selected horizon. No future values are read from the
+baseline feature record. Evaluation must split by time and group by mint/pool;
+overlapping horizons from the same launch must not be randomly scattered across
+train and test sets. Use chronological walk-forward splits with purging/embargo
+at least as long as the maximum label horizon, and fit all transforms only on
+the training fold. Keep a launch/pool group entirely within one fold when
+reporting generalization to unseen launches.
+
+## Execution-cost and failed-exit evidence boundary
+
+The current public DexScreener adapter does not provide validated executable
+quotes or transaction-level fills. Therefore label fields for exitability,
+realized slippage and failed exit are deliberately `UNKNOWN` / null. ETI must
+not substitute a fixed slippage guess or infer a successful exit from displayed
+liquidity. A future cost model must be pool-specific and validated against
+actual swap simulations or observed transactions, including curve impact,
+fees, priority fees, latency, liquidity depletion and failed/partial exits.
+Until then, the research pipeline reports price/liquidity deterioration as
+observed risk proxies, not executable P&L.
+
+Model training remains paused for this Solana label lane until sufficient
+time-stamped observations and independently reviewed labels accumulate.
+Nothing in this pipeline adds wallet access, transaction signing, swaps,
+copy-trading, or live execution.
