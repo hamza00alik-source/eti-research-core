@@ -150,13 +150,11 @@ class YahooFinanceMarketAdapter:
 
     def discover_instruments(self) -> list[InstrumentSpec]:
         found: list[InstrumentSpec] = []
-        self.discovery_errors: list[dict[str, str]] = []
+        errors: list[dict[str, str]] = []
         for market_type in sorted({m for values in self._MARKET_TYPES.values() for m in values}):
             found.extend(self.discover_instruments_for(market_type))
-            self.discovery_errors.extend(
-                error for error in getattr(self, "discovery_errors", [])
-                if error not in self.discovery_errors
-            )
+            errors.extend(getattr(self, "discovery_errors", []))
+        self.discovery_errors = errors
         return found
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
