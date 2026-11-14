@@ -343,3 +343,13 @@ fixed benchmark; training rows are counted for diagnostics and never contribute
 to benchmark metrics. Missing prepared validation rows are counted rather than
 replaced or reassigned. The runner accepts only the fail-closed
 `PREPARATION_ONLY` artifact and preserves `training_authorized=false`.
+
+
+The walk-forward runner additionally reports benchmark results separately by
+label horizon (using each prepared row's explicit horizon) so short- and
+long-horizon outcomes are not hidden in a pooled aggregate. It reports
+validation dependence diagnostics: distinct mints, repeated mint labels, and
+overlapping baseline-to-target intervals within each mint. Repeated and
+overlapping labels are dependent observations, not independent trades or
+independent samples. These diagnostics do not de-duplicate or reweight the
+underlying observations and do not establish statistical significance.
