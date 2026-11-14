@@ -965,3 +965,35 @@ def test_regime_persistence_censors_gaps_conflicts_and_sample_end():
 
     with pytest.raises(ValueError):
         evaluate_solana_regime_persistence([], maximum_gap_seconds=0)
+
+
+
+def test_multi_configuration_regime_robustness_orchestrates_predeclared_configs():
+    from eti.solana_evaluation import evaluate_solana_regime_robustness
+
+    config = {
+        "lookback_observations": 5,
+        "minimum_observations": 3,
+        "trend_abs_return_pct": 1.0,
+        "volatility_high_pct": 2.0,
+        "volatility_low_pct": 0.5,
+        "max_gap_seconds": 3600,
+        "minimum_history_span_seconds": 60,
+        "minimum_rows_per_regime_horizon": 5,
+        "buy_pressure_threshold": 0.55,
+    }
+    report = evaluate_solana_regime_robustness(
+        [], [], {"baseline": config, "wider_trend": {**config, "trend_abs_return_pct": 2.0}},
+        persistence_maximum_gap_seconds=3600,
+        minimum_persistence_episodes=2,
+        minimum_persistence_mints=2,
+    )
+    assert report["configuration_names"] == ["baseline", "wider_trend"]
+    assert report["sampling_sensitivity"]["all_configuration_common_observation_count"] == 0
+    assert set(report["persistence_by_configuration"]) == {"baseline", "wider_trend"}
+    assert report["training_authorized"] is False
+    assert report["model_fitting_performed"] is False
+
+    with pytest.raises(ValueError):
+        evaluate_solana_regime_robustness([], [], {"only_one": config},
+                                          persistence_maximum_gap_seconds=3600)
