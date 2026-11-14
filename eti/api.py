@@ -22,6 +22,8 @@ from .decision import build_research_decision
 from .portfolio import assess_portfolio
 from .risk import RiskEngine, RiskRequest
 from .storage import MemoryStore
+from .solana_dataset import prepare_solana_training_rows
+from .solana_cost_evaluation import evaluate_stored_solana_walk_forward
 
 app = FastAPI(title=AppConfig().app_name, version=AppConfig().version, lifespan=runtime_lifespan)
 risk_engine = RiskEngine()
@@ -117,6 +119,13 @@ class SolanaCostEvidencePayload(BaseModel):
     mint: str = Field(min_length=32, max_length=64)
     pool_address: str = Field(min_length=1, max_length=128)
     evidence: dict[str, Any]
+
+
+class SolanaWalkForwardEvaluationPayload(BaseModel):
+    n_splits: int = Field(default=3, ge=2, le=10)
+    min_train_groups: int = Field(default=3, ge=2, le=1000)
+    embargo_seconds: int = Field(default=86400, ge=0, le=604800)
+    buy_pressure_threshold: float = Field(default=0.55, gt=0.5, le=1.0)
 
 
 class SolanaResearchEventPayload(BaseModel):
@@ -635,6 +644,38 @@ def export_solana_research_dataset(
     try:
         return _memory_store().export_solana_research_dataset(
             account["id"], workspace_id, limit=limit, mint=mint
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/walk-forward-evaluation")
+def evaluate_solana_walk_forward_from_ledger(
+    workspace_id: str,
+    payload: SolanaWalkForwardEvaluationPayload,
+    limit: int = Query(default=5000, ge=1, le=5000),
+    mint: str | None = Query(default=None, min_length=32, max_length=64),
+    account: dict[str, str] = Depends(current_account),
+):
+    """Run non-fitting diagnostics against this account's export and cost ledger."""
+    store = _memory_store()
+    try:
+        dataset_export = store.export_solana_research_dataset(
+            account["id"], workspace_id, limit=limit, mint=mint
+        )
+        prepared = prepare_solana_training_rows(dataset_export)
+        return evaluate_stored_solana_walk_forward(
+            store,
+            account["id"],
+            workspace_id,
+            dataset_export["labels"],
+            prepared,
+            n_splits=payload.n_splits,
+            min_train_groups=payload.min_train_groups,
+            embargo_seconds=payload.embargo_seconds,
+            buy_pressure_threshold=payload.buy_pressure_threshold,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
