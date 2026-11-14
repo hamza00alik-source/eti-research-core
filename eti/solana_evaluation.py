@@ -303,6 +303,159 @@ def evaluate_solana_regime_diagnostics(
     }
 
 
+
+def evaluate_solana_fold_regime_stability(
+    folds: list[dict[str, Any]],
+    thresholds: dict[str, float] | None,
+    *,
+    buy_pressure_threshold: float = 0.55,
+    minimum_rows_per_fold_regime: int = 5,
+    minimum_mints_per_fold_regime: int = 3,
+) -> dict[str, Any]:
+    """Report chronological fold stability for fixed baseline proxy regimes.
+
+    Fold-level evidence is withheld from stability aggregation when either
+    the row or distinct-mint minimum is not met. This is descriptive only.
+    """
+    if (isinstance(minimum_rows_per_fold_regime, bool)
+            or not isinstance(minimum_rows_per_fold_regime, int)
+            or minimum_rows_per_fold_regime < 1):
+        raise ValueError("minimum_rows_per_fold_regime must be a positive integer")
+    if (isinstance(minimum_mints_per_fold_regime, bool)
+            or not isinstance(minimum_mints_per_fold_regime, int)
+            or minimum_mints_per_fold_regime < 1):
+        raise ValueError("minimum_mints_per_fold_regime must be a positive integer")
+    if thresholds is None:
+        return {
+            "status": "NOT_CONFIGURED",
+            "folds": [],
+            "regimes": {},
+            "minimum_rows_per_fold_regime": minimum_rows_per_fold_regime,
+            "minimum_mints_per_fold_regime": minimum_mints_per_fold_regime,
+            "note": "No predeclared regime thresholds supplied; no fold stability inferred.",
+        }
+    fold_groups: list[dict[str, list[dict[str, Any]]]] = []
+    all_regimes: set[str] = set()
+    fold_reports: list[dict[str, Any]] = []
+    required = {
+        "buy_pressure_high", "buy_pressure_low",
+        "turnover_liquidity_ratio_high", "turnover_liquidity_ratio_low",
+    }
+    if not isinstance(thresholds, dict) or set(thresholds) != required:
+        raise ValueError("regime thresholds must contain exactly: " + ", ".join(sorted(required)))
+    values = {key: thresholds[key] for key in required}
+    if any(not _finite(value) for value in values.values()):
+        raise ValueError("regime thresholds must be finite numbers")
+    if not (0 <= values["buy_pressure_low"] < values["buy_pressure_high"] <= 1):
+        raise ValueError("buy-pressure thresholds must satisfy 0 <= low < high <= 1")
+    if not (0 <= values["turnover_liquidity_ratio_low"] < values["turnover_liquidity_ratio_high"]):
+        raise ValueError("turnover/liquidity thresholds must satisfy 0 <= low < high")
+    for fold_number, fold in enumerate(folds, start=1):
+        if not isinstance(fold, dict) or not isinstance(fold.get("validation"), list):
+            raise ValueError("each fold must contain a validation list")
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in fold["validation"]:
+            if not isinstance(row, dict) or not _finite(row.get("target_sampled_price_return_pct")):
+                continue
+            features = row.get("features")
+            if not isinstance(features, dict):
+                continue
+            buys, sells = features.get("txns_h1_buys"), features.get("txns_h1_sells")
+            volume, liquidity = features.get("volume_h24_usd"), features.get("liquidity_usd")
+            if (not all(_finite(x) for x in (buys, sells, volume, liquidity))
+                    or buys < 0 or sells < 0 or volume < 0 or liquidity <= 0
+                    or buys + sells <= 0):
+                continue
+            pressure = buys / (buys + sells)
+            turnover = volume / liquidity
+            flow = ("BUY_DOMINANT" if pressure >= values["buy_pressure_high"]
+                    else "SELL_DOMINANT" if pressure <= values["buy_pressure_low"]
+                    else "BALANCED_FLOW")
+            activity = ("HIGH_TURNOVER_PROXY" if turnover >= values["turnover_liquidity_ratio_high"]
+                        else "LOW_TURNOVER_PROXY" if turnover <= values["turnover_liquidity_ratio_low"]
+                        else "MID_TURNOVER_PROXY")
+            grouped.setdefault(flow + "__" + activity, []).append(row)
+        fold_groups.append(grouped)
+        all_regimes.update(grouped)
+        strata = {}
+        for regime, rows in sorted(grouped.items()):
+            mint_counts: dict[str, int] = {}
+            for row in rows:
+                mint = row.get("mint")
+                key = mint.strip() if isinstance(mint, str) and mint.strip() else "__missing_mint__"
+                mint_counts[key] = mint_counts.get(key, 0) + 1
+            distinct_mints = len(mint_counts)
+            row_count = len(rows)
+            eligible = (row_count >= minimum_rows_per_fold_regime
+                        and distinct_mints >= minimum_mints_per_fold_regime
+                        and "__missing_mint__" not in mint_counts)
+            benchmark = evaluate_solana_research_folds(
+                [{"fold": fold.get("fold", fold_number), "validation": rows}],
+                buy_pressure_threshold=buy_pressure_threshold,
+            )
+            strata[regime] = {
+                "row_count": row_count,
+                "distinct_mint_count": distinct_mints,
+                "largest_mint_row_share": max(mint_counts.values()) / row_count if row_count else None,
+                "status": "FOLD_SAMPLE_THRESHOLD_MET" if eligible else "INSUFFICIENT_OR_MISSING_MINT_DIVERSITY",
+                "stability_eligible": eligible,
+                "baselines": benchmark["aggregate"],
+            }
+        fold_reports.append({
+            "fold": fold.get("fold", fold_number),
+            "classified_row_count": sum(len(rows) for rows in grouped.values()),
+            "regimes": strata,
+        })
+    regime_summary: dict[str, Any] = {}
+    for regime in sorted(all_regimes):
+        per_baseline: dict[str, Any] = {}
+        for baseline in ("always_long", "fixed_buy_pressure"):
+            means = []
+            positive = 0
+            negative = 0
+            eligible_folds = 0
+            for grouped in fold_groups:
+                rows = grouped.get(regime, [])
+                mints = {row.get("mint") for row in rows
+                         if isinstance(row.get("mint"), str) and row.get("mint").strip()}
+                if (len(rows) < minimum_rows_per_fold_regime
+                        or len(mints) < minimum_mints_per_fold_regime
+                        or any(not isinstance(row.get("mint"), str) or not row.get("mint").strip() for row in rows)):
+                    continue
+                summary = evaluate_solana_research_folds(
+                    [{"validation": rows}], buy_pressure_threshold=buy_pressure_threshold,
+                )["aggregate"][baseline]
+                mean = summary.get("mean_return_pct")
+                if not _finite(mean):
+                    continue
+                eligible_folds += 1
+                means.append(float(mean))
+                positive += mean > 0
+                negative += mean < 0
+            per_baseline[baseline] = {
+                "eligible_fold_count": eligible_folds,
+                "positive_mean_fold_count": positive,
+                "negative_mean_fold_count": negative,
+                "mean_return_sign_consistency": (
+                    max(positive, negative) / eligible_folds if eligible_folds else None
+                ),
+                "fold_mean_returns_pct": means,
+                "status": "DESCRIPTIVE_FOLD_STABILITY_AVAILABLE" if eligible_folds else "INSUFFICIENT_ELIGIBLE_FOLDS",
+            }
+        regime_summary[regime] = per_baseline
+    return {
+        "status": "CHRONOLOGICAL_FOLD_REGIME_STABILITY_DIAGNOSTICS_ONLY",
+        "thresholds": values,
+        "minimum_rows_per_fold_regime": minimum_rows_per_fold_regime,
+        "minimum_mints_per_fold_regime": minimum_mints_per_fold_regime,
+        "folds": fold_reports,
+        "regimes": regime_summary,
+        "model_fitting_performed": False,
+        "training_authorized": False,
+        "note": "Fold means are gross sampled-mark diagnostics. Eligibility excludes missing mint identities and requires both row and mint minima; sign consistency is not significance, edge validation, or independent evidence when labels overlap.",
+    }
+
+
 def evaluate_solana_time_series_regimes(
     history_rows: list[dict[str, Any]],
     validation_rows: list[dict[str, Any]],
