@@ -2352,6 +2352,31 @@ class MemoryStore:
             ).fetchone()
         return dict(row)
 
+    def list_solana_research_refresh_jobs(
+        self, owner_id: str, workspace_id: str, mint: str | None = None,
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        query = (
+            "SELECT id,mint,pool_address,interval_seconds,next_due_at,last_enqueued_at,"
+            "enabled,created_at,updated_at FROM solana_research_refresh_jobs "
+            "WHERE owner_id=? AND workspace_id=?"
+        )
+        params: list[Any] = [owner_id, workspace_id]
+        if mint is not None:
+            query += " AND mint=?"
+            params.append(_required_text(mint, "mint", 64))
+        query += " ORDER BY next_due_at,id"
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+        return [
+            {**dict(row), "status": "awaiting_pool" if row["pool_address"] == "__pending__"
+             else "scheduled", "enabled": bool(row["enabled"])}
+            for row in rows
+        ]
+
     def enqueue_due_solana_research_refreshes(self, limit: int = 100) -> int:
         """Atomically enqueue due recurring scans; repeated worker polls are idempotent."""
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
