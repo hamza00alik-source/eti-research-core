@@ -1147,7 +1147,7 @@ class MemoryStore:
                         )
                         refresh_now_dt = datetime.now(timezone.utc)
                         refresh_now = refresh_now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
-                        refresh_due = (refresh_now_dt + timedelta(seconds=900)).isoformat(
+                        refresh_due = (refresh_now_dt + timedelta(seconds=300)).isoformat(
                             timespec="microseconds"
                         ).replace("+00:00", "Z")
                         conn.execute(
