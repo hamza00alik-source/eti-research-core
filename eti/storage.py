@@ -923,7 +923,7 @@ class MemoryStore:
             query += " AND status = ?"
             params.append(status)
         query += " ORDER BY created_at DESC, id LIMIT ?"
-        params.append(limit + 1)
+        params.append(limit)
         with self._connection() as conn:
             rows = conn.execute(query, params).fetchall()
         return [
@@ -2783,7 +2783,7 @@ class MemoryStore:
             query += " AND mint=?"
             params.append(mint)
         query += " ORDER BY fetched_at ASC,id ASC LIMIT ?"
-        params.append(limit)
+        params.append(limit + 1)
         with self._connection() as conn:
             if not self._owns_workspace(conn, owner_id, workspace_id):
                 raise LookupError("workspace not found")
