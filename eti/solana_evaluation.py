@@ -136,6 +136,7 @@ def evaluate_prepared_solana_walk_forward(
     min_train_groups: int = 3,
     embargo_seconds: int = 86400,
     buy_pressure_threshold: float = 0.55,
+    execution_cost_evidence_by_label_id: dict[Any, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Join prepared rows to fixed chronological validation folds and benchmark.
 
@@ -152,6 +153,15 @@ def evaluate_prepared_solana_walk_forward(
     prepared_rows = prepared_dataset.get("rows")
     if not isinstance(prepared_rows, list):
         raise ValueError("prepared dataset rows must be a list")
+
+    if execution_cost_evidence_by_label_id is not None and not isinstance(execution_cost_evidence_by_label_id, dict):
+        raise ValueError("execution_cost_evidence_by_label_id must be a dictionary")
+    if execution_cost_evidence_by_label_id is not None:
+        for evidence_label_id, evidence_value in execution_cost_evidence_by_label_id.items():
+            if not isinstance(evidence_label_id, (str, int)) or isinstance(evidence_label_id, bool):
+                raise ValueError("execution cost evidence keys must be string or integer label IDs")
+            if not isinstance(evidence_value, dict):
+                raise ValueError("each execution cost evidence value must be a dictionary")
 
     rows_by_label_id: dict[Any, dict[str, Any]] = {}
     for row in prepared_rows:
@@ -190,6 +200,7 @@ def evaluate_prepared_solana_walk_forward(
     fold_metadata: list[dict[str, Any]] = []
     horizon_folds: dict[int, list[dict[str, Any]]] = {}
     validation_intervals: list[tuple[str, datetime, datetime]] = []
+    validation_cost_evidence: list[dict[str, Any]] = []
     for index, fold in enumerate(folds, start=1):
         validation_rows: list[dict[str, Any]] = []
         missing_prepared = 0
@@ -199,6 +210,18 @@ def evaluate_prepared_solana_walk_forward(
                 missing_prepared += 1
                 continue
             validation_rows.append(prepared)
+            if execution_cost_evidence_by_label_id is not None:
+                from eti.solana_costs import evaluate_execution_cost_evidence
+                cost_result = evaluate_execution_cost_evidence(
+                    prepared.get("target_sampled_price_return_pct"),
+                    execution_cost_evidence_by_label_id.get(label.get("id")),
+                )
+                validation_cost_evidence.append({
+                    "label_id": label.get("id"),
+                    "mint": label.get("mint"),
+                    "horizon_seconds": prepared.get("horizon_seconds"),
+                    **cost_result,
+                })
             horizon = prepared.get("horizon_seconds")
             if isinstance(horizon, int) and not isinstance(horizon, bool) and horizon > 0:
                 horizon_folds.setdefault(horizon, []).append({"fold": index, "row": prepared})
@@ -259,6 +282,36 @@ def evaluate_prepared_solana_walk_forward(
             active.append((start, end))
 
     report["by_horizon_seconds"] = by_horizon
+    if execution_cost_evidence_by_label_id is None:
+        report["execution_cost_evidence"] = {
+            "status": "NOT_SUPPLIED",
+            "validation_rows_checked": 0,
+            "complete_evidence_count": 0,
+            "incomplete_evidence_count": 0,
+            "net_return_pct": None,
+            "realized_pnl_available": False,
+            "note": "No execution-cost evidence was supplied; no cost-adjusted scenario is calculated.",
+        }
+    else:
+        complete_cost_rows = [row for row in validation_cost_evidence if row["cost_evidence_complete"] and _finite(row["cost_adjusted_sampled_mark_scenario_return_pct"])]
+        scenario_returns = [float(row["cost_adjusted_sampled_mark_scenario_return_pct"]) for row in complete_cost_rows]
+        ordered_scenarios = sorted(scenario_returns)
+        median_scenario = None
+        if ordered_scenarios:
+            middle = len(ordered_scenarios) // 2
+            median_scenario = ordered_scenarios[middle] if len(ordered_scenarios) % 2 else (ordered_scenarios[middle - 1] + ordered_scenarios[middle]) / 2
+        report["execution_cost_evidence"] = {
+            "status": "COST_EVIDENCE_DIAGNOSTICS_ONLY",
+            "validation_rows_checked": len(validation_cost_evidence),
+            "complete_evidence_count": len(complete_cost_rows),
+            "incomplete_evidence_count": len(validation_cost_evidence) - len(complete_cost_rows),
+            "cost_adjusted_sampled_mark_scenario_mean_pct": sum(scenario_returns) / len(scenario_returns) if scenario_returns else None,
+            "cost_adjusted_sampled_mark_scenario_median_pct": median_scenario,
+            "net_return_pct": None,
+            "realized_pnl_available": False,
+            "rows": validation_cost_evidence,
+            "note": "Only prepared validation labels are checked. These are cost-adjusted sampled-mark scenarios, not executable fills, net returns, or realized P&L.",
+        }
     report["validation_dependence"] = {
         "validation_label_count": len(validation_intervals),
         "distinct_validation_mint_count": len(intervals_by_mint),
