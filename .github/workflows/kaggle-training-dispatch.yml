@@ -1,0 +1,90 @@
+name: Run ETI Kaggle Training
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_run:
+        description: "Confirm that you want to start a Kaggle CPU run (uses Kaggle compute quota)"
+        required: true
+        type: choice
+        options:
+          - "no"
+          - "yes"
+        default: "no"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eti-kaggle-training
+  cancel-in-progress: false
+
+jobs:
+  train:
+    if: inputs.confirm_run == 'yes'
+    environment: hamza00alik
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Check out ETI main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Install Kaggle CLI
+        run: python -m pip install --upgrade kaggle
+
+      - name: Configure Kaggle credentials
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME || 'hamza00alik' }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY || secrets.HAMZA00ALIK }}
+        run: |
+          if [ -z "$KAGGLE_USERNAME" ] || [ -z "$KAGGLE_KEY" ]; then
+            echo "::error::Kaggle credentials unavailable. Configure the existing hamza00alik environment secret."
+            exit 1
+          fi
+          mkdir -p "$HOME/.kaggle"
+          python - <<'PY'
+          import json, os
+          p = os.path.expanduser("~/.kaggle/kaggle.json")
+          with open(p, "w") as f:
+              json.dump({"username": os.environ["KAGGLE_USERNAME"], "key": os.environ["KAGGLE_KEY"]}, f)
+          os.chmod(p, 0o600)
+          PY
+
+      - name: Pull existing Kaggle kernel metadata
+        env:
+          KERNEL: hamza00alik/eti-first-training-kaggle
+        run: |
+          mkdir -p kaggle_kernel
+          kaggle kernels pull "$KERNEL" -p kaggle_kernel -m
+          test -f kaggle_kernel/kernel-metadata.json
+
+      - name: Replace notebook with canonical ETI training notebook
+        run: |
+          python - <<'PY'
+          import json
+          import shutil
+          from pathlib import Path
+
+          folder = Path("kaggle_kernel")
+          metadata_path = folder / "kernel-metadata.json"
+          metadata = json.loads(metadata_path.read_text())
+          expected_id = "hamza00alik/eti-first-training-kaggle"
+          if metadata.get("id") != expected_id:
+              raise SystemExit(f"Kernel metadata ID mismatch: {metadata.get('id')!r}")
+          code_file = metadata.get("code_file")
+          if not isinstance(code_file, str) or not code_file.endswith(".ipynb"):
+              raise SystemExit(f"Unexpected Kaggle code_file: {code_file!r}")
+          source = Path("notebooks/ETI_v0_1_Training.ipynb")
+          if not source.is_file():
+              raise SystemExit(f"Canonical notebook missing: {source}")
+          destination = folder / code_file
+          destination.parent.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(source, destination)
+          print(f"Prepared {destination} for {expected_id}")
+          print("Preserved Kaggle kernel metadata, including privacy and internet settings.")
+          PY
+
+      - name: Push canonical notebook and start Kaggle run
+        run: kaggle kernels push -p kaggle_kernel --timeout 7200
