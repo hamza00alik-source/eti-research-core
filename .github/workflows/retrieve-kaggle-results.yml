@@ -1,0 +1,85 @@
+name: Retrieve ETI Kaggle training results
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["ETI Kaggle Training"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  retrieve:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Kaggle credentials
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          if [ -z "$KAGGLE_USERNAME" ] || [ -z "$KAGGLE_KEY" ]; then
+            echo "::error::Add KAGGLE_USERNAME and KAGGLE_KEY repository Actions secrets first."
+            exit 1
+          fi
+
+      - name: Install Kaggle CLI
+        run: python -m pip install --upgrade kaggle
+
+      - name: Download latest notebook output
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          mkdir -p kaggle-output
+          kaggle kernels output hamza00alik/eti-first-training-kaggle -p kaggle-output --force
+          find kaggle-output -maxdepth 4 -type f -printf '%p (%s bytes)\\n'
+
+      - name: Create readable metrics summary
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          matches = list(Path("kaggle-output").rglob("eti_training_metrics.json"))
+          if not matches:
+              raise SystemExit("eti_training_metrics.json was not found in Kaggle output")
+          source = matches[0]
+          data = json.loads(source.read_text())
+          root = data.get("root", data)
+          summary = {
+              "source_file": str(source),
+              "fold_count": root.get("fold_count"),
+              "mean_test_balanced_accuracy": root.get("mean_test_balanced_accuracy"),
+              "test_balanced_accuracy_ci": root.get("test_balanced_accuracy_ci"),
+              "trading_performance": root.get("trading_performance"),
+              "warning": root.get("warning"),
+          }
+          Path("kaggle-output/ETI_RESULTS_SUMMARY.json").write_text(
+              json.dumps(summary, indent=2, allow_nan=False) + "\\n"
+          )
+          print(json.dumps(summary, indent=2))
+          PY
+
+      - name: Publish results as downloadable workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eti-kaggle-training-results
+          path: kaggle-output/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Add key metrics to workflow summary
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("kaggle-output/ETI_RESULTS_SUMMARY.json")
+          d = json.loads(p.read_text())
+          with open(Path(__import__("os").environ["GITHUB_STEP_SUMMARY"]), "a") as f:
+              f.write("# ETI Kaggle training results\\n\\n")
+              f.write(f"- Evaluation folds: {d.get('fold_count')}\\n")
+              f.write(f"- Mean balanced accuracy: {d.get('mean_test_balanced_accuracy')}\\n")
+              f.write(f"- Trading summary: see downloadable JSON artifact\\n")
+              f.write(f"- Warning: {d.get('warning')}\\n")
+          PY
