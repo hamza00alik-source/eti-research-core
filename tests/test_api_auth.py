@@ -544,3 +544,45 @@ def test_authenticated_solana_event_ledger_is_idempotent_and_workspace_scoped(tm
         assert client.get(
             f"/v1/workspaces/{workspace_id}/solana/events",
         ).status_code == 401
+
+def test_solana_dataset_export_api_requires_auth_and_isolates_workspaces(tmp_path, monkeypatch):
+    database = tmp_path / "solana-export-api.sqlite3"
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(database))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        assert client.get("/v1/workspaces/not-owned/solana/dataset-export").status_code == 401
+        owner = _register(client, "solana_export_owner")
+        other = _register(client, "solana_export_other")
+        owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+        other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+        workspace_response = client.post(
+            "/v1/workspaces", headers=owner_headers, json={"name": "Solana export"}
+        )
+        assert workspace_response.status_code == 201, workspace_response.text
+        workspace_id = workspace_response.json()["id"]
+
+        own_export = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/dataset-export",
+            headers=owner_headers,
+        )
+        assert own_export.status_code == 200, own_export.text
+        assert own_export.json()["schema"] == "eti.solana.research_dataset.v1"
+        assert own_export.json()["snapshot_count"] == 0
+
+        foreign_export = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/dataset-export",
+            headers=other_headers,
+        )
+        assert foreign_export.status_code == 404
+
+        invalid_limit = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/dataset-export?limit=5001",
+            headers=owner_headers,
+        )
+        assert invalid_limit.status_code == 422
+        invalid_mint = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/dataset-export?mint=short",
+            headers=owner_headers,
+        )
+        assert invalid_mint.status_code == 422
