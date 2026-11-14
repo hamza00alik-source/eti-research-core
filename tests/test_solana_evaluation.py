@@ -721,3 +721,64 @@ def test_time_series_regime_horizon_summary_requires_predeclared_row_count():
     assert stratum["summary"]["trade_count"] == 5
     assert stratum["distinct_mint_count"] == 1
     assert stratum["mint_cluster_bootstrap"]["status"] == "INSUFFICIENT_MINT_CLUSTERS"
+
+
+def test_fold_regime_stability_rejects_mint_concentration_and_reports_sign_consistency():
+    from eti.solana_evaluation import evaluate_solana_fold_regime_stability
+
+    thresholds = {
+        "buy_pressure_high": 0.7,
+        "buy_pressure_low": 0.3,
+        "turnover_liquidity_ratio_high": 5.0,
+        "turnover_liquidity_ratio_low": 1.0,
+    }
+
+    def row(mint, outcome):
+        return {
+            "mint": mint,
+            "target_sampled_price_return_pct": outcome,
+            "features": {
+                "txns_h1_buys": 8, "txns_h1_sells": 2,
+                "volume_h24_usd": 100, "liquidity_usd": 10,
+            },
+        }
+
+    report = evaluate_solana_fold_regime_stability(
+        [
+            {"fold": 1, "validation": [
+                row("mint-a", 2.0), row("mint-a", 1.0),
+                row("mint-b", 3.0), row("mint-b", 2.0),
+                row("mint-c", 1.0),
+            ]},
+            {"fold": 2, "validation": [
+                row("mint-z", -2.0), row("mint-z", -1.0),
+                row("mint-z", -3.0), row("mint-z", -2.0),
+                row("mint-z", -1.0),
+            ]},
+        ],
+        thresholds,
+    )
+    regime = "BUY_DOMINANT__HIGH_TURNOVER_PROXY"
+    first = report["folds"][0]["regimes"][regime]
+    second = report["folds"][1]["regimes"][regime]
+    assert first["stability_eligible"] is True
+    assert first["distinct_mint_count"] == 3
+    assert first["largest_mint_row_share"] == 0.4
+    assert second["stability_eligible"] is False
+    assert second["distinct_mint_count"] == 1
+    stability = report["regimes"][regime]["always_long"]
+    assert stability["eligible_fold_count"] == 1
+    assert stability["positive_mean_fold_count"] == 1
+    assert stability["negative_mean_fold_count"] == 0
+    assert stability["mean_return_sign_consistency"] == 1.0
+    assert report["training_authorized"] is False
+
+
+def test_fold_regime_stability_is_not_configured_without_predeclared_thresholds():
+    from eti.solana_evaluation import evaluate_solana_fold_regime_stability
+
+    report = evaluate_solana_fold_regime_stability(
+        [{"fold": 1, "validation": []}], None
+    )
+    assert report["status"] == "NOT_CONFIGURED"
+    assert report["regimes"] == {}
