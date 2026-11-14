@@ -889,7 +889,7 @@ def evaluate_prepared_solana_walk_forward(
     benchmark_folds: list[dict[str, Any]] = []
     fold_metadata: list[dict[str, Any]] = []
     horizon_folds: dict[int, list[dict[str, Any]]] = {}
-    validation_intervals: list[tuple[str, datetime, datetime]] = []
+    validation_intervals: list[tuple[str, datetime, datetime, int]] = []
     validation_cost_evidence: list[dict[str, Any]] = []
     validation_transaction_attestations: list[dict[str, Any]] = []
     for index, fold in enumerate(folds, start=1):
@@ -994,7 +994,7 @@ def evaluate_prepared_solana_walk_forward(
                 end = datetime.fromisoformat(str(label["target_at"]).replace("Z", "+00:00"))
                 mint = label.get("mint")
                 if isinstance(mint, str) and start.tzinfo is not None and end.tzinfo is not None and end > start:
-                    validation_intervals.append((mint, start, end))
+                    validation_intervals.append((mint, start, end, index))
             except (KeyError, TypeError, ValueError):
                 pass
         benchmark_folds.append({"fold": index, "validation": validation_rows})
@@ -1050,8 +1050,10 @@ def evaluate_prepared_solana_walk_forward(
     overlap_comparisons = 0
     overlapping_pairs = 0
     intervals_by_mint: dict[str, list[tuple[datetime, datetime]]] = {}
-    for mint, start, end in validation_intervals:
+    fold_mints: dict[int, set[str]] = {}
+    for mint, start, end, fold_number in validation_intervals:
         intervals_by_mint.setdefault(mint, []).append((start, end))
+        fold_mints.setdefault(fold_number, set()).add(mint)
     for intervals in intervals_by_mint.values():
         intervals.sort(key=lambda pair: pair[0])
         active: list[tuple[datetime, datetime]] = []
@@ -1060,6 +1062,26 @@ def evaluate_prepared_solana_walk_forward(
             overlap_comparisons += len(active)
             overlapping_pairs += sum(1 for a, b in active if a < end and start < b)
             active.append((start, end))
+
+    # Cross-mint interval overlap is a separate dependence channel: distinct
+    # token identities can still share the same market-wide shock window.
+    all_intervals = sorted(validation_intervals, key=lambda item: item[1])
+    active_global: list[tuple[str, datetime, datetime]] = []
+    cross_mint_overlapping_pairs = 0
+    cross_mint_overlap_comparisons = 0
+    for mint, start, end, _fold_number in all_intervals:
+        active_global = [(other, a, b) for other, a, b in active_global if b > start]
+        cross_mint_overlap_comparisons += sum(1 for other, _a, _b in active_global if other != mint)
+        cross_mint_overlapping_pairs += sum(
+            1 for other, a, b in active_global
+            if other != mint and a < end and start < b
+        )
+        active_global.append((mint, start, end))
+    mint_fold_counts: dict[str, int] = {}
+    for mint_set in fold_mints.values():
+        for mint in mint_set:
+            mint_fold_counts[mint] = mint_fold_counts.get(mint, 0) + 1
+    repeated_mint_across_fold_count = sum(1 for count in mint_fold_counts.values() if count > 1)
 
     report["by_horizon_seconds"] = by_horizon
     if transaction_attestations_by_label_id is None:
