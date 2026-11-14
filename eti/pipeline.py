@@ -17,6 +17,7 @@ from .artifacts import ModelArtifactStore
 from .simulator import simulate_long_flat
 from .performance import evaluate_predictions
 from .regimes import classify_market_regime
+from .universe import scan_market_universe
 
 
 def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h") -> dict:
@@ -393,15 +394,39 @@ def main():
                         help="explicitly fit and save one deployable model artifact after evaluation")
     parser.add_argument("--model-id", default="eti-baseline")
     parser.add_argument("--model-version", default="0.1.0")
+    parser.add_argument("--scan-universe", action="store_true",
+                        help="discover a bounded multi-asset universe and check data readiness without training")
+    parser.add_argument("--asset-classes", default="crypto,forex,equity,commodity,index",
+                        help="comma-separated asset classes for --scan-universe")
+    parser.add_argument("--market-types", default="spot",
+                        help="comma-separated market types for --scan-universe")
+    parser.add_argument("--max-per-asset-class", type=int, default=5,
+                        help="candidate cap per asset class for --scan-universe")
+    parser.add_argument("--max-per-venue", type=int, default=2,
+                        help="candidate cap per venue within each asset class")
+    parser.add_argument("--min-market-rows", type=int, default=662,
+                        help="minimum valid candles required for a data-ready universe candidate")
     args = parser.parse_args()
     if args.save_model and args.max_model_fits < 2:
         parser.error("--save-model requires a fit cap of at least 2 (one final deployable fit plus evaluation)")
     nested_fit_cap = args.max_model_fits - (1 if args.save_model else 0)
+    if args.scan_universe and (args.csv or args.symbols or args.save_model):
+        parser.error("--scan-universe cannot be combined with --csv, --symbols or --save-model")
     if args.csv and args.symbols:
         parser.error("--csv cannot be combined with --symbols")
     if args.save_model and args.symbols:
         parser.error("--save-model currently requires one symbol or one CSV dataset")
-    if args.csv:
+    if args.scan_universe:
+        asset_classes = [item.strip() for item in args.asset_classes.split(",") if item.strip()]
+        market_types = [item.strip() for item in args.market_types.split(",") if item.strip()]
+        metrics = scan_market_universe(
+            asset_classes=asset_classes, market_types=market_types,
+            timeframe=args.timeframe, limit=args.limit,
+            min_rows=args.min_market_rows,
+            max_per_asset_class=args.max_per_asset_class,
+            max_per_venue=args.max_per_venue,
+        )
+    elif args.csv:
         frame = pd.read_csv(args.csv)
         now_ms = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
         frame = drop_incomplete_candles(frame, int(_timeframe_seconds(args.timeframe) * 1000), now_ms)
@@ -457,7 +482,7 @@ def main():
             step_size=args.step_size, timeframe=args.timeframe,
             max_model_fits=nested_fit_cap,
         ) if args.evaluation == "nested" else run_experiment(frame, horizon=args.horizon, timeframe=args.timeframe)
-    if not args.csv:
+    if not args.csv and not args.scan_universe:
         metrics["market_data"] = (
             {"mode": "multi_symbol", "sources": source_records}
             if args.symbols else source_record
