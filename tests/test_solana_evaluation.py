@@ -545,6 +545,8 @@ def test_time_series_regimes_use_only_prior_same_mint_pool_prices():
     report = evaluate_solana_time_series_regimes(history, validation, config)
     assert report["status"] == "TIME_SERIES_PROXY_REGIME_DIAGNOSTICS_ONLY"
     assert report["classified_row_count"] == 1
+    assert len(report["classified_observations"]) == 1
+    assert report["regime_transitions"]["training_authorized"] is False
     assert "UPWARD_TREND_PROXY__LOW_TIME_NORMALIZED_VOLATILITY_PROXY" in report["regimes"]
 
     # A future price observation and another pool must not affect this label.
@@ -859,3 +861,42 @@ def test_fold_time_series_regime_stability_requires_explicit_config():
     )
     assert report["status"] == "NOT_CONFIGURED"
     assert report["regimes_by_horizon_seconds"] == {}
+
+
+
+def test_regime_transitions_are_mint_pool_horizon_local_and_fail_closed():
+    from eti.solana_evaluation import evaluate_solana_regime_transitions
+
+    observations = []
+    for mint in ("mint-a", "mint-b", "mint-c"):
+        observations.extend([
+            {"mint": mint, "pool_address": "pool-" + mint, "horizon_seconds": "60",
+             "baseline_at": "2026-01-01T00:00:00+00:00", "regime": "UP"},
+            {"mint": mint, "pool_address": "pool-" + mint, "horizon_seconds": "60",
+             "baseline_at": "2026-01-01T00:01:00+00:00", "regime": "DOWN"},
+            {"mint": mint, "pool_address": "pool-" + mint, "horizon_seconds": "60",
+             "baseline_at": "2026-01-01T00:02:00+00:00", "regime": "UP"},
+        ])
+    # Same timestamp with contradictory assignments is excluded, not ordered.
+    observations.extend([
+        {"mint": "mint-conflict", "pool_address": "pool-conflict", "horizon_seconds": "60",
+         "baseline_at": "2026-01-01T00:00:00+00:00", "regime": "UP"},
+        {"mint": "mint-conflict", "pool_address": "pool-conflict", "horizon_seconds": "60",
+         "baseline_at": "2026-01-01T00:00:00+00:00", "regime": "DOWN"},
+        {"mint": "mint-conflict", "pool_address": "pool-conflict", "horizon_seconds": "60",
+         "baseline_at": "2026-01-01T00:01:00+00:00", "regime": "UP"},
+    ])
+    report = evaluate_solana_regime_transitions(
+        observations, minimum_transitions=3, minimum_mints=3
+    )
+    assert report["total_transition_count"] == 6
+    assert report["distinct_mint_count_with_transitions"] == 3
+    assert report["conflicting_timestamp_count"] == 1
+    assert report["training_authorized"] is False
+    up_down = report["transitions_by_horizon_seconds"]["60"]["UP -> DOWN"]
+    assert up_down["transition_count"] == 3
+    assert up_down["distinct_mint_count"] == 3
+    assert up_down["status"] == "DESCRIPTIVE_TRANSITION_THRESHOLD_MET"
+
+    with pytest.raises(ValueError):
+        evaluate_solana_regime_transitions([], minimum_transitions=0)
