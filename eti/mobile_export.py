@@ -54,6 +54,12 @@ def export_model_to_onnx(
     import skl2onnx.common._container as converter_container
 
     original_make_node = converter_container.make_node
+    original_make_attribute = converter_container.make_attribute
+
+    def _make_attribute_with_integer_boolean_attrs(name, value, *args, **kwargs):
+        if name == "nodes_missing_value_tracks_true":
+            value = [int(item) for item in value]
+        return original_make_attribute(name, value, *args, **kwargs)
 
     def _make_node_with_integer_boolean_attrs(op_type, inputs, outputs, **attrs):
         normalized = {}
@@ -66,6 +72,7 @@ def export_model_to_onnx(
         return original_make_node(op_type, inputs, outputs, **normalized)
 
     converter_container.make_node = _make_node_with_integer_boolean_attrs
+    converter_container.make_attribute = _make_attribute_with_integer_boolean_attrs
     try:
         converted = convert_sklearn(
             estimator,
@@ -75,6 +82,7 @@ def export_model_to_onnx(
         )
     finally:
         converter_container.make_node = original_make_node
+        converter_container.make_attribute = original_make_attribute
     onnx.checker.check_model(converted)
     model_bytes = converted.SerializeToString()
 
