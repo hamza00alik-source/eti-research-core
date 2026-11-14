@@ -137,6 +137,7 @@ def evaluate_prepared_solana_walk_forward(
     embargo_seconds: int = 86400,
     buy_pressure_threshold: float = 0.55,
     execution_cost_evidence_by_label_id: dict[Any, dict[str, Any]] | None = None,
+    transaction_attestations_by_label_id: dict[Any, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Join prepared rows to fixed chronological validation folds and benchmark.
 
@@ -162,6 +163,15 @@ def evaluate_prepared_solana_walk_forward(
                 raise ValueError("execution cost evidence keys must be string or integer label IDs")
             if not isinstance(evidence_value, dict):
                 raise ValueError("each execution cost evidence value must be a dictionary")
+
+    if transaction_attestations_by_label_id is not None:
+        if not isinstance(transaction_attestations_by_label_id, dict):
+            raise ValueError("transaction_attestations_by_label_id must be a dictionary")
+        for attestation_label_id, records in transaction_attestations_by_label_id.items():
+            if not isinstance(attestation_label_id, (str, int)) or isinstance(attestation_label_id, bool):
+                raise ValueError("transaction attestation keys must be string or integer label IDs")
+            if not isinstance(records, list) or any(not isinstance(record, dict) for record in records):
+                raise ValueError("transaction attestation values must be lists of records")
 
     rows_by_label_id: dict[Any, dict[str, Any]] = {}
     for row in prepared_rows:
@@ -201,6 +211,7 @@ def evaluate_prepared_solana_walk_forward(
     horizon_folds: dict[int, list[dict[str, Any]]] = {}
     validation_intervals: list[tuple[str, datetime, datetime]] = []
     validation_cost_evidence: list[dict[str, Any]] = []
+    validation_transaction_attestations: list[dict[str, Any]] = []
     for index, fold in enumerate(folds, start=1):
         validation_rows: list[dict[str, Any]] = []
         missing_prepared = 0
@@ -215,6 +226,58 @@ def evaluate_prepared_solana_walk_forward(
             ):
                 raise ValueError("prepared row identity does not match its exported label")
             validation_rows.append(prepared)
+            if transaction_attestations_by_label_id is not None:
+                import hashlib
+                import json
+                expected_identity = {
+                    "label_id": label.get("id"),
+                    "mint": label.get("mint"),
+                    "pool_address": label.get("pool_address"),
+                }
+                supplied_records = transaction_attestations_by_label_id.get(label.get("id"), [])
+                integrity_valid_count = 0
+                receipt_observation_count = 0
+                rejected_record_count = 0
+                for record in supplied_records:
+                    attestation = record.get("attestation")
+                    digest = record.get("attestation_sha256")
+                    try:
+                        encoded = json.dumps(
+                            attestation, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+                        )
+                        digest_valid = hashlib.sha256(encoded.encode("utf-8")).hexdigest() == digest
+                    except (TypeError, ValueError):
+                        digest_valid = False
+                    record_identity = {
+                        "label_id": record.get("label_id"),
+                        "mint": record.get("mint"),
+                        "pool_address": record.get("pool_address"),
+                    }
+                    if record.get("integrity_valid") is True and digest_valid and record_identity == expected_identity:
+                        integrity_valid_count += 1
+                        if (
+                            isinstance(attestation, dict)
+                            and attestation.get("transaction_receipt_verified") is True
+                            and attestation.get("verified") is False
+                            and attestation.get("status") == "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED"
+                            and attestation.get("signature") == record.get("signature")
+                            and attestation.get("mint") == expected_identity["mint"]
+                            and attestation.get("expected_pool_address") == expected_identity["pool_address"]
+                            and attestation.get("wallet_address") == record.get("wallet_address")
+                        ):
+                            receipt_observation_count += 1
+                        else:
+                            rejected_record_count += 1
+                    else:
+                        rejected_record_count += 1
+                validation_transaction_attestations.append({
+                    **expected_identity,
+                    "horizon_seconds": prepared.get("horizon_seconds"),
+                    "attestation_record_count": len(supplied_records),
+                    "integrity_valid_record_count": integrity_valid_count,
+                    "finalized_receipt_observation_count": receipt_observation_count,
+                    "rejected_record_count": rejected_record_count,
+                })
             if execution_cost_evidence_by_label_id is not None:
                 from eti.solana_costs import evaluate_execution_cost_evidence
                 evidence = execution_cost_evidence_by_label_id.get(label.get("id"))
@@ -303,6 +366,33 @@ def evaluate_prepared_solana_walk_forward(
             active.append((start, end))
 
     report["by_horizon_seconds"] = by_horizon
+    if transaction_attestations_by_label_id is None:
+        report["transaction_receipt_attestations"] = {
+            "status": "NOT_SUPPLIED",
+            "validation_rows_checked": 0,
+            "attestation_record_count": 0,
+            "integrity_valid_record_count": 0,
+            "finalized_receipt_observation_count": 0,
+            "rejected_record_count": 0,
+            "verified_swap_count": 0,
+            "net_return_pct": None,
+            "realized_pnl_available": False,
+            "note": "No receipt attestations were supplied. Receipt observations are not verified swaps, exits, fills, or P&L.",
+        }
+    else:
+        report["transaction_receipt_attestations"] = {
+            "status": "RECEIPT_OBSERVATION_DIAGNOSTICS_ONLY",
+            "validation_rows_checked": len(validation_transaction_attestations),
+            "attestation_record_count": sum(row["attestation_record_count"] for row in validation_transaction_attestations),
+            "integrity_valid_record_count": sum(row["integrity_valid_record_count"] for row in validation_transaction_attestations),
+            "finalized_receipt_observation_count": sum(row["finalized_receipt_observation_count"] for row in validation_transaction_attestations),
+            "rejected_record_count": sum(row["rejected_record_count"] for row in validation_transaction_attestations),
+            "verified_swap_count": 0,
+            "net_return_pct": None,
+            "realized_pnl_available": False,
+            "rows": validation_transaction_attestations,
+            "note": "Digest and label identity checks support record-integrity diagnostics only. Finalized receipt observations do not prove swap causality, fill price, successful exit, transaction costs, or realized P&L.",
+        }
     if execution_cost_evidence_by_label_id is None:
         report["execution_cost_evidence"] = {
             "status": "NOT_SUPPLIED",
