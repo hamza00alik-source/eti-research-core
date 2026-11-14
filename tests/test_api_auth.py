@@ -702,3 +702,79 @@ def test_solana_transaction_verification_api_is_authenticated_and_workspace_scop
         assert response.json()["transaction_receipt_verified"] is True
         assert response.json()["status"] == "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED"
 
+
+
+def test_solana_transaction_attestation_api_verifies_and_persists_server_report(tmp_path, monkeypatch):
+    import json
+    import eti.api as api_module
+
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "solana-tx-attest.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+    def b58(data):
+        number = int.from_bytes(data, "big")
+        encoded = ""
+        while number:
+            number, remainder = divmod(number, 58)
+            encoded = alphabet[remainder] + encoded
+        return "1" * (len(data) - len(data.lstrip(b"\\x00"))) + encoded
+
+    signature = b58(bytes(range(1, 65)))
+    mint = b58(bytes(range(65, 97)))
+    pool = b58(bytes(range(129, 161)))
+    wallet = b58(bytes(range(161, 193)))
+
+    class FakeRpc:
+        def call(self, method, params):
+            if method == "getSignatureStatuses":
+                return {"value": [{"slot": 7, "err": None, "confirmationStatus": "finalized"}]}
+            if method == "getTransaction":
+                return {
+                    "slot": 7, "blockTime": 1794672000,
+                    "transaction": {
+                        "signatures": [signature],
+                        "message": {"accountKeys": [{"pubkey": pool}, {"pubkey": wallet}]},
+                    },
+                    "meta": {
+                        "err": None,
+                        "preTokenBalances": [{"mint": mint, "owner": wallet,
+                            "uiTokenAmount": {"amount": "80", "decimals": 6}}],
+                        "postTokenBalances": [{"mint": mint, "owner": wallet,
+                            "uiTokenAmount": {"amount": "30", "decimals": 6}}],
+                    },
+                }
+            raise AssertionError(method)
+
+    monkeypatch.setattr(api_module, "SolanaRpcClient", lambda: FakeRpc())
+    with TestClient(app) as client:
+        owner = _register(client, "tx_attest_owner")
+        other = _register(client, "tx_attest_other")
+        headers = {"Authorization": f"Bearer {owner['access_token']}"}
+        other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+        workspace = client.post("/v1/workspaces", headers=headers, json={"name": "attest"}).json()
+        workspace_id = workspace["id"]
+        label_id = "attest-label"
+        with api_module._memory_store()._connection() as conn:
+            conn.execute(
+                "INSERT INTO solana_research_labels "
+                "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
+                "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (label_id, owner["id"], workspace_id, mint, pool, "base", "target", 3600,
+                 json.dumps({"baseline_at": "2026-01-01T00:00:00Z"}), "2026-01-01T00:00:00Z"),
+            )
+        url = f"/v1/workspaces/{workspace_id}/solana/transaction-attestations"
+        body = {"label_id": label_id, "signature": signature, "mint": mint,
+                "expected_pool_address": pool, "wallet_address": wallet}
+        assert client.post(url, json=body).status_code == 401
+        assert client.post(url, headers=other_headers, json=body).status_code == 404
+        saved = client.post(url, headers=headers, json=body)
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["recorded"] is True
+        assert saved.json()["verification"]["verified"] is False
+        assert saved.json()["attestation"]["integrity_valid"] is True
+        listed = client.get(url, headers=headers)
+        assert listed.status_code == 200
+        assert len(listed.json()["items"]) == 1
+        assert client.get(url, headers=other_headers).status_code == 404
