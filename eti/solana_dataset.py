@@ -104,3 +104,126 @@ def validate_snapshot_rows(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
         "row_issue_list_truncated": len(invalid_rows) > 500,
         "note": "No values are repaired or imputed; zero liquidity/price and negative values are flagged for review.",
     }
+
+
+def prepare_solana_training_rows(dataset_export: dict[str, Any]) -> dict[str, Any]:
+    """Build a conservative baseline-only research matrix; never authorize training.
+
+    A label is retained only when both referenced snapshots are present in this
+    export, the export reports no label-reference issues, both snapshots are
+    valid market-scan rows, all baseline features are finite and positive where
+    required, and the sampled-return outcome is finite. Target snapshot values
+    are never copied into the feature vector.
+    """
+    if not isinstance(dataset_export, dict) or dataset_export.get("schema") != "eti.solana.research_dataset.v1":
+        raise ValueError("unsupported Solana research dataset export")
+    snapshots = dataset_export.get("snapshots")
+    labels = dataset_export.get("labels")
+    if not isinstance(snapshots, list) or not isinstance(labels, list):
+        raise ValueError("dataset export must contain snapshot and label lists")
+
+    snapshot_by_id = {
+        row.get("id"): row for row in snapshots
+        if isinstance(row, dict) and isinstance(row.get("id"), str)
+    }
+    diagnostics = validate_snapshot_rows(snapshots)
+    invalid_snapshot_ids = {
+        issue.get("snapshot_id") for issue in diagnostics["row_issues"]
+    }
+    eligible: list[dict[str, Any]] = []
+    excluded: dict[str, int] = {}
+
+    def reject(reason: str) -> None:
+        excluded[reason] = excluded.get(reason, 0) + 1
+
+    for label in labels:
+        if not isinstance(label, dict):
+            reject("malformed_label")
+            continue
+        if label.get("label_parse_error") or not isinstance(label.get("label"), dict):
+            reject("malformed_label")
+            continue
+        if label.get("reference_issues") != []:
+            reject("label_reference_issues")
+            continue
+        baseline_id = label.get("baseline_snapshot_id")
+        target_id = label.get("target_snapshot_id")
+        if not label.get("baseline_snapshot_in_export") or not label.get("target_snapshot_in_export"):
+            reject("referenced_snapshot_not_in_export")
+            continue
+        baseline = snapshot_by_id.get(baseline_id)
+        target = snapshot_by_id.get(target_id)
+        if baseline is None or target is None:
+            reject("referenced_snapshot_missing")
+            continue
+        if baseline_id == target_id:
+            reject("invalid_snapshot_pair")
+            continue
+        if baseline_id in invalid_snapshot_ids or target_id in invalid_snapshot_ids:
+            reject("snapshot_validation_issues")
+            continue
+        if baseline.get("capability") != "solana.market.scan" or target.get("capability") != "solana.market.scan":
+            reject("unsupported_snapshot_capability")
+            continue
+        if baseline.get("schema_version") != 1 or target.get("schema_version") != 1:
+            reject("unsupported_snapshot_schema")
+            continue
+        if (baseline.get("mint"), baseline.get("pool_address")) != (label.get("mint"), label.get("pool_address")):
+            reject("baseline_identity_mismatch")
+            continue
+        if (target.get("mint"), target.get("pool_address")) != (label.get("mint"), label.get("pool_address")):
+            reject("target_identity_mismatch")
+            continue
+        horizon = label.get("horizon_seconds")
+        if isinstance(horizon, bool) or not isinstance(horizon, int) or horizon <= 0:
+            reject("invalid_horizon")
+            continue
+        outcome = label["label"].get("sampled_price_return_pct")
+        if isinstance(outcome, bool) or not isinstance(outcome, (int, float)) or not _is_finite_number(outcome):
+            reject("invalid_outcome")
+            continue
+        evidence = baseline.get("payload", {}).get("evidence")
+        if not isinstance(evidence, dict):
+            reject("missing_baseline_evidence")
+            continue
+        features: dict[str, int | float] = {}
+        feature_error = False
+        for field in NUMERIC_FIELDS:
+            value = evidence.get(field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not _is_finite_number(value):
+                feature_error = True
+                break
+            if value < 0 or (value == 0 and field in {"price_usd", "liquidity_usd"}):
+                feature_error = True
+                break
+            features[field] = value
+        if feature_error:
+            reject("invalid_baseline_features")
+            continue
+        eligible.append({
+            "label_id": label.get("id"),
+            "mint": label.get("mint"),
+            "pool_address": label.get("pool_address"),
+            "baseline_snapshot_id": baseline_id,
+            "target_snapshot_id": target_id,
+            "horizon_seconds": horizon,
+            "features": features,
+            "target_sampled_price_return_pct": outcome,
+        })
+
+    return {
+        "status": "PREPARATION_ONLY",
+        "training_authorized": False,
+        "prediction_features_source": "baseline_snapshot_only",
+        "target_outcome": "sampled_price_return_pct",
+        "rows": eligible,
+        "eligible_row_count": len(eligible),
+        "excluded_label_count": sum(excluded.values()),
+        "exclusion_counts": excluded,
+        "limitations": [
+            "This helper prepares research rows only; it does not fit, train, approve, or deploy a model.",
+            "Target snapshot values are never included in prediction features.",
+            "Both baseline and target snapshots must be present and pass export validation; bounded exports may therefore exclude otherwise valid labels.",
+            "Sampled price returns are not executable returns or net P&L.",
+        ],
+    }
