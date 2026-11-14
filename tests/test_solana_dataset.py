@@ -317,6 +317,7 @@ def test_training_preparation_uses_only_valid_baseline_features():
     row = prepared["rows"][0]
     assert row["features"]["price_usd"] == 1.0
     assert row["target_sampled_price_return_pct"] == 100.0
+    assert row["baseline_at"] == baseline["fetched_at"]
     assert "target_price_usd" not in row["features"]
     assert row["features"] == baseline["payload"]["evidence"]
 
