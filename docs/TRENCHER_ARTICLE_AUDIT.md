@@ -167,3 +167,17 @@ Grok Bot is a development/work-computer environment, not the trading system's da
 - **Jev economics and quotas:** the article's exact `$0.042 / 1M input tokens` and `1,200 requests/minute` claims were not established from the primary API reference reviewed. Check the current account/model pricing and rate-limit headers before budgeting.
 - **FOMO economics and referral:** the claimed fee bands, 10% lifetime referral discount and zero-gas statement were not verified against a current first-party FOMO fee schedule in this audit. They must not be used as fixed paper-trading assumptions.
 - **RugCheck:** both the full report and insider-graph routes are documented by public API references. The report summary also exposes fields such as `lpLockedPct`, but a token-level aggregate is not necessarily the same as the exact Scanner pool's LP lock percentage. The article's pool-to-LP mapping still requires raw-response validation and should remain UNKNOWN until it is proven for the selected pair.
+
+
+### First-party FOMO terms check (material finding)
+
+FOMO Labs' current Terms of Service (last updated October 26, 2026) materially strengthen the rejection of the article's private-session integration:
+
+- Section 16 expressly prohibits unauthorized automated access to non-public FOMO systems, automated bots/scripts that interact with account activity or execute trades, unauthorized scraping/data extraction, and third-party tools accessing the service or retrieving data without an integration/functionality expressly authorized by Fomo.
+- Section 16 specifically prohibits supplying or transferring authentication tokens, session tokens, session cookies, API keys or other account credentials to a third party for those purposes without Fomo's express authorization; the restriction applies even to valid credentials and even where the account holder consents.
+- Sections 4 and 6 warn that third-party tools accessing an account may expose credentials/account data or enable unauthorized action; Fomo may revoke sessions and restrict accounts if it suspects unapproved tools.
+- Section 7 says Fomo fees vary by transaction size/type/token/route and the fee displayed at confirmation controls. It separately warns that network gas, pool fees and price differences can apply; network charges may occur even on failed transactions.
+
+Therefore, the article's use of a browser-captured Privy/session bearer token and private backend endpoints is not just brittle: it conflicts with the current published terms unless Fomo expressly authorizes that integration. ETI must not reproduce it. The article's fixed fee tiers, "10% lifetime" referral assumption and universal zero-gas assumption are not reliable substitutes for transaction-specific current fee/cost data.
+
+First-party terms: https://fomo.family/terms (especially Sections 4, 6, 7 and 16).
