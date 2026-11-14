@@ -472,7 +472,8 @@ def test_solana_event_ledger_is_durable_idempotent_and_owner_scoped(tmp_path):
     assert len(items) == 1
     assert items[0]["payload"] == payload
     assert items[0]["payload_sha256"] == first["payload_sha256"]
-    assert reopened.list_solana_research_events("owner-b", workspace["id"]) == []
+    with pytest.raises(LookupError, match="workspace not found"):
+        reopened.list_solana_research_events("owner-b", workspace["id"])
 
 
 def test_solana_event_ledger_rejects_invalid_event_data(tmp_path):
