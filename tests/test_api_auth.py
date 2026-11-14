@@ -761,7 +761,7 @@ def test_solana_transaction_attestation_api_verifies_and_persists_server_report(
                 "INSERT INTO solana_research_labels "
                 "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
                 "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (label_id, owner["id"], workspace_id, mint, pool, "base", "target", 3600,
+                (label_id, owner["account"]["id"], workspace_id, mint, pool, "base", "target", 3600,
                  json.dumps({"baseline_at": "2026-01-01T00:00:00Z"}), "2026-01-01T00:00:00Z"),
             )
         url = f"/v1/workspaces/{workspace_id}/solana/transaction-attestations"
