@@ -192,6 +192,23 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _training_data_quality_review(data_quality: dict[str, Any], asset_class: str) -> dict[str, Any]:
+    """Apply strict freshness only to 24/7 crypto; session-calendar gaps stay informational."""
+    is_continuous_market = asset_class == "crypto"
+    return {
+        "freshness_gate_applied": is_continuous_market,
+        "freshness_gate_passed": data_quality["status"] == "fresh" if is_continuous_market else None,
+        "calendar_gaps_blocking": False,
+        "calendar_coverage_ratio": data_quality["calendar_coverage_ratio"],
+        "gap_count": data_quality["gap_count"],
+        "review_note": (
+            "Crypto trades continuously; stale latest candles block candidate evaluation."
+            if is_continuous_market
+            else "Freshness and elapsed-calendar gaps are informational because provider session calendars, weekends and holidays are not modeled."
+        ),
+    }
+
+
 def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     """Train a multi-asset research candidate; approval remains gated by data quality."""
     asset_class, market_type, venue, provider = _market_provider(payload)
@@ -211,18 +228,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     frame = provider.fetch_ohlcv(symbol, timeframe, limit)
     # Assess the raw OHLCV frame before derivative enrichment adds optional columns.
     data_quality = assess_ohlcv_quality(frame, timeframe)
-    data_quality_review = {
-        "freshness_gate_applied": asset_class == "crypto",
-        "freshness_gate_passed": data_quality["status"] == "fresh" if asset_class == "crypto" else None,
-        "calendar_gaps_blocking": False,
-        "calendar_coverage_ratio": data_quality["calendar_coverage_ratio"],
-        "gap_count": data_quality["gap_count"],
-        "review_note": (
-            "Crypto trades continuously; stale latest candles block candidate evaluation."
-            if asset_class == "crypto"
-            else "Freshness and elapsed-calendar gaps are informational because provider session calendars, weekends and holidays are not modeled."
-        ),
-    }
+    data_quality_review = _training_data_quality_review(data_quality, asset_class)
     derivative_context = None
     funding_bps_per_bar = 0.0
     derivative_feature_coverage = None
