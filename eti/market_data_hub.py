@@ -51,18 +51,40 @@ class CcxtMarketAdapter:
             for market_type in self.market_types
         }
 
+    def _normalize_markets(self, market_type: str, rows: list[dict]) -> list[InstrumentSpec]:
+        found: list[InstrumentSpec] = []
+        for row in rows:
+            found.append(InstrumentSpec(
+                symbol=row["symbol"], venue=self.venue, asset_class="crypto",
+                market_type=market_type, base_currency=row.get("base"),
+                quote_currency=row.get("quote"), settlement_currency=row.get("settle"),
+                contract_multiplier=float(row.get("contract_size") or 1.0),
+                max_leverage=1.0, supports_short=market_type in {"swap", "future"},
+                supports_funding=market_type == "swap", active=bool(row.get("active", True)),
+            ))
+        return found
+
+    def discover_instruments_for(self, market_type: str) -> list[InstrumentSpec]:
+        """Discover only one requested market type to avoid unnecessary venue calls."""
+        try:
+            provider = self._providers[market_type]
+        except KeyError as exc:
+            raise LookupError(f"{self.venue} does not support {market_type} discovery") from exc
+        return self._normalize_markets(
+            market_type, provider.discover_markets(limit=1000)
+        )
+
     def discover_instruments(self) -> list[InstrumentSpec]:
         found: list[InstrumentSpec] = []
-        for market_type, provider in self._providers.items():
-            for row in provider.discover_markets(limit=1000):
-                found.append(InstrumentSpec(
-                    symbol=row["symbol"], venue=self.venue, asset_class="crypto",
-                    market_type=market_type, base_currency=row.get("base"),
-                    quote_currency=row.get("quote"), settlement_currency=row.get("settle"),
-                    contract_multiplier=float(row.get("contract_size") or 1.0),
-                    max_leverage=1.0, supports_short=market_type in {"swap", "future"},
-                    supports_funding=market_type == "swap", active=bool(row.get("active", True)),
-                ))
+        self.discovery_errors: list[dict[str, str]] = []
+        for market_type in self.market_types:
+            try:
+                found.extend(self.discover_instruments_for(market_type))
+            except Exception as exc:
+                self.discovery_errors.append({
+                    "market_type": market_type, "error_type": type(exc).__name__,
+                    "message": str(exc)[:500],
+                })
         return found
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
@@ -171,7 +193,18 @@ class MarketDataHub:
             if market_type and market_type.lower() not in caps.market_types:
                 continue
             try:
-                discovered = adapter.discover_instruments()
+                discover_one = getattr(adapter, "discover_instruments_for", None)
+                discovered = (
+                    discover_one(market_type.lower())
+                    if market_type and callable(discover_one)
+                    else adapter.discover_instruments()
+                )
+                for item_error in getattr(adapter, "discovery_errors", []):
+                    errors.append({
+                        "venue": venue,
+                        "error_type": item_error.get("error_type", "DiscoveryError"),
+                        "message": f"{item_error.get('market_type', 'unknown')}: {item_error.get('message', '')}"[:500],
+                    })
                 for instrument in discovered:
                     if asset_class and instrument.asset_class != asset_class.lower():
                         continue
