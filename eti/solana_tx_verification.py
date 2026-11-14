@@ -139,6 +139,16 @@ def verify_finalized_transaction_for_mint(
                 key_values.append(key)
             elif isinstance(key, dict) and isinstance(key.get("pubkey"), str):
                 key_values.append(key["pubkey"])
+    if wallet_address not in key_values:
+        return {
+            "status": "WALLET_NOT_REFERENCED",
+            "verified": False,
+            "signature": signature,
+            "mint": mint,
+            "wallet_address": wallet_address,
+            "slot": transaction.get("slot"),
+            "reason": "Wallet address is not present in transaction account keys",
+        }
     if expected_pool_address not in key_values:
         return {
             "status": "EXPECTED_POOL_NOT_REFERENCED",
