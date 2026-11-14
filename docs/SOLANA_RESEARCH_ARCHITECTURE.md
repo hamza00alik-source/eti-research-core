@@ -273,7 +273,11 @@ labels whose baseline snapshots are included. It supports an optional mint
 filter and a maximum of 5,000 snapshots per request. Each snapshot preserves
 its task ID, capability, mint/pool identity, schema version, sampled timestamp,
 normalized payload and SHA-256 digest. Labels retain their baseline and target
-snapshot references and horizon.
+snapshot references and horizon, plus explicit
+`baseline_snapshot_in_export` and `target_snapshot_in_export` flags. A bounded
+export can include a baseline label while omitting its later target snapshot;
+consumers must check the target flag before attempting to join the target row.
+Only baseline snapshot fields may be used as prediction inputs.
 
 The export includes non-mutating validation diagnostics for malformed payloads,
 missing evidence/features, invalid numeric values, negative values, zero price
