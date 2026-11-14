@@ -1153,7 +1153,11 @@ def evaluate_prepared_solana_walk_forward(
         "dependence_scope": "PREPARED_VALIDATION_ROWS_WITH_VALID_INTERVALS_ONLY",
         "overlapping_interval_pair_count": overlapping_pairs,
         "overlap_comparison_count": overlap_comparisons,
-        "note": "Dependence counts cover prepared validation rows with parseable, timezone-aware, positive-duration intervals; fold_validation_label_count also includes unprepared labels. Overlapping labels and repeated mints are dependent observations, not independent trades or samples.",
+        "cross_mint_overlapping_interval_pair_count": cross_mint_overlapping_pairs,
+        "cross_mint_overlap_comparison_count": cross_mint_overlap_comparisons,
+        "distinct_mints_repeated_across_validation_folds": repeated_mint_across_fold_count,
+        "validation_fold_count_with_prepared_intervals": len(fold_mints),
+        "note": "Dependence counts cover prepared validation rows with parseable, timezone-aware, positive-duration intervals; fold_validation_label_count also includes unprepared labels. Same-mint and cross-mint interval overlap are separate descriptive dependence channels. Repeated mints across folds are not independent replications.",
     }
     report["walk_forward"] = {
         "method": "chronological_expanding_mint_grouped_purged_embargo_v1",
