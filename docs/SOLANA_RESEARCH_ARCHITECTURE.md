@@ -475,3 +475,25 @@ must be set before inspecting validation outcomes and should be documented by
 the research operator; this feature does not select thresholds, fit a model,
 authorize training, or authorize live execution. Results remain sampled-mark
 validation diagnostics, not executable returns or net P&L.
+
+
+### Point-in-time time-series regime diagnostics
+
+The walk-forward evaluator also accepts optional `time_series_regime_config`.
+When omitted, the time-series classifier reports `NOT_CONFIGURED`. When
+configured, each validation observation is classified using only baseline
+price observations for the same mint and pool whose timestamps are less than
+or equal to that observation's baseline timestamp. Future baseline rows are
+excluded even if present in the preparation artifact. Conflicting prices at
+the same timestamp are excluded rather than averaged. Sparse histories below
+the configured minimum are withheld.
+
+The current classifier computes a first-to-last sampled price change and the
+sample standard deviation of adjacent sampled log returns. The latter is a
+per-observation volatility proxy, not time-normalized realized volatility:
+irregular snapshot intervals make values non-comparable across different
+sampling cadences. These observations are not OHLCV candles and can miss
+intraperiod price paths, wicks, and liquidity shocks. All lookback lengths and
+thresholds are caller-supplied and must be frozen before examining validation
+outcomes. This diagnostic does not fit thresholds, select strategies, authorize
+training, or enable live execution.
