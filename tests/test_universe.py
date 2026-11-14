@@ -51,7 +51,7 @@ def test_scan_market_universe_is_bounded_and_round_robins_venues():
     ]
     assert crypto == ["binance", "coinbaseexchange"]
     assert report["summary"]["candidate_count"] == 4
-    assert report["summary"]["data_ready_count"] == 3
+    assert report["summary"]["data_ready_count"] == 4
     assert report["scan_only"] is True
     assert report["training_performed"] is False
     assert report["execution_enabled"] is False
