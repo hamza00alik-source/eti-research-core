@@ -174,7 +174,10 @@ The delayed label module supports 5-minute, 15-minute, 1-hour, 6-hour and
 (b) a later observation exists at or beyond that horizon, and (c) the baseline
 and target have the same mint and non-empty pool address. The first qualifying
 future observation is used. A unique baseline-snapshot/horizon key makes label
-persistence idempotent. Missing future observations do not produce a label.
+persistence idempotent. Missing future observations do not produce a label. The
+label generator skips malformed stored JSON and snapshot schema versions it does
+not explicitly support, and reports the skipped count instead of crashing or
+silently interpreting unknown payload formats.
 Authenticated endpoints:
 - `POST /v1/workspaces/{workspace_id}/solana/labels/generate`
 - `GET /v1/workspaces/{workspace_id}/solana/labels`
