@@ -497,3 +497,50 @@ def test_registry_cannot_approve_artifact_without_embedded_calibration(tmp_path,
             "/v1/models/uncalibrated-model/0.1.0", headers=trainer_headers
         )
         assert candidate.json()["lifecycle"] == "candidate"
+
+
+def test_authenticated_solana_event_ledger_is_idempotent_and_workspace_scoped(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "solana-api.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        owner = _register(client, "solana_owner")
+        other = _register(client, "solana_other")
+        headers = {"Authorization": f"Bearer {owner['access_token']}"}
+        other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+        workspace = client.post("/v1/workspaces", headers=headers,
+                                json={"name": "solana research"}).json()
+        workspace_id = workspace["id"]
+        body = {
+            "event_key": "pumpportal:sig-001",
+            "source": "pumpportal",
+            "event_type": "new_token",
+            "mint": "A" * 40,
+            "source_timestamp": "2026-11-14T12:00:00Z",
+            "payload": {"signature": "sig-001", "slot": 12345},
+        }
+        first = client.post(
+            f"/v1/workspaces/{workspace_id}/solana/events",
+            headers=headers, json=body,
+        )
+        assert first.status_code == 201, first.text
+        duplicate = client.post(
+            f"/v1/workspaces/{workspace_id}/solana/events",
+            headers=headers, json=body,
+        )
+        assert duplicate.status_code == 201
+        assert duplicate.json()["id"] == first.json()["id"]
+        assert duplicate.json()["duplicate"] is True
+        listed = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/events",
+            headers=headers,
+        )
+        assert listed.status_code == 200
+        assert len(listed.json()["items"]) == 1
+        assert client.get(
+            f"/v1/workspaces/{workspace_id}/solana/events",
+            headers=other_headers,
+        ).status_code == 404
+        assert client.get(
+            f"/v1/workspaces/{workspace_id}/solana/events",
+        ).status_code == 401
