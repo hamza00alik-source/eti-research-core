@@ -237,8 +237,9 @@ def verify_finalized_transaction_for_mint(
         }
 
     return {
-        "status": "FINALIZED_MINT_TRANSACTION_VERIFIED",
-        "verified": True,
+        "status": "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED",
+        "verified": False,
+        "transaction_receipt_verified": True,
         "signature": signature,
         "mint": mint,
         "slot": transaction_slot,
