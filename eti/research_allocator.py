@@ -25,7 +25,7 @@ def _finite_nonnegative(name: str, value: Any) -> float:
 def _timeframe_seconds(value: Any) -> float:
     if not isinstance(value, str):
         raise ValueError("provenance.timeframe must be a fixed-duration string")
-    match = re.fullmatch(r"(\\d+)([smhdw])", value.strip().lower())
+    match = re.fullmatch(r"(\d+)([smhdw])", value.strip().lower())
     if not match:
         raise ValueError(f"unsupported fixed-duration timeframe: {value}")
     amount, unit = int(match.group(1)), match.group(2)
