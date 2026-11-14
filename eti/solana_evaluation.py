@@ -124,3 +124,105 @@ def evaluate_solana_research_folds(
             "No threshold selection, model fitting, calibration or training approval occurs.",
         ],
     }
+
+
+
+def evaluate_prepared_solana_walk_forward(
+    exported_labels: list[dict[str, Any]],
+    prepared_dataset: dict[str, Any],
+    *,
+    n_splits: int = 3,
+    min_train_groups: int = 3,
+    embargo_seconds: int = 86400,
+    buy_pressure_threshold: float = 0.55,
+) -> dict[str, Any]:
+    """Join prepared rows to fixed chronological validation folds and benchmark.
+
+    Fold membership is derived from exported label timestamps, never shuffled.
+    Training-fold rows are counted for diagnostics only; their outcomes are not
+    passed to the benchmark. Missing prepared validation rows remain excluded.
+    """
+    from eti.solana_labels import chronological_walk_forward_splits
+
+    if not isinstance(exported_labels, list) or not isinstance(prepared_dataset, dict):
+        raise ValueError("exported_labels and prepared_dataset have invalid shapes")
+    if prepared_dataset.get("status") != "PREPARATION_ONLY" or prepared_dataset.get("training_authorized") is not False:
+        raise ValueError("prepared dataset is not a fail-closed preparation artifact")
+    prepared_rows = prepared_dataset.get("rows")
+    if not isinstance(prepared_rows, list):
+        raise ValueError("prepared dataset rows must be a list")
+
+    rows_by_label_id: dict[Any, dict[str, Any]] = {}
+    for row in prepared_rows:
+        if not isinstance(row, dict) or row.get("label_id") is None:
+            raise ValueError("every prepared row must have a label_id")
+        label_id = row["label_id"]
+        if label_id in rows_by_label_id:
+            raise ValueError("prepared dataset contains duplicate label_id values")
+        rows_by_label_id[label_id] = row
+
+    split_labels: list[dict[str, Any]] = []
+    label_ids: set[Any] = set()
+    for exported in exported_labels:
+        if not isinstance(exported, dict) or exported.get("id") is None:
+            raise ValueError("every exported label must have an id")
+        label_id = exported["id"]
+        if label_id in label_ids:
+            raise ValueError("export contains duplicate label id values")
+        label_ids.add(label_id)
+        label_body = exported.get("label")
+        if not isinstance(label_body, dict) or exported.get("label_parse_error"):
+            continue
+        split_row = dict(label_body)
+        for key in ("id", "mint", "pool_address", "baseline_snapshot_id", "target_snapshot_id", "horizon_seconds"):
+            if key in exported:
+                split_row[key] = exported[key]
+        split_labels.append(split_row)
+
+    folds = chronological_walk_forward_splits(
+        split_labels,
+        n_splits=n_splits,
+        min_train_groups=min_train_groups,
+        embargo_seconds=embargo_seconds,
+    )
+    benchmark_folds: list[dict[str, Any]] = []
+    fold_metadata: list[dict[str, Any]] = []
+    for index, fold in enumerate(folds, start=1):
+        validation_rows: list[dict[str, Any]] = []
+        missing_prepared = 0
+        for label in fold["validation"]:
+            prepared = rows_by_label_id.get(label.get("id"))
+            if prepared is None:
+                missing_prepared += 1
+                continue
+            validation_rows.append(prepared)
+        benchmark_folds.append({"fold": index, "validation": validation_rows})
+        fold_metadata.append({
+            "fold": index,
+            "train_label_count": len(fold["train"]),
+            "validation_label_count": len(fold["validation"]),
+            "prepared_validation_count": len(validation_rows),
+            "unprepared_validation_count": missing_prepared,
+            "train_mint_count": fold["train_group_count"],
+            "validation_mint_count": fold["validation_group_count"],
+            "purged_mint_group_count": fold["purged_group_count"],
+            "boundary_at": fold["boundary_at"],
+            "validation_start_at": fold["validation_start_at"],
+            "embargo_seconds": fold["embargo_seconds"],
+        })
+    report = evaluate_solana_research_folds(
+        benchmark_folds,
+        buy_pressure_threshold=buy_pressure_threshold,
+    )
+    report["walk_forward"] = {
+        "method": "chronological_expanding_mint_grouped_purged_embargo_v1",
+        "fold_metadata": fold_metadata,
+        "unmatched_prepared_row_count": sum(
+            1 for label_id in rows_by_label_id if label_id not in label_ids
+        ),
+        "training_rows_used_for_metrics": False,
+    }
+    report["limitations"].append(
+        "Prepared rows missing from a validation fold are excluded; the runner never substitutes another fold's row."
+    )
+    return report
