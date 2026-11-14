@@ -8,6 +8,7 @@ import org.json.JSONObject
 import java.io.Closeable
 import java.io.File
 import java.nio.FloatBuffer
+import java.security.MessageDigest
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.max
@@ -42,7 +43,12 @@ class OnDeviceModelRunner(
         probabilityOutputName = metadata.getString("probability_output_name")
         val classes = metadata.getJSONArray("class_ids")
         classIds = (0 until classes.length()).map { classes.getInt(it) }
-        require(classIds.isNotEmpty()) { "Model metadata has no class IDs" }
+        require(classIds == listOf(0, 1, 2)) { "ETI class mapping must be [short, flat, long]" }
+        val safety = metadata.getJSONObject("safety")
+        require(safety.optBoolean("candidate_only", false)) { "Only candidate models may be loaded by this runtime" }
+        require(!safety.optBoolean("live_trading_enabled", true)) { "Mobile inference bundle must not enable live trading" }
+        val expectedModelSha256 = metadata.getString("onnx_sha256").lowercase()
+        require(expectedModelSha256.matches(Regex("[0-9a-f]{64}"))) { "Invalid ONNX checksum metadata" }
         val calibration = metadata.optJSONObject("calibration")
         temperature = calibration?.optDouble("temperature", 1.0)
             ?.takeIf { it.isFinite() && it > 0.0 } ?: 1.0
@@ -51,6 +57,10 @@ class OnDeviceModelRunner(
         context.assets.open(modelAssetName).use { source ->
             modelFile.outputStream().use { destination -> source.copyTo(destination) }
         }
+        val actualModelSha256 = MessageDigest.getInstance("SHA-256")
+            .digest(modelFile.readBytes())
+            .joinToString("") { "%02x".format(it) }
+        require(actualModelSha256 == expectedModelSha256) { "ONNX model checksum does not match metadata" }
         val options = OrtSession.SessionOptions()
         session = try {
             environment.createSession(modelFile.absolutePath, options)
