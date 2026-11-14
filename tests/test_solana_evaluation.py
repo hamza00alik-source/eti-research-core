@@ -73,6 +73,7 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
             "mint": f"mint-{index}",
             "pool_address": f"pool-{index}",
             "baseline_at": stamp,
+            "horizon_seconds": 3600,
             "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
             "target_sampled_price_return_pct": 3.0,
         })
