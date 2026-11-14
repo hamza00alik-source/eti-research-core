@@ -6,6 +6,7 @@ plan only: no model fitting, trading signals, or order execution.
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, Iterable
 
 MAX_DAILY_USD = 10.0
@@ -19,6 +20,16 @@ def _finite_nonnegative(name: str, value: Any) -> float:
     if not math.isfinite(number) or number < 0:
         raise ValueError(f"{name} must be a finite non-negative number")
     return number
+
+
+def _timeframe_seconds(value: Any) -> float:
+    if not isinstance(value, str):
+        raise ValueError("provenance.timeframe must be a fixed-duration string")
+    match = re.fullmatch(r"(\\d+)([smhdw])", value.strip().lower())
+    if not match:
+        raise ValueError(f"unsupported fixed-duration timeframe: {value}")
+    amount, unit = int(match.group(1)), match.group(2)
+    return float(amount * {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}[unit])
 
 
 def _candidate_score(candidate: dict[str, Any], *, max_age_seconds: float) -> tuple[float, list[str]]:
@@ -37,7 +48,10 @@ def _candidate_score(candidate: dict[str, Any], *, max_age_seconds: float) -> tu
         age = _finite_nonnegative("quality.last_candle_age_seconds", quality.get("last_candle_age_seconds"))
         missing = _finite_nonnegative("quality.missing_interval_estimate", quality.get("missing_interval_estimate"))
         max_gap = _finite_nonnegative("quality.max_gap_seconds", quality.get("max_gap_seconds"))
-        interval = _finite_nonnegative("timeframe_seconds", candidate.get("timeframe_seconds"))
+        interval_value = candidate.get("timeframe_seconds")
+        if interval_value is None:
+            interval_value = _timeframe_seconds(provenance.get("timeframe"))
+        interval = _finite_nonnegative("timeframe_seconds", interval_value)
     except ValueError as exc:
         return 0.0, [str(exc)]
 
