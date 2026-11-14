@@ -382,6 +382,41 @@ def discover_market_universe(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def market_coverage_report(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Describe implemented data and execution coverage without implying availability."""
+    payload = payload or {}
+    if not isinstance(payload, dict):
+        raise ValueError("coverage input must be a JSON object")
+    return {
+        "kind": "market_coverage_report",
+        "coverage_as_of": "implementation_capabilities",
+        "research": {
+            "crypto": {"venues": ["binance", "mexc"], "market_types": ["spot", "swap", "future"],
+                       "discovery": "active CCXT-listed instruments; dated futures require exact listed contract symbols",
+                       "data": "public OHLCV; funding/open-interest context where endpoints support it"},
+            "forex": {"venue": "yahoo", "market_types": ["spot"], "universe": "curated reference symbols"},
+            "equity": {"venue": "yahoo", "market_types": ["spot"], "universe": "curated reference symbols"},
+            "commodity": {"venue": "yahoo", "market_types": ["future"], "universe": "curated futures reference symbols"},
+            "index": {"venue": "yahoo", "market_types": ["spot", "future"], "universe": "curated reference symbols"},
+            "csv": {"asset_classes": ["crypto", "forex", "equity", "commodity", "index"],
+                    "market_types": ["caller-labelled local OHLCV"]},
+        },
+        "live_execution": {
+            "enabled_by_default": False, "venues": ["binance", "mexc"],
+            "market_types": ["spot"], "derivatives_enabled": False,
+            "requires": ["owner-managed credentials", "approved calibrated model",
+                         "saved risk limits", "explicit owner authorization"],
+        },
+        "not_implemented": ["options", "CFDs", "margin execution", "live derivative execution",
+                            "exhaustive global exchange catalogues"],
+        "important_distinctions": [
+            "Discovery does not prove historical candles are available or sufficiently complete.",
+            "Research support does not imply broker connectivity or permission to execute.",
+            "Yahoo Finance symbols are curated public references, not exhaustive or guaranteed real-time feeds.",
+            "Funding, open-interest, fees, margin, settlement and roll coverage vary by contract and venue.",
+        ],
+    }
+
 def derivatives_market_context(payload: dict[str, Any]) -> dict[str, Any]:
     """Collect exchange-reported funding and open-interest data for one derivative."""
     venue = payload.get("venue", "binance")
@@ -410,6 +445,7 @@ def default_capabilities() -> AgentCapabilityRegistry:
     registry = AgentCapabilityRegistry()
     registry.register("market.snapshot", market_snapshot)
     registry.register("market.discover", discover_market_universe)
+    registry.register("market.coverage", market_coverage_report)
     registry.register("derivatives.context", derivatives_market_context)
     registry.register("strategy.walk_forward", strategy_walk_forward)
     registry.register("model.train_research", model_training_research)
