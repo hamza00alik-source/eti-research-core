@@ -44,14 +44,44 @@ jobs:
           os.chmod(p, 0o600)
           PY
 
+      - name: Discover Kaggle notebook slug
+        id: discover
+        env:
+          REQUESTED_KERNEL: ${{ inputs.kernel }}
+        run: |
+          if [ -n "$REQUESTED_KERNEL" ]; then
+            echo "kernel=$REQUESTED_KERNEL" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          kaggle kernels list --mine --csv --page-size 100 > kernels.csv
+          python - <<'PY'
+          import csv, os
+          from pathlib import Path
+          with Path("kernels.csv").open(newline="") as handle:
+              rows = list(csv.DictReader(handle))
+          matches = [
+              row for row in rows
+              if "eti-first-training-kaggle" in str(row.get("ref", "")).lower()
+              or "eti first training kaggle" in str(row.get("title", "")).lower()
+          ]
+          print("Matching ETI notebooks:")
+          for row in matches:
+              print(f"- {row.get('ref')} | {row.get('title')}")
+          if len(matches) != 1 or not matches[0].get("ref"):
+              raise SystemExit("Could not uniquely identify the ETI notebook. Supply its exact Kaggle URL slug as the workflow input.")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("kernel=" + matches[0]["ref"] + "\\n")
+          PY
+
       - name: Download latest Kaggle notebook output
         env:
-          KERNEL: ${{ inputs.kernel || 'hamza00alik/eti-first-training-kaggle' }}
+          KERNEL: ${{ steps.discover.outputs.kernel }}
         run: |
           mkdir -p downloaded
+          echo "Retrieving Kaggle output for $KERNEL"
           kaggle kernels output "$KERNEL" -p downloaded
           echo "Downloaded files:"
-          find downloaded -type f -printf '%p (%s bytes)\n' | sort
+          find downloaded -type f -printf '%p (%s bytes)\\n' | sort
 
       - name: Validate and summarize ETI outputs
         run: |
