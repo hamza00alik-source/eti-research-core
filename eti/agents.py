@@ -11,6 +11,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .data import assess_ohlcv_quality
+
 from .features import build_features
 from .providers import CcxtPublicProvider, YahooFinanceProvider, enrich_ohlcv_with_derivatives
 from .opportunities import rank_spot_opportunity
