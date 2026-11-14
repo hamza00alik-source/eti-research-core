@@ -79,7 +79,7 @@ class FakeLedger:
                 reverse=True,
             )
             if records:
-                selected.append(records[0])
+                selected.append({**records[0], "label_id": label_id})
         return selected
 
 
