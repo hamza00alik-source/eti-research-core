@@ -246,3 +246,20 @@ folds emptied by purging. The single chronological split helper remains
 available for simpler diagnostics. Preprocessing, feature selection,
 calibration and threshold selection must be fit within each training fold;
 the helper deliberately does not fit any of those transformations.
+
+
+## Dataset quality and training gate (implemented)
+
+The authenticated endpoint
+`GET /v1/workspaces/{workspace_id}/solana/dataset-report` returns
+workspace-scoped collection diagnostics: total scan/audit snapshots, distinct
+mints and mint/pool pairs, observation span, median sampled interval, long
+sampling gaps, malformed payload count, per-feature coverage, and label counts
+by horizon including distinct mints and available price returns.
+
+The report deliberately keeps `training_gate.ready=false` and reports
+`RESEARCH_DATA_COLLECTION`. No sample-size, coverage, regime-diversity,
+execution-cost, calibration, or out-of-sample acceptance thresholds have yet
+been independently approved. A high snapshot count alone is not a reason to
+train or deploy a model. The endpoint is descriptive, owner/workspace scoped,
+and does not expose another account's observations.
