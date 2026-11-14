@@ -215,7 +215,7 @@ class MarketDataHub:
                 discover_one = getattr(adapter, "discover_instruments_for", None)
                 if market_type and callable(discover_one):
                     discovered = discover_one(market_type.lower())
-                    item_errors = []
+                    item_errors = getattr(adapter, "discovery_errors", [])
                 else:
                     discovered = adapter.discover_instruments()
                     item_errors = getattr(adapter, "discovery_errors", [])
