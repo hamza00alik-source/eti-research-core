@@ -8,16 +8,15 @@ on:
   workflow_dispatch:
     inputs:
       kernel:
-        description: "Optional Kaggle notebook slug; leave blank to discover the ETI notebook"
+        description: "Kaggle notebook slug (owner/notebook)"
         required: false
-        default: ""
+        default: "hamza00alik/eti-first-training-kaggle"
 
 permissions:
   contents: read
 
 jobs:
   retrieve-training-output:
-    # Also expose the existing Kaggle environment secret shown in repository settings.
     environment: hamza00alik
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -27,7 +26,6 @@ jobs:
 
       - name: Configure Kaggle credentials
         env:
-          # Prefer repository secrets; fall back to the configured Kaggle environment.
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME || 'hamza00alik' }}
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY || secrets.HAMZA00ALIK }}
         run: |
@@ -44,42 +42,9 @@ jobs:
           os.chmod(p, 0o600)
           PY
 
-      - name: Discover Kaggle notebook slug
-        id: discover
-        env:
-          REQUESTED_KERNEL: ${{ inputs.kernel }}
-        run: |
-          if [ -n "$REQUESTED_KERNEL" ]; then
-            echo "kernel=$REQUESTED_KERNEL" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if ! kaggle kernels list --mine --csv > kernels.csv 2> kernels-list-error.txt; then
-            echo "Kaggle kernel listing failed:"
-            cat kernels-list-error.txt
-            exit 1
-          fi
-          python - <<'PY'
-          import csv, os
-          from pathlib import Path
-          with Path("kernels.csv").open(newline="") as handle:
-              rows = list(csv.DictReader(handle))
-          matches = [
-              row for row in rows
-              if "eti-first-training-kaggle" in str(row.get("ref", "")).lower()
-              or "eti first training kaggle" in str(row.get("title", "")).lower()
-          ]
-          print("Matching ETI notebooks:")
-          for row in matches:
-              print(f"- {row.get('ref')} | {row.get('title')}")
-          if len(matches) != 1 or not matches[0].get("ref"):
-              raise SystemExit("Could not uniquely identify the ETI notebook. Supply its exact Kaggle URL slug as the workflow input.")
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              output.write("kernel=" + matches[0]["ref"] + "\n")
-          PY
-
       - name: Download latest Kaggle notebook output
         env:
-          KERNEL: ${{ steps.discover.outputs.kernel }}
+          KERNEL: ${{ inputs.kernel || 'hamza00alik/eti-first-training-kaggle' }}
         run: |
           mkdir -p downloaded
           echo "Retrieving Kaggle output for $KERNEL"
@@ -91,6 +56,7 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
           root = Path("downloaded")
           metrics_files = list(root.rglob("eti_training_metrics.json"))
@@ -134,19 +100,19 @@ jobs:
               "mobile_bundle_found": bool(mobile_files),
           }
           Path("training-summary.json").write_text(json.dumps(summary, indent=2))
-          with open(__import__("os").environ["GITHUB_STEP_SUMMARY"], "a") as f:
-              f.write("# ETI Kaggle training output\n\n")
-              f.write(f"- Training performed: `{summary['training_performed']}`\n")
-              f.write(f"- Rows: `{summary['rows']}`\n")
-              f.write(f"- Evaluation folds: `{summary['fold_count']}`\n")
-              f.write(f"- Mean test balanced accuracy: `{summary['mean_test_balanced_accuracy']}`\n")
-              f.write(f"- Mobile bundle found: `{summary['mobile_bundle_found']}`\n\n")
-              f.write("## Outer test comparison (diagnostic only)\n\n```json\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("# ETI Kaggle training output\\n\\n")
+              f.write(f"- Training performed: `{summary['training_performed']}`\\n")
+              f.write(f"- Rows: `{summary['rows']}`\\n")
+              f.write(f"- Evaluation folds: `{summary['fold_count']}`\\n")
+              f.write(f"- Mean test balanced accuracy: `{summary['mean_test_balanced_accuracy']}`\\n")
+              f.write(f"- Mobile bundle found: `{summary['mobile_bundle_found']}`\\n\\n")
+              f.write("## Outer test comparison (diagnostic only)\\n\\n```json\\n")
               f.write(json.dumps({"candidate_test_comparison": summary["candidate_test_comparison"], "selected_candidate_counts": summary["selected_candidate_counts"]}, indent=2))
-              f.write("\n```\n\n")
-              f.write("## Trading performance and warnings\n\n```json\n")
+              f.write("\\n```\\n\\n")
+              f.write("## Trading performance and warnings\\n\\n```json\\n")
               f.write(json.dumps({"trading_performance": summary["trading_performance"], "warning": summary["warning"]}, indent=2))
-              f.write("\n```\n")
+              f.write("\\n```\\n")
           print(json.dumps(summary, indent=2))
           PY
 
