@@ -130,7 +130,7 @@ def chronological_group_split(
     train_fraction: float = 0.70,
     embargo_seconds: int = 86400,
 ) -> dict[str, Any]:
-    """Split complete mint/pool groups in time order and purge crossing labels.
+    """Split complete mint groups across all their pools in time order and purge crossing labels.
 
     A group is never divided between folds. Training outcomes must end before
     the validation boundary; validation groups must begin after the embargo.
@@ -154,7 +154,7 @@ def chronological_group_split(
         key=lambda pair: min(_timestamp(item["baseline_at"]) for item in pair[1]),
     )
     if len(groups) < 3:
-        raise ValueError("at least three distinct mint/pool groups are required for a purged chronological split")
+        raise ValueError("at least three distinct mint groups are required for a purged chronological split")
     boundary_index = max(1, min(len(groups) - 1, int(len(groups) * train_fraction)))
     boundary_time = min(
         _timestamp(item["baseline_at"]) for item in groups[boundary_index][1]
@@ -201,7 +201,7 @@ def chronological_walk_forward_splits(
         raise ValueError("min_train_groups must be an integer of at least 2")
     if isinstance(embargo_seconds, bool) or not isinstance(embargo_seconds, int) or embargo_seconds < 0:
         raise ValueError("embargo_seconds must be a non-negative integer")
-    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for label in labels:
         if not isinstance(label, dict):
             continue
@@ -209,13 +209,13 @@ def chronological_walk_forward_splits(
         start, end = _timestamp(label.get("baseline_at")), _timestamp(label.get("target_at"))
         if not isinstance(mint, str) or not isinstance(pool, str) or not pool or start is None or end is None or end <= start:
             continue
-        grouped.setdefault((mint, pool), []).append(label)
+        grouped.setdefault(mint, []).append(label)
     groups = sorted(
         grouped.items(),
         key=lambda pair: min(_timestamp(item["baseline_at"]) for item in pair[1]),
     )
     if len(groups) <= min_train_groups:
-        raise ValueError("not enough distinct mint/pool groups for walk-forward validation")
+        raise ValueError("not enough distinct mint groups for walk-forward validation")
     validation_group_size = max(1, (len(groups) - min_train_groups) // n_splits)
     folds: list[dict[str, Any]] = []
     for fold_index in range(n_splits):
@@ -252,8 +252,8 @@ def chronological_walk_forward_splits(
             ).isoformat().replace("+00:00", "Z"),
             "embargo_seconds": embargo_seconds,
             "purged_group_count": purged,
-            "train_group_count": len({(x["mint"], x["pool_address"]) for x in train}),
-            "validation_group_count": len({(x["mint"], x["pool_address"]) for x in validation}),
+            "train_group_count": len({x["mint"] for x in train}),
+            "validation_group_count": len({x["mint"] for x in validation}),
             "method": "expanding_chronological_grouped_walk_forward_v1",
         })
     if not folds:
