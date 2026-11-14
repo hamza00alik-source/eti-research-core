@@ -167,6 +167,9 @@ def test_walk_forward_cost_evidence_is_applied_only_to_validation_rows():
             "target_sampled_price_return_pct": 5.0,
         })
         evidence_by_id[label_id] = {
+            "label_id": label_id,
+            "mint": f"cost-mint-{index}",
+            "pool_address": f"cost-pool-{index}",
             "cost_components": {
                 name: {
                     "cost_bps": 10,
@@ -246,3 +249,67 @@ def test_walk_forward_reports_missing_cost_evidence_as_incomplete_not_zero():
     assert costs["incomplete_evidence_count"] == costs["validation_rows_checked"]
     assert costs["cost_adjusted_sampled_mark_scenario_mean_pct"] is None
     assert costs["net_return_pct"] is None
+
+
+def test_walk_forward_cost_evidence_rejects_cross_label_identity_reuse():
+    from eti.solana_evaluation import evaluate_prepared_solana_walk_forward
+
+    exported, prepared, evidence_by_id = [], []
+    for index in range(8):
+        day = 1 + index * 2
+        stamp = f"2026-01-{day:02d}T00:00:00Z"
+        label_id = f"identity-label-{index}"
+        exported.append({
+            "id": label_id, "mint": f"identity-mint-{index}",
+            "pool_address": f"identity-pool-{index}", "horizon_seconds": 3600,
+            "label": {"baseline_at": stamp, "target_at": f"2026-01-{day:02d}T01:00:00Z"},
+        })
+        prepared.append({
+            "label_id": label_id, "mint": f"identity-mint-{index}",
+            "pool_address": f"identity-pool-{index}", "horizon_seconds": 3600,
+            "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
+            "target_sampled_price_return_pct": 5.0,
+        })
+        evidence_by_id[label_id] = {
+            "label_id": label_id, "mint": "some-other-mint",
+            "pool_address": f"identity-pool-{index}",
+            "cost_components": {}, "exit_evidence": {},
+        }
+
+    report = evaluate_prepared_solana_walk_forward(
+        exported,
+        {"status": "PREPARATION_ONLY", "training_authorized": False, "rows": prepared},
+        n_splits=2, min_train_groups=3, embargo_seconds=3600,
+        execution_cost_evidence_by_label_id=evidence_by_id,
+    )
+    costs = report["execution_cost_evidence"]
+    assert costs["complete_evidence_count"] == 0
+    assert costs["incomplete_evidence_count"] == costs["validation_rows_checked"]
+    assert all("evidence_identity_mismatch" in row["invalid_components"] for row in costs["rows"])
+
+
+def test_walk_forward_rejects_prepared_row_mint_or_pool_identity_mismatch():
+    from eti.solana_evaluation import evaluate_prepared_solana_walk_forward
+
+    exported, prepared = [], []
+    for index in range(8):
+        day = 1 + index * 2
+        stamp = f"2026-01-{day:02d}T00:00:00Z"
+        label_id = f"prepared-identity-label-{index}"
+        exported.append({
+            "id": label_id, "mint": f"prepared-mint-{index}",
+            "pool_address": f"prepared-pool-{index}", "horizon_seconds": 3600,
+            "label": {"baseline_at": stamp, "target_at": f"2026-01-{day:02d}T01:00:00Z"},
+        })
+        prepared.append({
+            "label_id": label_id, "mint": "wrong-mint",
+            "pool_address": f"prepared-pool-{index}", "horizon_seconds": 3600,
+            "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
+            "target_sampled_price_return_pct": 5.0,
+        })
+    with pytest.raises(ValueError, match="identity"):
+        evaluate_prepared_solana_walk_forward(
+            exported,
+            {"status": "PREPARATION_ONLY", "training_authorized": False, "rows": prepared},
+            n_splits=2, min_train_groups=3, embargo_seconds=3600,
+        )
