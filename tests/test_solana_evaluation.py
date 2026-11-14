@@ -79,20 +79,20 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
 
     # A second overlapping horizon for the same mint must be visible as dependence.
     exported.append({
-        "id": "label-0-longer",
-        "mint": "mint-0",
-        "pool_address": "pool-0",
+        "id": "label-6-longer",
+        "mint": "mint-6",
+        "pool_address": "pool-6",
         "horizon_seconds": 7200,
         "label": {
-            "baseline_at": "2026-01-01T00:00:00Z",
-            "target_at": "2026-01-01T02:00:00Z",
+            "baseline_at": "2026-01-13T00:00:00Z",
+            "target_at": "2026-01-13T02:00:00Z",
         },
     })
     prepared.append({
-        "label_id": "label-0-longer",
+        "label_id": "label-6-longer",
         "mint": "mint-0",
         "pool_address": "pool-0",
-        "baseline_at": "2026-01-01T00:00:00Z",
+        "baseline_at": "2026-01-13T00:00:00Z",
         "horizon_seconds": 7200,
         "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
         "target_sampled_price_return_pct": 4.0,
