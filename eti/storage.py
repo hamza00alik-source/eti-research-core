@@ -2807,8 +2807,23 @@ class MemoryStore:
             label_params.extend([limit, owner_id, workspace_id])
             label_rows = conn.execute(label_query, label_params).fetchall()
             exported_snapshot_ids = {row["id"] for row in rows}
+            baseline_rows = {row["id"]: row for row in rows}
+            target_rows = {}
+            target_ids = list(dict.fromkeys(row["target_snapshot_id"] for row in label_rows))
+            for offset in range(0, len(target_ids), 500):
+                batch = target_ids[offset:offset + 500]
+                if not batch:
+                    continue
+                placeholders = ",".join("?" for _ in batch)
+                referenced = conn.execute(
+                    "SELECT id,mint,pool_address,fetched_at FROM solana_research_snapshots "
+                    "WHERE owner_id=? AND workspace_id=? AND id IN (" + placeholders + ")",
+                    [owner_id, workspace_id, *batch],
+                ).fetchall()
+                target_rows.update({item["id"]: item for item in referenced})
             labels = []
             malformed_label_count = 0
+            label_reference_issue_count = 0
             for row in label_rows:
                 try:
                     label_value = json.loads(row["label_json"])
@@ -2817,6 +2832,33 @@ class MemoryStore:
                     label_value = None
                     label_parse_error = True
                     malformed_label_count += 1
+                reference_issues = []
+                baseline = baseline_rows.get(row["baseline_snapshot_id"])
+                target = target_rows.get(row["target_snapshot_id"])
+                if baseline is None:
+                    reference_issues.append("baseline_snapshot_missing_or_outside_export")
+                if target is None:
+                    reference_issues.append("target_snapshot_missing_or_outside_workspace")
+                for role, snapshot in (("baseline", baseline), ("target", target)):
+                    if snapshot is not None and (
+                        snapshot["mint"] != row["mint"] or snapshot["pool_address"] != row["pool_address"]
+                    ):
+                        reference_issues.append(role + "_identity_mismatch")
+                if baseline is not None and target is not None:
+                    try:
+                        baseline_at = datetime.fromisoformat(baseline["fetched_at"].replace("Z", "+00:00"))
+                        target_at = datetime.fromisoformat(target["fetched_at"].replace("Z", "+00:00"))
+                        if baseline_at.tzinfo is None or target_at.tzinfo is None:
+                            raise ValueError("naive timestamp")
+                        elapsed = (target_at - baseline_at).total_seconds()
+                        if elapsed <= 0:
+                            reference_issues.append("target_not_after_baseline")
+                        if not isinstance(row["horizon_seconds"], int) or row["horizon_seconds"] <= 0 or elapsed < row["horizon_seconds"]:
+                            reference_issues.append("target_before_label_horizon")
+                    except (AttributeError, TypeError, ValueError):
+                        reference_issues.append("invalid_reference_timestamp")
+                if reference_issues:
+                    label_reference_issue_count += 1
                 labels.append({
                     "id": row["id"], "mint": row["mint"], "pool_address": row["pool_address"],
                     "baseline_snapshot_id": row["baseline_snapshot_id"],
@@ -2825,6 +2867,7 @@ class MemoryStore:
                     "target_snapshot_in_export": row["target_snapshot_id"] in exported_snapshot_ids,
                     "horizon_seconds": row["horizon_seconds"],
                     "label": label_value, "label_parse_error": label_parse_error,
+                    "reference_issues": reference_issues,
                     "created_at": row["created_at"],
                 })
         snapshots = []
@@ -2842,6 +2885,7 @@ class MemoryStore:
         from .solana_dataset import validate_snapshot_rows
         validation = validate_snapshot_rows(snapshots)
         validation["malformed_label_count"] = malformed_label_count
+        validation["label_reference_issue_count"] = label_reference_issue_count
         return {
             "schema": "eti.solana.research_dataset.v1",
             "scope": {"workspace_id": workspace_id},
