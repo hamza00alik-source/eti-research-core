@@ -52,38 +52,44 @@ jobs:
           os.chmod(p, 0o600)
           PY
 
-      - name: Pull existing Kaggle kernel metadata
+      - name: Prepare metadata for the existing Kaggle kernel
         env:
           KERNEL: hamza00alik/eti-first-training-kaggle
         run: |
           mkdir -p kaggle_kernel
-          kaggle kernels pull "$KERNEL" -p kaggle_kernel -m
-          test -f kaggle_kernel/kernel-metadata.json
-
-      - name: Replace notebook with canonical ETI training notebook
-        run: |
           python - <<'PY'
-          import json
-          import shutil
+          import json, os
           from pathlib import Path
 
-          folder = Path("kaggle_kernel")
-          metadata_path = folder / "kernel-metadata.json"
-          metadata = json.loads(metadata_path.read_text())
-          expected_id = "hamza00alik/eti-first-training-kaggle"
-          if metadata.get("id") != expected_id:
-              raise SystemExit(f"Kernel metadata ID mismatch: {metadata.get('id')!r}")
-          code_file = metadata.get("code_file")
-          if not isinstance(code_file, str) or not code_file.endswith(".ipynb"):
-              raise SystemExit(f"Unexpected Kaggle code_file: {code_file!r}")
-          source = Path("notebooks/ETI_v0_1_Training.ipynb")
-          if not source.is_file():
-              raise SystemExit(f"Canonical notebook missing: {source}")
-          destination = folder / code_file
-          destination.parent.mkdir(parents=True, exist_ok=True)
-          shutil.copy2(source, destination)
-          print(f"Prepared {destination} for {expected_id}")
-          print("Preserved Kaggle kernel metadata, including privacy and internet settings.")
+          expected_id = os.environ["KERNEL"]
+          metadata = {
+              "id": expected_id,
+              "title": "ETI First Training Kaggle",
+              "code_file": "eti-first-training-kaggle.ipynb",
+              "language": "python",
+              "kernel_type": "notebook",
+              "is_private": "true",
+              "enable_gpu": "false",
+              "enable_internet": "true",
+              "machine_shape": "",
+              "dataset_sources": [],
+              "competition_sources": [],
+              "kernel_sources": [],
+              "model_sources": []
+          }
+          out = Path("kaggle_kernel")
+          (out / metadata["code_file"]).write_bytes(
+              Path("notebooks/ETI_v0_1_Training.ipynb").read_bytes()
+          )
+          (out / "kernel-metadata.json").write_text(
+              json.dumps(metadata, indent=2) + "\\n"
+          )
+          check = json.loads((out / "kernel-metadata.json").read_text())
+          assert check["id"] == expected_id
+          assert check["is_private"] == "true"
+          assert check["enable_internet"] == "true"
+          print("Prepared canonical notebook and explicit metadata for " + expected_id)
+          print("Private: true | CPU-only: true | Internet: true")
           PY
 
       - name: Push canonical notebook and start Kaggle run
