@@ -584,6 +584,22 @@ if('serviceWorker'in navigator){
 // Authenticated public market-universe discovery and research task queue.
 (()=>{
  const button=$('#universe-discover');if(!button)return;
+ const coverageButton=$('#universe-coverage'),coverageReport=$('#universe-coverage-report');
+ if(coverageButton&&coverageReport)coverageButton.addEventListener('click',async()=>{
+  coverageButton.disabled=true;coverageButton.textContent='Loading coverage…';
+  try{
+   const report=await api('/v1/markets/coverage');
+   coverageReport.hidden=false;coverageReport.replaceChildren();
+   const title=make('h3','','Implemented coverage');
+   const intro=make('p','muted','Research capability is not the same as live execution permission. This report describes implemented sources, not guaranteed instrument availability.');
+   const research=make('pre','task-result',JSON.stringify(report.research,null,2));
+   const live=make('pre','task-result',JSON.stringify(report.live_execution,null,2));
+   const unsupported=make('p','muted','Not implemented: '+report.not_implemented.join(', '));
+   coverageReport.append(title,intro,make('h4','','Research data'),research,make('h4','','Live execution boundary'),live,unsupported);
+   coverageButton.textContent='Refresh coverage matrix';
+  }catch(error){coverageReport.hidden=false;coverageReport.textContent='Coverage report unavailable: '+error.message;coverageButton.textContent='Retry coverage matrix'}
+  finally{coverageButton.disabled=false}
+ });
  const status=$('#universe-status'),results=$('#universe-results');
  const assetSelect=$('#universe-asset-class'),venueSelect=$('#universe-venue'),typeSelect=$('#universe-market-type');
  assetSelect.addEventListener('change',()=>{
