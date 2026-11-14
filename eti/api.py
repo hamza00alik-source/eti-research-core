@@ -71,7 +71,7 @@ class AutonomyConfigPayload(BaseModel):
     symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"], min_length=1, max_length=20)
     timeframes: list[str] = Field(default_factory=lambda: ["1h"], min_length=1, max_length=6)
     market_types: list[str] = Field(default_factory=lambda: ["spot", "swap"], min_length=1, max_length=3)
-    interval_seconds: int = Field(default=900, ge=300, le=86400)
+    interval_seconds: int = Field(default=300, ge=300, le=86400)
     model_training_enabled: bool = False
     model_training_interval_seconds: int = Field(default=86400, ge=86400, le=604800)
 
