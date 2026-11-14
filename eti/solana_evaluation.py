@@ -529,6 +529,7 @@ def evaluate_solana_time_series_regimes(
     horizon_groups: dict[str, dict[str, list[float]]] = {}
     horizon_cluster_groups: dict[str, dict[str, dict[str, list[float]]]] = {}
     horizon_regime_rows: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    classified_observations: list[dict[str, Any]] = []
     classified = 0
     unclassified = 0
     reason_counts: dict[str, int] = {}
@@ -619,6 +620,13 @@ def evaluate_solana_time_series_regimes(
         horizon_groups.setdefault(horizon_key, {}).setdefault(regime, []).append(value)
         horizon_cluster_groups.setdefault(horizon_key, {}).setdefault(regime, {}).setdefault(mint, []).append(value)
         horizon_regime_rows.setdefault(horizon_key, {}).setdefault(regime, []).append(row)
+        classified_observations.append({
+            "mint": mint,
+            "pool_address": pool,
+            "baseline_at": stamp.isoformat(),
+            "horizon_seconds": horizon_key,
+            "regime": regime,
+        })
         sampling["classified_history_span_seconds"].append(span)
         sampling["classified_median_gap_seconds"].append(sorted(gaps)[len(gaps) // 2] if len(gaps) % 2 else (sorted(gaps)[len(gaps)//2-1] + sorted(gaps)[len(gaps)//2]) / 2)
         sampling["classified_max_gap_seconds"].append(max(gaps))
@@ -631,6 +639,10 @@ def evaluate_solana_time_series_regimes(
         "status": "TIME_SERIES_PROXY_REGIME_DIAGNOSTICS_ONLY",
         "config": dict(config),
         "classified_row_count": classified,
+        "classified_observations": sorted(
+            classified_observations,
+            key=lambda item: (item["mint"], item["pool_address"], item["horizon_seconds"], item["baseline_at"]),
+        ),
         "unclassified_row_count": unclassified,
         "unclassified_reasons": reason_counts,
         "regimes": summarize_groups(groups),
@@ -694,6 +706,113 @@ def evaluate_solana_time_series_regimes(
             "Sparse snapshots can miss intraperiod jumps, wicks, liquidity events and market-wide shocks.",
             "Thresholds are percent per square-root-hour and must be predeclared independently of validation outcomes.",
             "Regime-stratified outcomes remain sampled-mark diagnostics, not executable returns, net P&L, or training authorization.",
+        ],
+    }
+
+
+
+
+def evaluate_solana_regime_transitions(
+    classified_observations: list[dict[str, Any]],
+    *,
+    minimum_transitions: int = 20,
+    minimum_mints: int = 3,
+) -> dict[str, Any]:
+    """Summarize adjacent point-in-time regime changes without using outcomes.
+
+    Transitions are formed only within the same mint, pool and horizon. Duplicate
+    timestamps are collapsed when they agree and excluded when they conflict.
+    Counts are descriptive; overlapping labels and shared market shocks mean
+    transitions are not independent observations.
+    """
+    for name, value in (("minimum_transitions", minimum_transitions), ("minimum_mints", minimum_mints)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(name + " must be a positive integer")
+
+    grouped: dict[tuple[str, str, str], dict[datetime, set[str]]] = {}
+    invalid_rows = 0
+    for row in classified_observations:
+        if not isinstance(row, dict):
+            invalid_rows += 1
+            continue
+        mint, pool, horizon, regime = (
+            row.get("mint"), row.get("pool_address"),
+            row.get("horizon_seconds"), row.get("regime"),
+        )
+        raw_stamp = row.get("baseline_at")
+        if not all(isinstance(value, str) and value.strip() for value in (mint, pool, horizon, regime)) or not isinstance(raw_stamp, str):
+            invalid_rows += 1
+            continue
+        try:
+            stamp = datetime.fromisoformat(raw_stamp.replace("Z", "+00:00"))
+        except ValueError:
+            invalid_rows += 1
+            continue
+        if stamp.tzinfo is None or stamp.utcoffset() is None:
+            invalid_rows += 1
+            continue
+        grouped.setdefault((mint, pool, horizon), {}).setdefault(stamp, set()).add(regime)
+
+    transitions_by_horizon: dict[str, dict[str, dict[str, Any]]] = {}
+    total_transitions = 0
+    transition_mints: set[str] = set()
+    conflicting_timestamps = 0
+    duplicate_timestamps_collapsed = 0
+    for (mint, pool, horizon), timeline in sorted(grouped.items()):
+        ordered: list[tuple[datetime, str]] = []
+        for stamp, regimes in sorted(timeline.items()):
+            if len(regimes) != 1:
+                conflicting_timestamps += 1
+                continue
+            ordered.append((stamp, next(iter(regimes))))
+        for (previous_at, previous_regime), (current_at, current_regime) in zip(ordered, ordered[1:]):
+            if current_at <= previous_at or current_regime == previous_regime:
+                continue
+            key = previous_regime + " -> " + current_regime
+            item = transitions_by_horizon.setdefault(horizon, {}).setdefault(
+                key, {"from_regime": previous_regime, "to_regime": current_regime,
+                      "transition_count": 0, "mint_ids": set(), "elapsed_seconds": []}
+            )
+            item["transition_count"] += 1
+            item["mint_ids"].add(mint)
+            item["elapsed_seconds"].append((current_at - previous_at).total_seconds())
+            total_transitions += 1
+            transition_mints.add(mint)
+
+    report: dict[str, Any] = {}
+    for horizon, transitions in sorted(transitions_by_horizon.items()):
+        report[horizon] = {}
+        for key, item in sorted(transitions.items()):
+            mints = item.pop("mint_ids")
+            elapsed = sorted(item.pop("elapsed_seconds"))
+            item["distinct_mint_count"] = len(mints)
+            item["median_elapsed_seconds"] = (
+                elapsed[len(elapsed) // 2] if len(elapsed) % 2
+                else (elapsed[len(elapsed) // 2 - 1] + elapsed[len(elapsed) // 2]) / 2
+            )
+            item["status"] = (
+                "DESCRIPTIVE_TRANSITION_THRESHOLD_MET"
+                if item["transition_count"] >= minimum_transitions and len(mints) >= minimum_mints
+                else "INSUFFICIENT_TRANSITION_SAMPLE"
+            )
+            report[horizon][key] = item
+
+    return {
+        "status": "REGIME_TRANSITION_DIAGNOSTICS_ONLY",
+        "transitions_by_horizon_seconds": report,
+        "total_transition_count": total_transitions,
+        "distinct_mint_count_with_transitions": len(transition_mints),
+        "invalid_observation_count": invalid_rows,
+        "conflicting_timestamp_count": conflicting_timestamps,
+        "minimum_transitions_required": minimum_transitions,
+        "minimum_mints_required": minimum_mints,
+        "model_fitting_performed": False,
+        "training_authorized": False,
+        "limitations": [
+            "Transitions use adjacent classified validation observations from the same mint and pool; no cross-mint transitions are formed.",
+            "Conflicting regime assignments at the same timestamp are excluded.",
+            "Counts are not independent samples: labels may overlap and mints share market-wide shocks.",
+            "Transition frequencies do not establish predictive value, regime persistence, executable returns or training authorization.",
         ],
     }
 
