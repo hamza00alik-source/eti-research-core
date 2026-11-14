@@ -7,7 +7,7 @@ Training is intentionally manual. Running the command below fits the baseline cl
 1. Open the repository's canonical notebook: `notebooks/ETI_v0_1_Training.ipynb`.
 2. Enable Internet in Kaggle settings to fetch public market candles.
 3. Run all cells only when you are ready to start training.
-4. The budget-screening notebook evaluates BTC/USDT only using Binance public spot OHLCV.
+4. The budget-screening notebook requests BTC/USDT but uses automatic public spot-provider fallback: Coinbase Exchange BTC/USD first, then Kraken BTC/USD. The actual venue and quote mapping are recorded in the report. No authenticated endpoints are used.
 5. Download the generated JSON report before the Kaggle session ends.
 
 The notebook clones the repository's `main` branch. Merge the reviewed architecture PR before starting it.
@@ -15,7 +15,7 @@ The notebook clones the repository's `main` branch. Merge the reviewed architect
 ## Manual command
 
 ```bash
-python -m eti.pipeline --exchange binance --symbol BTC/USDT --timeframe 1h --limit 2000 --horizon 6 --min-train 400 --validation-size 100 --test-size 100 --step-size 200 --max-model-fits 32 --evaluation nested --output artifacts/eti_budget_screen.json
+python -m eti.pipeline --exchange auto --symbol BTC/USDT --timeframe 1h --limit 2000 --horizon 6 --min-train 400 --validation-size 100 --test-size 100 --step-size 200 --max-model-fits 32 --evaluation nested --output artifacts/eti_budget_screen.json
 ```
 
 For a single symbol, use `--symbol BTC/USDT`. For a CSV, supply the required columns `timestamp,open,high,low,close,volume` using `--csv path/to/data.csv`; CSV and `--symbols` cannot be combined.
@@ -37,6 +37,9 @@ Do not run multi-symbol or hyperparameter sweeps in the screening stage. Do not 
 
 ## Data and compute notes
 
+- `--exchange auto` tries Coinbase Exchange and then Kraken using public spot OHLCV. For BTC/USDT, these providers are queried as BTC/USD; the report records the actual venue symbol and quote mapping. USD and USDT are not treated as identical market feeds.
+- Coinbase Exchange is the primary fallback because Kraken's public OHLC endpoint is limited to the latest 720 candles per interval; the adapter rejects a response that is shorter than the minimum history required by the configured walk-forward evaluation. See [Kraken's OHLC history limit](https://support.kraken.com/articles/advanced-api-faq).
+- Binance/MEXC remain selectable explicitly, but should not be the default for a Kaggle region returning HTTP 451.
 - Public Binance/MEXC adapters currently cover crypto spot only.
 - Other labelled asset classes can be evaluated from local CSV data, but live FX/equity/commodity feeds are not connected.
 - Kaggle sessions are temporary and compute limits apply. The notebook uses CPU by default; GPU is not required by the current scikit-learn model.

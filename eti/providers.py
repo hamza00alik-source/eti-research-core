@@ -28,7 +28,7 @@ class CcxtPublicProvider:
     supported_market_types = ("spot", "swap", "future")
 
     def __init__(self, venue: str = "binance", market_type: str = "spot"):
-        if venue not in ("binance", "mexc"):
+        if venue not in ("binance", "mexc", "coinbaseexchange", "kraken"):
             raise ValueError(f"Unsupported public venue: {venue}")
         if market_type not in self.supported_market_types:
             raise ValueError(f"Unsupported public market type: {market_type}")

@@ -137,7 +137,7 @@ def test_training_cli_exports_only_when_explicit_flag_is_set(tmp_path, monkeypat
     assert calls == {
         "model_id": "eti-test",
         "version": "0.2.0",
-        "training_data_ref": "ccxt:binance:BTC/USDT:1h:3000",
+        "training_data_ref": "ccxt:coinbaseexchange:BTC/USD:1h:2999",
         "horizon": 6,
     }
     assert report["exported_model"]["calibration_status"] == "uncalibrated"

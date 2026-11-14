@@ -136,6 +136,60 @@ def fetch_ohlcv(
 
 
 
+
+def fetch_ohlcv_auto(
+    symbol: str = "BTC/USDT",
+    timeframe: str = "1h",
+    limit: int = 1500,
+    min_rows: int = 1,
+    pause_seconds: float = 0.15,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Try independent public spot venues in order and return provenance.
+
+    Coinbase Exchange is tried first, then Kraken. USDT-quoted symbols are
+    explicitly mapped to the equivalent USD spot pair on these venues; the
+    actual venue symbol is recorded. Short responses are rejected when they
+    cannot satisfy the caller's minimum history requirement.
+    """
+    if limit < 1 or min_rows < 1 or min_rows > limit:
+        raise ValueError("limit and min_rows must be positive and min_rows cannot exceed limit")
+    base, separator, quote = symbol.partition("/")
+    if not separator or not base or not quote:
+        raise ValueError(f"Expected BASE/QUOTE symbol, got: {symbol}")
+    candidates = [
+        ("coinbaseexchange", f"{base}/USD" if quote in {"USDT", "USDC"} else symbol),
+        ("kraken", f"{base}/USD" if quote in {"USDT", "USDC"} else symbol),
+    ]
+    failures: list[str] = []
+    for venue, venue_symbol in candidates:
+        try:
+            frame = fetch_ohlcv(
+                venue, venue_symbol, timeframe, limit,
+                pause_seconds=pause_seconds, market_type="spot",
+            )
+            frame = validate_ohlcv(frame)
+            if len(frame) < min_rows:
+                raise ValueError(f"returned {len(frame)} completed candles; {min_rows} required")
+            return frame, {
+                "mode": "automatic_fallback",
+                "provider": venue,
+                "venue_symbol": venue_symbol,
+                "requested_symbol": symbol,
+                "quote_mapping": f"{quote}_to_USD" if venue_symbol != symbol else None,
+                "timeframe": timeframe,
+                "requested_candles": limit,
+                "returned_candles": int(len(frame)),
+                "fallback_failures_before_success": failures.copy(),
+                "public_data_only": True,
+            }
+        except Exception as exc:
+            failures.append(f"{venue} {venue_symbol}: {type(exc).__name__}: {str(exc)[:240]}")
+    raise RuntimeError(
+        "All automatic public market-data providers failed or returned insufficient "
+        "history. " + " | ".join(failures)
+    )
+
+
 def assess_ohlcv_quality(
     frame: pd.DataFrame, timeframe: str, now: pd.Timestamp | None = None
 ) -> dict[str, Any]:

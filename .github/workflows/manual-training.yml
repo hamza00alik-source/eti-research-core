@@ -8,9 +8,12 @@ on:
         required: true
         type: choice
         options:
+          - auto
+          - coinbaseexchange
+          - kraken
           - binance
           - mexc
-        default: binance
+        default: auto
       symbols:
         description: Comma-separated spot symbols
         required: true

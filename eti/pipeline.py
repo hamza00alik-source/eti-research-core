@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, balanced_accuracy_score
 
-from .data import drop_incomplete_candles, fetch_ohlcv, validate_ohlcv
+from .data import drop_incomplete_candles, fetch_ohlcv, fetch_ohlcv_auto, validate_ohlcv
 from .features import BASE_FEATURE_COLUMNS, FEATURE_COLUMNS, build_features, feature_columns_for_frame, make_labels
 from .model import BaselineModel
 from .artifacts import ModelArtifactStore
@@ -374,7 +374,7 @@ def _timeframe_seconds(timeframe: str) -> float:
 
 def main():
     parser = argparse.ArgumentParser(description="Run ETI research-only baseline")
-    parser.add_argument("--exchange", default="binance", choices=["binance", "mexc"])
+    parser.add_argument("--exchange", default="auto", choices=["auto", "binance", "mexc", "coinbaseexchange", "kraken"])
     parser.add_argument("--symbol", default="BTC/USDT", help="Single symbol")
     parser.add_argument("--symbols", help="Comma-separated symbols for independent nested evaluation")
     parser.add_argument("--evaluation", choices=["holdout", "nested"], default="holdout", help="nested performs repeated from-scratch candidate fitting")
@@ -415,8 +415,21 @@ def main():
         symbols = [item.strip() for item in args.symbols.split(",") if item.strip()]
         if not symbols:
             parser.error("--symbols must contain at least one symbol")
-        frames = {symbol: fetch_ohlcv(args.exchange, symbol, args.timeframe, args.limit)
-                  for symbol in symbols}
+        frames = {}
+        source_records = {}
+        for symbol in symbols:
+            if args.exchange == "auto":
+                frames[symbol], source_records[symbol] = fetch_ohlcv_auto(
+                    symbol, args.timeframe, args.limit,
+                    min_rows=args.min_train + args.validation_size + args.test_size + 2 * args.horizon + 50,
+                )
+            else:
+                frames[symbol] = fetch_ohlcv(args.exchange, symbol, args.timeframe, args.limit)
+                source_records[symbol] = {
+                    "mode": "explicit", "provider": args.exchange,
+                    "venue_symbol": symbol, "requested_symbol": symbol,
+                    "returned_candles": int(len(frames[symbol])),
+                }
         metrics = run_multi_symbol_experiment(
             frames, horizon=args.horizon, min_train=args.min_train,
             validation_size=args.validation_size, test_size=args.test_size,
@@ -426,18 +439,40 @@ def main():
             symbol: run_experiment(data, horizon=args.horizon, timeframe=args.timeframe)
             for symbol, data in frames.items()}
     else:
-        frame = fetch_ohlcv(args.exchange, args.symbol, args.timeframe, args.limit)
+        if args.exchange == "auto":
+            frame, source_record = fetch_ohlcv_auto(
+                args.symbol, args.timeframe, args.limit,
+                min_rows=args.min_train + args.validation_size + args.test_size + 2 * args.horizon + 50,
+            )
+        else:
+            frame = fetch_ohlcv(args.exchange, args.symbol, args.timeframe, args.limit)
+            source_record = {
+                "mode": "explicit", "provider": args.exchange,
+                "venue_symbol": args.symbol, "requested_symbol": args.symbol,
+                "returned_candles": int(len(frame)),
+            }
         metrics = run_nested_experiment(
             frame, horizon=args.horizon, min_train=args.min_train,
             validation_size=args.validation_size, test_size=args.test_size,
             step_size=args.step_size, timeframe=args.timeframe,
             max_model_fits=nested_fit_cap,
         ) if args.evaluation == "nested" else run_experiment(frame, horizon=args.horizon, timeframe=args.timeframe)
+    if not args.csv:
+        metrics["market_data"] = (
+            {"mode": "multi_symbol", "sources": source_records}
+            if args.symbols else source_record
+        )
     if args.save_model:
         if args.csv:
             training_ref = "csv:" + args.csv.name
         else:
-            training_ref = f"ccxt:{args.exchange}:{args.symbol}:{args.timeframe}:{args.limit}"
+            actual_source = source_record if args.exchange == "auto" else {
+                "provider": args.exchange, "venue_symbol": args.symbol
+            }
+            training_ref = (
+                f"ccxt:{actual_source['provider']}:{actual_source['venue_symbol']}:"
+                f"{args.timeframe}:{len(frame)}"
+            )
         metrics["exported_model"] = export_deployable_model(
             frame, args.model_id, args.model_version, training_ref, horizon=args.horizon
         )
