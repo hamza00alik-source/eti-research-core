@@ -69,7 +69,6 @@ def run_walk_forward(
     folds = walk_forward_folds(len(clean), min_train, validation_size, test_size,
                                step_size, purge_bars)
     x, y = clean[feature_columns], clean[label_column]
-    class_labels = sorted(pd.unique(y).tolist())
     results = []
     for number, fold in enumerate(folds):
         train_x, train_y = x.iloc[fold.train_start:fold.train_end], y.iloc[fold.train_start:fold.train_end]
@@ -121,6 +120,7 @@ def run_nested_walk_forward(dataset: pd.DataFrame, feature_columns: list[str],
                                step_size, purge_bars)
     x, y = clean[feature_columns], clean[label_column]
     from sklearn.metrics import balanced_accuracy_score
+    class_labels = sorted(pd.unique(y).tolist())
     results = []
     for i, fold in enumerate(folds):
         train_x, train_y = x.iloc[:fold.train_end], y.iloc[:fold.train_end]
