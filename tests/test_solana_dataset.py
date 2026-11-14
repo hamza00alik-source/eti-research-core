@@ -232,3 +232,45 @@ def test_label_generation_skips_malformed_and_unsupported_snapshot_rows(tmp_path
     assert result == {
         "generated": 0, "available": 0, "skipped_invalid_snapshots": 2,
     }
+
+
+def test_dataset_export_does_not_resolve_label_target_from_another_owner(tmp_path):
+    import hashlib
+
+    store = MemoryStore(tmp_path / "cross-owner-label-reference.sqlite3")
+    owner_workspace = store.create_workspace("owner-1", "owner")
+    other_workspace = store.create_workspace("owner-2", "other")
+    payload = '{"evidence":{"price_usd":1,"liquidity_usd":2,"volume_h24_usd":3,"txns_h1_buys":4,"txns_h1_sells":5}}'
+    digest = hashlib.sha256(payload.encode()).hexdigest()
+    with store._connection() as conn:
+        conn.execute(
+            "INSERT INTO solana_research_snapshots "
+            "(id,owner_id,workspace_id,task_id,capability,mint,pool_address,schema_version,"
+            "payload_json,payload_sha256,fetched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            ("owner-baseline", "owner-1", owner_workspace["id"], "task-base",
+             "solana.market.scan", "A" * 40, "PoolA", 1, payload, digest,
+             "2026-01-01T00:00:00Z"),
+        )
+        conn.execute(
+            "INSERT INTO solana_research_snapshots "
+            "(id,owner_id,workspace_id,task_id,capability,mint,pool_address,schema_version,"
+            "payload_json,payload_sha256,fetched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            ("foreign-target", "owner-2", other_workspace["id"], "task-target",
+             "solana.market.scan", "A" * 40, "PoolA", 1, payload, digest,
+             "2026-01-01T00:10:00Z"),
+        )
+        conn.execute(
+            "INSERT INTO solana_research_labels "
+            "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
+            "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("owner-label", "owner-1", owner_workspace["id"], "A" * 40, "PoolA",
+             "owner-baseline", "foreign-target", 300,
+             '{"sampled_price_return_pct":0}', "2026-01-01T00:10:00Z"),
+        )
+
+    exported = store.export_solana_research_dataset("owner-1", owner_workspace["id"])
+    label = exported["labels"][0]
+    assert "target_snapshot_missing_or_outside_workspace" in label["reference_issues"]
+    assert label["target_snapshot_in_export"] is False
+    assert exported["validation"]["label_reference_issue_count"] == 1
+    assert all(row["id"] != "foreign-target" for row in exported["snapshots"])
