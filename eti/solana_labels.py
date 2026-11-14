@@ -222,7 +222,10 @@ def chronological_walk_forward_splits(
         start_index = min_train_groups + fold_index * validation_group_size
         if start_index >= len(groups):
             break
-        end_index = min(len(groups), start_index + validation_group_size)
+        end_index = (
+            len(groups) if fold_index == n_splits - 1
+            else min(len(groups), start_index + validation_group_size)
+        )
         boundary = min(_timestamp(item["baseline_at"]) for item in groups[start_index][1])
         validation_start = boundary.timestamp() + embargo_seconds
         train: list[dict[str, Any]] = []
