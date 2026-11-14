@@ -70,3 +70,14 @@ def test_dataset_export_respects_limit_and_mint_filter(tmp_path):
     result = store.export_solana_research_dataset("owner-1", workspace["id"], limit=1, mint="B" * 40)
     assert result["snapshot_count"] == 1
     assert result["snapshots"][0]["mint"] == "B" * 40
+
+
+
+def test_dataset_validator_does_not_apply_market_features_to_audit_snapshots():
+    report = validate_snapshot_rows([{
+        "id": "audit", "capability": "solana.token.audit", "mint": "A" * 40,
+        "pool_address": "PoolA", "fetched_at": "2026-01-01T00:00:00Z",
+        "payload": {"passed": False, "checks": []},
+    }])
+    assert report["issue_counts"]["missing_evidence"] == 0
+    assert report["issue_counts"]["missing_feature_values"] == 0
