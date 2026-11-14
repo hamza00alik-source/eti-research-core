@@ -687,5 +687,5 @@ def test_solana_transaction_attestation_requires_exact_label_identity(tmp_path):
     with pytest.raises(LookupError, match="label not found"):
         store.record_solana_transaction_attestation(
             "owner-a", workspace["id"], label_id, mint, "different-pool",
-            "wallet-exact", report,
+            "wallet-exact", {**report, "expected_pool_address": "different-pool"},
         )
