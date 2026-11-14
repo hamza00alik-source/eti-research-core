@@ -926,3 +926,42 @@ def test_regime_sampling_sensitivity_matches_only_identical_point_in_time_rows()
 
     with pytest.raises(ValueError):
         evaluate_solana_regime_sampling_sensitivity({"only": {"classified_observations": []}})
+
+
+
+def test_regime_persistence_censors_gaps_conflicts_and_sample_end():
+    from eti.solana_evaluation import evaluate_solana_regime_persistence
+
+    observations = []
+    for mint in ("mint-a", "mint-b", "mint-c"):
+        observations.extend([
+            {"mint": mint, "pool_address": "pool-" + mint, "horizon_seconds": "60",
+             "baseline_at": "2026-01-01T00:00:00+00:00", "regime": "UP"},
+            {"mint": mint, "pool_address": "pool-" + mint, "horizon_seconds": "60",
+             "baseline_at": "2026-01-01T00:00:30+00:00", "regime": "UP"},
+            {"mint": mint, "pool_address": "pool-" + mint, "horizon_seconds": "60",
+             "baseline_at": "2026-01-01T00:01:00+00:00", "regime": "DOWN"},
+            {"mint": mint, "pool_address": "pool-" + mint, "horizon_seconds": "60",
+             "baseline_at": "2026-01-01T00:05:00+00:00", "regime": "DOWN"},
+        ])
+    observations.extend([
+        {"mint": "mint-gap", "pool_address": "pool-gap", "horizon_seconds": "60",
+         "baseline_at": "2026-01-01T00:00:00+00:00", "regime": "UP"},
+        {"mint": "mint-gap", "pool_address": "pool-gap", "horizon_seconds": "60",
+         "baseline_at": "2026-01-01T00:10:00+00:00", "regime": "UP"},
+    ])
+    report = evaluate_solana_regime_persistence(
+        observations, maximum_gap_seconds=60, minimum_episodes=3, minimum_mints=3
+    )
+    up = report["persistence_by_horizon_seconds"]["60"]["UP"]
+    down = report["persistence_by_horizon_seconds"]["60"]["DOWN"]
+    assert up["episode_count"] == 6
+    assert up["distinct_mint_count"] == 4
+    assert up["median_observed_span_seconds"] == 30
+    assert up["right_censored_episode_count"] == 4
+    assert down["episode_count"] == 6
+    assert down["median_observed_span_seconds"] == 0
+    assert report["training_authorized"] is False
+
+    with pytest.raises(ValueError):
+        evaluate_solana_regime_persistence([], maximum_gap_seconds=0)
