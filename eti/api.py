@@ -22,6 +22,10 @@ from .decision import build_research_decision
 from .portfolio import assess_portfolio
 from .risk import RiskEngine, RiskRequest
 from .storage import MemoryStore
+from .solana_dataset import prepare_solana_training_rows
+from .solana_cost_evaluation import evaluate_stored_solana_walk_forward
+from .solana_research import ProviderError, SolanaRpcClient
+from .solana_tx_verification import verify_finalized_transaction_for_mint
 
 app = FastAPI(title=AppConfig().app_name, version=AppConfig().version, lifespan=runtime_lifespan)
 risk_engine = RiskEngine()
@@ -71,7 +75,7 @@ class AutonomyConfigPayload(BaseModel):
     symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"], min_length=1, max_length=20)
     timeframes: list[str] = Field(default_factory=lambda: ["1h"], min_length=1, max_length=6)
     market_types: list[str] = Field(default_factory=lambda: ["spot", "swap"], min_length=1, max_length=3)
-    interval_seconds: int = Field(default=900, ge=300, le=86400)
+    interval_seconds: int = Field(default=300, ge=300, le=86400)
     model_training_enabled: bool = False
     model_training_interval_seconds: int = Field(default=86400, ge=86400, le=604800)
 
@@ -111,6 +115,45 @@ class AgentTaskPayload(BaseModel):
     input: Any
     deadline_at: str | None = Field(default=None, max_length=40)
     max_attempts: int = Field(default=3, ge=1, le=10)
+
+class SolanaCostEvidencePayload(BaseModel):
+    label_id: str = Field(min_length=1, max_length=128)
+    mint: str = Field(min_length=32, max_length=64)
+    pool_address: str = Field(min_length=1, max_length=128)
+    evidence: dict[str, Any]
+
+
+class SolanaWalkForwardEvaluationPayload(BaseModel):
+    n_splits: int = Field(default=3, ge=2, le=10)
+    min_train_groups: int = Field(default=3, ge=2, le=1000)
+    embargo_seconds: int = Field(default=86400, ge=0, le=604800)
+    buy_pressure_threshold: float = Field(default=0.55, gt=0.5, le=1.0)
+
+
+class SolanaTransactionVerificationPayload(BaseModel):
+    signature: str = Field(min_length=64, max_length=88)
+    mint: str = Field(min_length=32, max_length=44)
+    expected_pool_address: str = Field(min_length=32, max_length=44)
+    wallet_address: str = Field(min_length=32, max_length=44)
+
+class SolanaTransactionAttestationPayload(SolanaTransactionVerificationPayload):
+    label_id: str = Field(min_length=1, max_length=128)
+
+
+class SolanaResearchEventPayload(BaseModel):
+    event_key: str = Field(min_length=1, max_length=200)
+    source: str = Field(default="pumpportal", min_length=1, max_length=40)
+    event_type: str = Field(min_length=1, max_length=20)
+    mint: str = Field(min_length=32, max_length=64)
+    source_timestamp: str | None = Field(default=None, max_length=80)
+    payload: dict[str, Any]
+
+
+
+class SolanaRefreshPayload(BaseModel):
+    mint: str = Field(min_length=32, max_length=48)
+    pool_address: str = Field(min_length=1, max_length=128)
+    interval_seconds: int = Field(default=900, ge=300, le=86400)
 
 
 class AgentTaskUpdatePayload(BaseModel):
@@ -517,6 +560,298 @@ def delete_memory(workspace_id: str, namespace: str, key: str,
 @app.get("/v1/agents/capabilities")
 def list_agent_capabilities(account: dict[str, str] = Depends(current_account)):
     return {"items": default_capabilities().capabilities()}
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/events")
+def list_solana_research_events(
+    workspace_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    mint: str | None = Query(default=None, min_length=32, max_length=64),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        items = _memory_store().list_solana_research_events(
+            account["id"], workspace_id, limit=limit, mint=mint
+        )
+        return {"items": items}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/snapshots")
+def list_solana_research_snapshots(
+    workspace_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    mint: str | None = Query(default=None, min_length=32, max_length=64),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        items = _memory_store().list_solana_research_snapshots(
+            account["id"], workspace_id, limit=limit, mint=mint
+        )
+        return {"items": items}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/refresh")
+def list_solana_research_refresh_jobs(
+    workspace_id: str,
+    mint: str | None = Query(default=None, min_length=32, max_length=48),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        items = _memory_store().list_solana_research_refresh_jobs(
+            account["id"], workspace_id, mint=mint
+        )
+        return {"items": items}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/refresh", status_code=201)
+def schedule_solana_research_refresh(
+    workspace_id: str,
+    payload: SolanaRefreshPayload,
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return _memory_store().schedule_solana_research_refresh(
+            account["id"], workspace_id, payload.mint, payload.pool_address,
+            interval_seconds=payload.interval_seconds,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/dataset-report")
+def solana_research_dataset_report(
+    workspace_id: str,
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return _memory_store().get_solana_research_dataset_report(
+            account["id"], workspace_id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/dataset-export")
+def export_solana_research_dataset(
+    workspace_id: str,
+    limit: int = Query(default=5000, ge=1, le=5000),
+    mint: str | None = Query(default=None, min_length=32, max_length=64),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return _memory_store().export_solana_research_dataset(
+            account["id"], workspace_id, limit=limit, mint=mint
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/walk-forward-evaluation")
+def evaluate_solana_walk_forward_from_ledger(
+    workspace_id: str,
+    payload: SolanaWalkForwardEvaluationPayload,
+    limit: int = Query(default=5000, ge=1, le=5000),
+    mint: str | None = Query(default=None, min_length=32, max_length=64),
+    account: dict[str, str] = Depends(current_account),
+):
+    """Run non-fitting diagnostics against this account's export and cost ledger."""
+    store = _memory_store()
+    try:
+        dataset_export = store.export_solana_research_dataset(
+            account["id"], workspace_id, limit=limit, mint=mint
+        )
+        prepared = prepare_solana_training_rows(dataset_export)
+        return evaluate_stored_solana_walk_forward(
+            store,
+            account["id"],
+            workspace_id,
+            dataset_export["labels"],
+            prepared,
+            n_splits=payload.n_splits,
+            min_train_groups=payload.min_train_groups,
+            embargo_seconds=payload.embargo_seconds,
+            buy_pressure_threshold=payload.buy_pressure_threshold,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/transaction-verification")
+def verify_solana_research_transaction(
+    workspace_id: str,
+    payload: SolanaTransactionVerificationPayload,
+    account: dict[str, str] = Depends(current_account),
+):
+    """Verify finalized transaction inclusion against the configured public RPC."""
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        return verify_finalized_transaction_for_mint(
+            SolanaRpcClient(),
+            payload.signature,
+            payload.mint,
+            expected_pool_address=payload.expected_pool_address,
+            wallet_address=payload.wallet_address,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail="Solana RPC verification unavailable") from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/transaction-attestations")
+def attest_solana_research_transaction(
+    workspace_id: str,
+    payload: SolanaTransactionAttestationPayload,
+    account: dict[str, str] = Depends(current_account),
+):
+    """Verify against public RPC and persist only a positive receipt observation."""
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        label = store.get_solana_research_label(
+            account["id"], workspace_id, payload.label_id
+        )
+        if label.get("mint") != payload.mint or label.get("pool_address") != payload.expected_pool_address:
+            raise HTTPException(status_code=422, detail="label identity does not match transaction request")
+        report = verify_finalized_transaction_for_mint(
+            SolanaRpcClient(), payload.signature, payload.mint,
+            expected_pool_address=payload.expected_pool_address,
+            wallet_address=payload.wallet_address,
+        )
+        if report.get("transaction_receipt_verified") is not True:
+            return {"recorded": False, "verification": report}
+        record = store.record_solana_transaction_attestation(
+            account["id"], workspace_id, payload.label_id, payload.mint,
+            payload.expected_pool_address, payload.wallet_address, report,
+        )
+        return {"recorded": True, "verification": report, "attestation": record}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace or label not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail="Solana RPC verification unavailable") from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/transaction-attestations")
+def list_solana_transaction_attestations(
+    workspace_id: str,
+    label_id: str | None = Query(default=None, min_length=1, max_length=128),
+    limit: int = Query(default=500, ge=1, le=1000),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        items = _memory_store().list_solana_transaction_attestations(
+            account["id"], workspace_id, label_id=label_id, limit=limit
+        )
+        return {"items": items}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/cost-evidence", status_code=201)
+def record_solana_execution_cost_evidence(
+    workspace_id: str,
+    payload: SolanaCostEvidencePayload,
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return _memory_store().record_solana_execution_cost_evidence(
+            account["id"], workspace_id, payload.label_id, payload.mint,
+            payload.pool_address, payload.evidence,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace or label not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/cost-evidence")
+def list_solana_execution_cost_evidence(
+    workspace_id: str,
+    label_id: str | None = Query(default=None, min_length=1, max_length=128),
+    limit: int = Query(default=500, ge=1, le=1000),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        items = _memory_store().list_solana_execution_cost_evidence(
+            account["id"], workspace_id, label_id=label_id, limit=limit
+        )
+        return {"items": items}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/labels")
+def list_solana_research_labels(
+    workspace_id: str,
+    limit: int = Query(default=500, ge=1, le=1000),
+    mint: str | None = Query(default=None, min_length=32, max_length=64),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        items = _memory_store().list_solana_research_labels(
+            account["id"], workspace_id, mint=mint, limit=limit
+        )
+        return {"items": items}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/labels/generate")
+def generate_solana_research_labels(
+    workspace_id: str,
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return _memory_store().generate_solana_research_labels(account["id"], workspace_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/events", status_code=201)
+def record_solana_research_event(
+    workspace_id: str,
+    payload: SolanaResearchEventPayload,
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return _memory_store().record_solana_research_event(
+            account["id"], workspace_id, payload.event_key, payload.source,
+            payload.event_type, payload.mint, payload.payload, payload.source_timestamp,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/v1/agents/status")

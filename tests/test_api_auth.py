@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -497,3 +498,283 @@ def test_registry_cannot_approve_artifact_without_embedded_calibration(tmp_path,
             "/v1/models/uncalibrated-model/0.1.0", headers=trainer_headers
         )
         assert candidate.json()["lifecycle"] == "candidate"
+
+
+def test_authenticated_solana_event_ledger_is_idempotent_and_workspace_scoped(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "solana-api.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        owner = _register(client, "solana_owner")
+        other = _register(client, "solana_other")
+        headers = {"Authorization": f"Bearer {owner['access_token']}"}
+        other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+        workspace = client.post("/v1/workspaces", headers=headers,
+                                json={"name": "solana research"}).json()
+        workspace_id = workspace["id"]
+        body = {
+            "event_key": "pumpportal:sig-001",
+            "source": "pumpportal",
+            "event_type": "new_token",
+            "mint": "A" * 40,
+            "source_timestamp": "2026-11-14T12:00:00Z",
+            "payload": {"signature": "sig-001", "slot": 12345},
+        }
+        first = client.post(
+            f"/v1/workspaces/{workspace_id}/solana/events",
+            headers=headers, json=body,
+        )
+        assert first.status_code == 201, first.text
+        duplicate = client.post(
+            f"/v1/workspaces/{workspace_id}/solana/events",
+            headers=headers, json=body,
+        )
+        assert duplicate.status_code == 201
+        assert duplicate.json()["id"] == first.json()["id"]
+        assert duplicate.json()["duplicate"] is True
+        listed = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/events",
+            headers=headers,
+        )
+        assert listed.status_code == 200
+        assert len(listed.json()["items"]) == 1
+        assert client.get(
+            f"/v1/workspaces/{workspace_id}/solana/events",
+            headers=other_headers,
+        ).status_code == 404
+        assert client.get(
+            f"/v1/workspaces/{workspace_id}/solana/events",
+        ).status_code == 401
+
+def test_solana_dataset_export_api_requires_auth_and_isolates_workspaces(tmp_path, monkeypatch):
+    database = tmp_path / "solana-export-api.sqlite3"
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(database))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        assert client.get("/v1/workspaces/not-owned/solana/dataset-export").status_code == 401
+        owner = _register(client, "solana_export_owner")
+        other = _register(client, "solana_export_other")
+        owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+        other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+        workspace_response = client.post(
+            "/v1/workspaces", headers=owner_headers, json={"name": "Solana export"}
+        )
+        assert workspace_response.status_code == 201, workspace_response.text
+        workspace_id = workspace_response.json()["id"]
+
+        own_export = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/dataset-export",
+            headers=owner_headers,
+        )
+        assert own_export.status_code == 200, own_export.text
+        assert own_export.json()["schema"] == "eti.solana.research_dataset.v1"
+        assert own_export.json()["snapshot_count"] == 0
+
+        foreign_export = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/dataset-export",
+            headers=other_headers,
+        )
+        assert foreign_export.status_code == 404
+
+        invalid_limit = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/dataset-export?limit=5001",
+            headers=owner_headers,
+        )
+        assert invalid_limit.status_code == 422
+        invalid_mint = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/dataset-export?mint=short",
+            headers=owner_headers,
+        )
+        assert invalid_mint.status_code == 422
+
+
+def test_solana_cost_evidence_api_is_authenticated_and_owner_scoped(tmp_path, monkeypatch):
+    database = tmp_path / "solana-cost-api.sqlite3"
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(database))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        account_a = _register(client, "cost_owner_a")
+        account_b = _register(client, "cost_owner_b")
+        headers_a = {"Authorization": f"Bearer {account_a['access_token']}"}
+        headers_b = {"Authorization": f"Bearer {account_b['access_token']}"}
+        workspace = client.post(
+            "/v1/workspaces", headers=headers_a, json={"name": "cost research"}
+        ).json()
+        workspace_id = workspace["id"]
+        mint, pool, label_id = "E" * 32, "pool-api", "cost-api-label"
+        store = MemoryStore(database)
+        with store._connection() as conn:
+            conn.execute(
+                "INSERT INTO solana_research_labels "
+                "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
+                "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (label_id, account_a["account"]["id"], workspace_id, mint, pool,
+                 "baseline", "target", 3600, json.dumps({}), "2026-01-01T00:00:00Z"),
+            )
+        body = {
+            "label_id": label_id, "mint": mint, "pool_address": pool,
+            "evidence": {"label_id": label_id, "mint": mint, "pool_address": pool,
+                         "cost_components": {}},
+        }
+        url = f"/v1/workspaces/{workspace_id}/solana/cost-evidence"
+        assert client.post(url, json=body).status_code == 401
+        saved = client.post(url, headers=headers_a, json=body)
+        assert saved.status_code == 201, saved.text
+        assert saved.json()["integrity_valid"] is True
+        assert client.get(url, headers=headers_a).json()["items"][0]["id"] == saved.json()["id"]
+        assert client.get(url, headers=headers_b).status_code == 404
+        assert client.post(url, headers=headers_b, json=body).status_code == 404
+
+def test_solana_transaction_verification_api_is_authenticated_and_workspace_scoped(tmp_path, monkeypatch):
+    import eti.api as api_module
+
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "solana-tx-verify.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+    def b58(data):
+        number = int.from_bytes(data, "big")
+        encoded = ""
+        while number:
+            number, remainder = divmod(number, 58)
+            encoded = alphabet[remainder] + encoded
+        return "1" * (len(data) - len(data.lstrip(b"\\x00"))) + encoded
+
+    signature = b58(bytes(range(1, 65)))
+    mint = b58(bytes(range(65, 97)))
+    pool = b58(bytes(range(129, 161)))
+    wallet = b58(bytes(range(161, 193)))
+
+    class FakeRpc:
+        def call(self, method, params):
+            if method == "getSignatureStatuses":
+                return {"value": [{
+                    "slot": 123,
+                    "err": None,
+                    "confirmationStatus": "finalized",
+                }]}
+            if method == "getTransaction":
+                return {
+                    "slot": 123,
+                    "blockTime": 1794672000,
+                    "transaction": {
+                        "signatures": [signature],
+                        "message": {"accountKeys": [{"pubkey": pool}, {"pubkey": wallet}]},
+                    },
+                    "meta": {
+                        "err": None,
+                        "preTokenBalances": [{
+                            "mint": mint, "owner": wallet,
+                            "uiTokenAmount": {"amount": "100", "decimals": 6},
+                        }],
+                        "postTokenBalances": [{
+                            "mint": mint, "owner": wallet,
+                            "uiTokenAmount": {"amount": "50", "decimals": 6},
+                        }],
+                    },
+                }
+            raise AssertionError(method)
+
+    monkeypatch.setattr(api_module, "SolanaRpcClient", lambda: FakeRpc())
+    with TestClient(app) as client:
+        owner = _register(client, "tx_verify_owner")
+        other = _register(client, "tx_verify_other")
+        owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+        other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+        workspace = client.post(
+            "/v1/workspaces", headers=owner_headers, json={"name": "tx verification"}
+        ).json()
+        url = f"/v1/workspaces/{workspace['id']}/solana/transaction-verification"
+        payload = {
+            "signature": signature, "mint": mint,
+            "expected_pool_address": pool, "wallet_address": wallet,
+        }
+
+        assert client.post(url, json=payload).status_code == 401
+        assert client.post(url, headers=other_headers, json=payload).status_code == 404
+        response = client.post(url, headers=owner_headers, json=payload)
+        assert response.status_code == 200, response.text
+        assert response.json()["verified"] is False
+        assert response.json()["transaction_receipt_verified"] is True
+        assert response.json()["status"] == "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED"
+
+
+
+def test_solana_transaction_attestation_api_verifies_and_persists_server_report(tmp_path, monkeypatch):
+    import json
+    import eti.api as api_module
+
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "solana-tx-attest.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+    def b58(data):
+        number = int.from_bytes(data, "big")
+        encoded = ""
+        while number:
+            number, remainder = divmod(number, 58)
+            encoded = alphabet[remainder] + encoded
+        return "1" * (len(data) - len(data.lstrip(b"\\x00"))) + encoded
+
+    signature = b58(bytes(range(1, 65)))
+    mint = b58(bytes(range(65, 97)))
+    pool = b58(bytes(range(129, 161)))
+    wallet = b58(bytes(range(161, 193)))
+
+    class FakeRpc:
+        def call(self, method, params):
+            if method == "getSignatureStatuses":
+                return {"value": [{"slot": 7, "err": None, "confirmationStatus": "finalized"}]}
+            if method == "getTransaction":
+                return {
+                    "slot": 7, "blockTime": 1794672000,
+                    "transaction": {
+                        "signatures": [signature],
+                        "message": {"accountKeys": [{"pubkey": pool}, {"pubkey": wallet}]},
+                    },
+                    "meta": {
+                        "err": None,
+                        "preTokenBalances": [{"mint": mint, "owner": wallet,
+                            "uiTokenAmount": {"amount": "80", "decimals": 6}}],
+                        "postTokenBalances": [{"mint": mint, "owner": wallet,
+                            "uiTokenAmount": {"amount": "30", "decimals": 6}}],
+                    },
+                }
+            raise AssertionError(method)
+
+    monkeypatch.setattr(api_module, "SolanaRpcClient", lambda: FakeRpc())
+    with TestClient(app) as client:
+        owner = _register(client, "tx_attest_owner")
+        other = _register(client, "tx_attest_other")
+        headers = {"Authorization": f"Bearer {owner['access_token']}"}
+        other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+        workspace = client.post("/v1/workspaces", headers=headers, json={"name": "attest"}).json()
+        workspace_id = workspace["id"]
+        label_id = "attest-label"
+        with api_module._memory_store()._connection() as conn:
+            conn.execute(
+                "INSERT INTO solana_research_labels "
+                "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
+                "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (label_id, owner["account"]["id"], workspace_id, mint, pool, "base", "target", 3600,
+                 json.dumps({"baseline_at": "2026-01-01T00:00:00Z"}), "2026-01-01T00:00:00Z"),
+            )
+        url = f"/v1/workspaces/{workspace_id}/solana/transaction-attestations"
+        body = {"label_id": label_id, "signature": signature, "mint": mint,
+                "expected_pool_address": pool, "wallet_address": wallet}
+        assert client.post(url, json=body).status_code == 401
+        assert client.post(url, headers=other_headers, json=body).status_code == 404
+        saved = client.post(url, headers=headers, json=body)
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["recorded"] is True
+        assert saved.json()["verification"]["verified"] is False
+        assert saved.json()["attestation"]["integrity_valid"] is True
+        listed = client.get(url, headers=headers)
+        assert listed.status_code == 200
+        assert len(listed.json()["items"]) == 1
+        assert client.get(url, headers=other_headers).status_code == 404

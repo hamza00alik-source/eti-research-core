@@ -17,6 +17,7 @@ from .features import build_features
 from .providers import CcxtPublicProvider, YahooFinanceProvider, enrich_ohlcv_with_derivatives
 from .opportunities import rank_spot_opportunity
 from .strategy_evaluation import run_strategy_walk_forward
+from .solana_research import DexScreenerClient, SolanaRpcClient, RugCheckClient, scan_pair, audit_mint
 
 
 AgentHandler = Callable[[dict[str, Any]], dict[str, Any]]
@@ -502,6 +503,47 @@ def derivatives_market_context(payload: dict[str, Any]) -> dict[str, Any]:
     context["timeframe"] = timeframe
     return context
 
+def solana_market_scan(payload: dict[str, Any]) -> dict[str, Any]:
+    """Fetch one Solana mint's current DexScreener pair and apply explicit market filters."""
+    mint = payload.get("mint")
+    if not isinstance(mint, str) or not 32 <= len(mint) <= 48:
+        raise ValueError("mint must be a valid-length Solana address")
+    liquidity_floor = payload.get("min_liquidity_usd", 40000.0)
+    age_floor = payload.get("min_pool_age_minutes", 10.0)
+    chase_ceiling = payload.get("max_h1_change_pct", 80.0)
+    for name, value in (("min_liquidity_usd", liquidity_floor),
+                        ("min_pool_age_minutes", age_floor),
+                        ("max_h1_change_pct", chase_ceiling)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value) or value < 0:
+            raise ValueError(f"{name} must be a finite non-negative number")
+    pairs = DexScreenerClient().fetch_pairs([mint])
+    pair = DexScreenerClient.select_pair(mint, pairs)
+    return scan_pair(mint, pair, min_liquidity_usd=float(liquidity_floor),
+                     min_pool_age_minutes=float(age_floor),
+                     max_h1_change_pct=float(chase_ceiling))
+
+
+def solana_token_audit(payload: dict[str, Any]) -> dict[str, Any]:
+    """Run the read-only Solana evidence audit; incomplete critical evidence blocks."""
+    mint = payload.get("mint")
+    if not isinstance(mint, str) or not 32 <= len(mint) <= 48:
+        raise ValueError("mint must be a valid-length Solana address")
+    pairs = DexScreenerClient().fetch_pairs([mint])
+    pair = DexScreenerClient.select_pair(mint, pairs)
+    created_at = pair.get("pairCreatedAt") if pair else None
+    created_at = int(created_at) if isinstance(created_at, (int, float)) else None
+    excluded = payload.get("excluded_token_accounts", [])
+    if not isinstance(excluded, list) or len(excluded) > 100:
+        raise ValueError("excluded_token_accounts must be a list of at most 100 addresses")
+    return audit_mint(
+        mint, rpc=SolanaRpcClient(), rugcheck=RugCheckClient(),
+        pool_created_at_ms=created_at,
+        pool_address=pair.get("pairAddress") if pair else None,
+        creator_address=payload.get("creator_hint"),
+        excluded_token_accounts=excluded,
+    )
+
+
 def default_capabilities() -> AgentCapabilityRegistry:
     registry = AgentCapabilityRegistry()
     registry.register("market.snapshot", market_snapshot)
@@ -510,4 +552,6 @@ def default_capabilities() -> AgentCapabilityRegistry:
     registry.register("derivatives.context", derivatives_market_context)
     registry.register("strategy.walk_forward", strategy_walk_forward)
     registry.register("model.train_research", model_training_research)
+    registry.register("solana.market.scan", solana_market_scan)
+    registry.register("solana.token.audit", solana_token_audit)
     return registry

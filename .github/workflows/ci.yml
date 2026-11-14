@@ -2,7 +2,7 @@ name: ETI research core checks
 
 on:
   push:
-    branches: [main, "feature/**"]
+    branches: [main, "feature/**", "solana-research-paper-only"]
   pull_request:
     branches: [main]
 

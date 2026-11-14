@@ -212,10 +212,12 @@ class AgentWorker:
         scheduled = self.store.enqueue_due_autonomy_tasks()
         paper_scheduled = self.store.enqueue_due_paper_tasks()
         live_scheduled = self.store.enqueue_due_live_execution_tasks()
-        if scheduled or paper_scheduled or live_scheduled:
+        solana_refresh_scheduled = self.store.enqueue_due_solana_research_refreshes()
+        if scheduled or paper_scheduled or live_scheduled or solana_refresh_scheduled:
             print(json.dumps({"event": "autonomy.tasks_scheduled",
                               "research_tasks": scheduled, "paper_tasks": paper_scheduled,
-                              "live_tasks": live_scheduled},
+                              "live_tasks": live_scheduled,
+                              "solana_refresh_tasks": solana_refresh_scheduled},
                              separators=(",", ":")), flush=True)
         self.store.record_agent_worker_heartbeat(self.worker_id, self.registry.capabilities())
         task = self.store.claim_next_agent_task(lease_seconds=self.lease_seconds)
@@ -305,6 +307,20 @@ class AgentWorker:
             status=updated["status"], duration_ms=duration_ms,
             error_type=error_type,
         )
+        if status == "completed" and capability in {"solana.market.scan", "solana.token.audit"}:
+            try:
+                label_result = self.store.generate_solana_research_labels(
+                    task["owner_id"], task["workspace_id"]
+                )
+                self._log_event(
+                    "solana.labels.generated", task_id=task["id"],
+                    generated=label_result["generated"], available=label_result["available"],
+                )
+            except Exception as exc:
+                self._log_event(
+                    "solana.labels.generation_failed", task_id=task["id"],
+                    error_type=type(exc).__name__,
+                )
         self.store.send_agent_message(
             task["owner_id"], task["workspace_id"], "eti.worker",
             task["requester"], message_type,

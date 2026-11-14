@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -115,6 +116,99 @@ class MemoryStore:
                 CREATE INDEX IF NOT EXISTS idx_audit_owner_time
                     ON audit_events(owner_id, created_at);
 
+                CREATE TABLE IF NOT EXISTS solana_research_events (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    event_key TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    event_type TEXT NOT NULL CHECK(event_type IN ('new_token','migration')),
+                    mint TEXT NOT NULL,
+                    source_timestamp TEXT,
+                    payload_json TEXT NOT NULL,
+                    payload_sha256 TEXT NOT NULL,
+                    received_at TEXT NOT NULL,
+                    UNIQUE(owner_id, workspace_id, event_key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_solana_events_owner_time
+                    ON solana_research_events(owner_id, workspace_id, received_at);
+                CREATE TABLE IF NOT EXISTS solana_research_snapshots (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    task_id TEXT NOT NULL,
+                    capability TEXT NOT NULL CHECK(capability IN ('solana.market.scan','solana.token.audit')),
+                    mint TEXT NOT NULL,
+                    pool_address TEXT,
+                    schema_version INTEGER NOT NULL DEFAULT 1,
+                    payload_json TEXT NOT NULL,
+                    payload_sha256 TEXT NOT NULL,
+                    fetched_at TEXT NOT NULL,
+                    UNIQUE(owner_id, workspace_id, task_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_solana_snapshots_owner_mint_time
+                    ON solana_research_snapshots(owner_id, workspace_id, mint, fetched_at);
+                CREATE TABLE IF NOT EXISTS solana_research_refresh_jobs (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    mint TEXT NOT NULL,
+                    pool_address TEXT NOT NULL,
+                    interval_seconds INTEGER NOT NULL CHECK(interval_seconds BETWEEN 300 AND 86400),
+                    next_due_at TEXT NOT NULL,
+                    last_enqueued_at TEXT,
+                    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(owner_id, workspace_id, mint, pool_address)
+                );
+                CREATE INDEX IF NOT EXISTS idx_solana_refresh_due
+                    ON solana_research_refresh_jobs(enabled, next_due_at);
+                CREATE TABLE IF NOT EXISTS solana_research_labels (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    mint TEXT NOT NULL,
+                    pool_address TEXT NOT NULL,
+                    baseline_snapshot_id TEXT NOT NULL,
+                    target_snapshot_id TEXT NOT NULL,
+                    horizon_seconds INTEGER NOT NULL,
+                    label_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(owner_id, workspace_id, baseline_snapshot_id, horizon_seconds)
+                );
+                CREATE INDEX IF NOT EXISTS idx_solana_labels_owner_mint
+                    ON solana_research_labels(owner_id, workspace_id, mint, horizon_seconds);
+                CREATE TABLE IF NOT EXISTS solana_execution_cost_evidence (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    label_id TEXT NOT NULL,
+                    mint TEXT NOT NULL,
+                    pool_address TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL,
+                    evidence_sha256 TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(owner_id, workspace_id, label_id, evidence_sha256)
+                );
+                CREATE INDEX IF NOT EXISTS idx_solana_cost_evidence_label
+                    ON solana_execution_cost_evidence(owner_id, workspace_id, label_id, created_at);
+                CREATE TABLE IF NOT EXISTS solana_transaction_attestations (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    label_id TEXT NOT NULL,
+                    signature TEXT NOT NULL,
+                    mint TEXT NOT NULL,
+                    pool_address TEXT NOT NULL,
+                    wallet_address TEXT NOT NULL,
+                    attestation_json TEXT NOT NULL,
+                    attestation_sha256 TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(owner_id, workspace_id, label_id, signature, attestation_sha256)
+                );
+                CREATE INDEX IF NOT EXISTS idx_solana_tx_attestations_label
+                    ON solana_transaction_attestations(owner_id, workspace_id, label_id, created_at);
                 CREATE TABLE IF NOT EXISTS agent_tasks (
                     id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
@@ -335,7 +429,7 @@ class MemoryStore:
     def configure_autonomy(
         self, owner_id: str, workspace_id: str, enabled: bool,
         venues: list[str] | None = None, symbols: list[str] | None = None,
-        timeframes: list[str] | None = None, interval_seconds: int = 900,
+        timeframes: list[str] | None = None, interval_seconds: int = 300,
         model_training_enabled: bool = False,
         model_training_interval_seconds: int = 86400,
         market_types: list[str] | None = None
@@ -991,8 +1085,8 @@ class MemoryStore:
         now = now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
         with self._connection() as conn:
             row = conn.execute(
-                "SELECT owner_id, workspace_id, status, lease_token, lease_expires_at "
-                "FROM agent_tasks WHERE id = ?",
+                "SELECT owner_id, workspace_id, status, lease_token, lease_expires_at, "
+                "requester, target_capability, input_json FROM agent_tasks WHERE id = ?",
                 (task_id,),
             ).fetchone()
             if row is None:
@@ -1012,6 +1106,126 @@ class MemoryStore:
                 (str(uuid4()), row["owner_id"], row["workspace_id"],
                  _encode_json({"task_id": task_id}), now),
             )
+            # Every completed Solana research task creates one immutable,
+            # point-in-time snapshot in the same transaction as task completion.
+            task_input = json.loads(row["input_json"])
+            if (row["target_capability"] in {"solana.market.scan", "solana.token.audit"}
+                    and isinstance(task_input, dict) and isinstance(result, dict)):
+                mint = task_input.get("mint") or result.get("mint")
+                if isinstance(mint, str) and len(mint) >= 32:
+                    snapshot_id = str(uuid4())
+                    snapshot_json = _encode_json(result)
+                    snapshot_digest = hashlib.sha256(snapshot_json.encode("utf-8")).hexdigest()
+                    snapshot_fetched_at = now
+                    observed_at_ms = result.get("observed_at_ms")
+                    if isinstance(observed_at_ms, (int, float)) and not isinstance(observed_at_ms, bool):
+                        try:
+                            snapshot_fetched_at = datetime.fromtimestamp(
+                                float(observed_at_ms) / 1000.0, timezone.utc
+                            ).isoformat(timespec="microseconds").replace("+00:00", "Z")
+                        except (OverflowError, OSError, ValueError):
+                            pass
+                    pool_address = result.get("pool_address")
+                    evidence = result.get("evidence")
+                    if isinstance(evidence, dict):
+                        pool_address = pool_address or evidence.get("pair_address")
+                    conn.execute(
+                        "INSERT OR IGNORE INTO solana_research_snapshots("
+                        "id,owner_id,workspace_id,task_id,capability,mint,pool_address,"
+                        "schema_version,payload_json,payload_sha256,fetched_at) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        (snapshot_id, row["owner_id"], row["workspace_id"], task_id,
+                         row["target_capability"], mint,
+                         pool_address if isinstance(pool_address, str) else None,
+                         1, snapshot_json, snapshot_digest, snapshot_fetched_at),
+                    )
+                    if row["target_capability"] == "solana.market.scan" and result.get("verdict") == "REJECT":
+                        conn.execute(
+                            "UPDATE solana_research_refresh_jobs SET enabled=0,updated_at=? "
+                            "WHERE owner_id=? AND workspace_id=? AND mint=? AND enabled=1",
+                            (now, row["owner_id"], row["workspace_id"], mint),
+                        )
+                    elif (row["target_capability"] == "solana.market.scan"
+                            and row["requester"] == "eti.solana.ingest"
+                            and isinstance(task_input, dict)
+                            and task_input.get("scheduled_by") == "eti.solana.ingest"
+                            and result.get("verdict") in {"WAIT", "UNKNOWN"}
+                            and not pool_address):
+                        # Keep newly discovered mints on a low-frequency watch
+                        # until DexScreener indexes their first pool.
+                        pending_pool = "__pending__"
+                        refresh_now_dt = datetime.now(timezone.utc)
+                        refresh_now = refresh_now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
+                        refresh_due = (refresh_now_dt + timedelta(seconds=300)).isoformat(
+                            timespec="microseconds"
+                        ).replace("+00:00", "Z")
+                        conn.execute(
+                            "INSERT INTO solana_research_refresh_jobs(id,owner_id,workspace_id,mint,"
+                            "pool_address,interval_seconds,next_due_at,created_at,updated_at) "
+                            "VALUES(?,?,?,?,?,300,?,?,?) ON CONFLICT(owner_id,workspace_id,mint,pool_address) "
+                            "DO UPDATE SET enabled=1,updated_at=excluded.updated_at",
+                            (str(uuid4()), row["owner_id"], row["workspace_id"], mint,
+                             pending_pool, refresh_due, refresh_now, refresh_now),
+                        )
+                    elif isinstance(pool_address, str) and pool_address:
+                        # A mint may migrate to a new dominant pool. Stop polling
+                        # obsolete pool schedules before activating the current one.
+                        conn.execute(
+                            "UPDATE solana_research_refresh_jobs SET enabled=0,updated_at=? "
+                            "WHERE owner_id=? AND workspace_id=? AND mint=? AND pool_address<>? AND enabled=1",
+                            (now, row["owner_id"], row["workspace_id"], mint, pool_address),
+                        )
+                        refresh_now_dt = datetime.now(timezone.utc)
+                        refresh_now = refresh_now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
+                        refresh_due = (refresh_now_dt + timedelta(seconds=300)).isoformat(
+                            timespec="microseconds"
+                        ).replace("+00:00", "Z")
+                        conn.execute(
+                            "INSERT INTO solana_research_refresh_jobs(id,owner_id,workspace_id,mint,"
+                            "pool_address,interval_seconds,next_due_at,created_at,updated_at) "
+                            "VALUES(?,?,?,?,?,900,?,?,?) ON CONFLICT(owner_id,workspace_id,mint,pool_address) "
+                            "DO UPDATE SET enabled=1,updated_at=excluded.updated_at",
+                            (str(uuid4()), row["owner_id"], row["workspace_id"], mint,
+                             pool_address, refresh_due, refresh_now, refresh_now),
+                        )
+                    conn.execute(
+                        "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                        "VALUES(?,?,?,'solana.snapshot.persisted',?,?)",
+                        (str(uuid4()), row["owner_id"], row["workspace_id"],
+                         _encode_json({"task_id": task_id, "snapshot_id": snapshot_id,
+                                       "capability": row["target_capability"], "mint": mint,
+                                       "payload_sha256": snapshot_digest}), now),
+                    )
+            # Persist the audit follow-up in the same transaction as scan
+            # completion, eliminating a crash window between completion and enqueue.
+            if (row["target_capability"] == "solana.market.scan"
+                    and row["requester"] == "eti.solana.ingest"
+                    and isinstance(task_input, dict)
+                    and task_input.get("scheduled_by") == "eti.solana.ingest"
+                    and isinstance(result, dict)
+                    and result.get("verdict") != "REJECT"):
+                mint = task_input.get("mint")
+                if isinstance(mint, str):
+                    audit_task_id = str(uuid4())
+                    audit_payload = {
+                        "mint": mint, "source_scan_task_id": task_id,
+                        "source_event_id": task_input.get("source_event_id"),
+                        "scheduled_by": "eti.solana.ingest",
+                    }
+                    conn.execute(
+                        "INSERT INTO agent_tasks(id,owner_id,workspace_id,requester,target_capability,"
+                        "status,input_json,max_attempts,created_at,updated_at) "
+                        "VALUES(?,?,?,?,'solana.token.audit','queued',?,2,?,?)",
+                        (audit_task_id, row["owner_id"], row["workspace_id"],
+                         "eti.solana.ingest", _encode_json(audit_payload), now, now),
+                    )
+                    conn.execute(
+                        "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                        "VALUES(?,?,?,'solana.audit.queued',?,?)",
+                        (str(uuid4()), row["owner_id"], row["workspace_id"],
+                         _encode_json({"scan_task_id": task_id, "audit_task_id": audit_task_id,
+                                       "mint": mint}), now),
+                    )
         return self.get_agent_task(row["owner_id"], row["workspace_id"], task_id)  # type: ignore[return-value]
 
     def fail_claimed_agent_task(
@@ -2132,3 +2346,915 @@ class MemoryStore:
                 (owner_id, limit),
             ).fetchall()
         return [self._live_order_dict(row) for row in rows]
+
+
+
+    def schedule_solana_research_refresh(
+        self, owner_id: str, workspace_id: str, mint: str, pool_address: str,
+        interval_seconds: int = 300,
+    ) -> dict[str, Any]:
+        """Create or refresh an owner-scoped recurring scan for a known pool."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        mint = _required_text(mint, "mint", 48)
+        pool_address = _required_text(pool_address, "pool_address", 128)
+        if len(mint) < 32:
+            raise ValueError("mint must be a valid-length Solana address")
+        if isinstance(interval_seconds, bool) or not isinstance(interval_seconds, int) or not 300 <= interval_seconds <= 86400:
+            raise ValueError("interval_seconds must be between 300 and 86400")
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
+        due = (now_dt + timedelta(seconds=interval_seconds)).isoformat(timespec="microseconds").replace("+00:00", "Z")
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            conn.execute(
+                "INSERT INTO solana_research_refresh_jobs(id,owner_id,workspace_id,mint,pool_address,"
+                "interval_seconds,next_due_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(owner_id,workspace_id,mint,pool_address) DO UPDATE SET "
+                "interval_seconds=excluded.interval_seconds,next_due_at=excluded.next_due_at,enabled=1,updated_at=excluded.updated_at",
+                (str(uuid4()), owner_id, workspace_id, mint, pool_address,
+                 interval_seconds, due, now, now),
+            )
+            row = conn.execute(
+                "SELECT * FROM solana_research_refresh_jobs WHERE owner_id=? AND workspace_id=? AND mint=? AND pool_address=?",
+                (owner_id, workspace_id, mint, pool_address),
+            ).fetchone()
+        return dict(row)
+
+    def list_solana_research_refresh_jobs(
+        self, owner_id: str, workspace_id: str, mint: str | None = None,
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        query = (
+            "SELECT id,mint,pool_address,interval_seconds,next_due_at,last_enqueued_at,"
+            "enabled,created_at,updated_at FROM solana_research_refresh_jobs "
+            "WHERE owner_id=? AND workspace_id=?"
+        )
+        params: list[Any] = [owner_id, workspace_id]
+        if mint is not None:
+            query += " AND mint=?"
+            params.append(_required_text(mint, "mint", 48))
+        query += " ORDER BY next_due_at,id"
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+        return [
+            {**dict(row), "status": "awaiting_pool" if row["pool_address"] == "__pending__"
+             else "scheduled", "enabled": bool(row["enabled"])}
+            for row in rows
+        ]
+
+    def enqueue_due_solana_research_refreshes(self, limit: int = 100) -> int:
+        """Atomically enqueue due recurring scans; repeated worker polls are idempotent."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be from 1 to 500")
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
+        created = 0
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT * FROM solana_research_refresh_jobs WHERE enabled=1 AND next_due_at<=? "
+                "ORDER BY next_due_at,id LIMIT ?", (now, limit)
+            ).fetchall()
+            for row in rows:
+                task_id = str(uuid4())
+                payload = {
+                    "mint": row["mint"], "pool_address": row["pool_address"],
+                    "scheduled_by": "eti.solana.refresh",
+                    "refresh_job_id": row["id"],
+                }
+                conn.execute(
+                    "INSERT INTO agent_tasks(id,owner_id,workspace_id,requester,target_capability,"
+                    "status,input_json,max_attempts,created_at,updated_at) "
+                    "VALUES(?,?,?,'eti.solana.refresh','solana.market.scan','queued',?,3,?,?)",
+                    (task_id, row["owner_id"], row["workspace_id"], _encode_json(payload), now, now),
+                )
+                next_due = (now_dt + timedelta(seconds=row["interval_seconds"])).isoformat(
+                    timespec="microseconds"
+                ).replace("+00:00", "Z")
+                conn.execute(
+                    "UPDATE solana_research_refresh_jobs SET last_enqueued_at=?,next_due_at=?,updated_at=? "
+                    "WHERE id=? AND next_due_at<=?",
+                    (now, next_due, now, row["id"], now),
+                )
+                conn.execute(
+                    "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                    "VALUES(?,?,?,'solana.refresh.queued',?,?)",
+                    (str(uuid4()), row["owner_id"], row["workspace_id"],
+                     _encode_json({"task_id": task_id, "refresh_job_id": row["id"],
+                                   "mint": row["mint"], "pool_address": row["pool_address"]}), now),
+                )
+                created += 1
+        return created
+
+    def generate_solana_research_labels(
+        self, owner_id: str, workspace_id: str, now: datetime | None = None,
+    ) -> dict[str, int]:
+        """Persist only labels supported by later same-pool observations."""
+        from .solana_labels import build_forward_labels
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(
+                "SELECT id,capability,mint,pool_address,schema_version,payload_json,fetched_at "
+                "FROM solana_research_snapshots WHERE owner_id=? AND workspace_id=? "
+                "ORDER BY fetched_at,id", (owner_id, workspace_id)
+            ).fetchall()
+            snapshots = []
+            skipped_invalid_snapshots = 0
+            for row in rows:
+                # Label generation must not crash on damaged stored JSON or use
+                # payloads whose schema has not been explicitly understood.
+                if isinstance(row["schema_version"], bool) or row["schema_version"] != 1:
+                    skipped_invalid_snapshots += 1
+                    continue
+                try:
+                    payload = json.loads(row["payload_json"])
+                except (TypeError, ValueError):
+                    skipped_invalid_snapshots += 1
+                    continue
+                if not isinstance(payload, dict):
+                    skipped_invalid_snapshots += 1
+                    continue
+                snapshots.append({
+                    "id": row["id"], "capability": row["capability"], "mint": row["mint"],
+                    "pool_address": row["pool_address"], "payload": payload,
+                    "fetched_at": row["fetched_at"],
+                })
+            labels = build_forward_labels(snapshots, now=now)
+            inserted = 0
+            created_at = _utc_now()
+            for label in labels:
+                cursor = conn.execute(
+                    "INSERT OR IGNORE INTO solana_research_labels(id,owner_id,workspace_id,mint,"
+                    "pool_address,baseline_snapshot_id,target_snapshot_id,horizon_seconds,label_json,created_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (str(uuid4()), owner_id, workspace_id, label["mint"], label["pool_address"],
+                     label["baseline_snapshot_id"], label["target_snapshot_id"],
+                     label["horizon_seconds"], _encode_json(label), created_at),
+                )
+                inserted += cursor.rowcount
+        return {
+            "generated": inserted, "available": len(labels),
+            "skipped_invalid_snapshots": skipped_invalid_snapshots,
+        }
+
+    def get_solana_research_dataset_report(
+        self, owner_id: str, workspace_id: str,
+    ) -> dict[str, Any]:
+        """Return owner-scoped coverage diagnostics; never declares a model train-ready."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            snapshot_rows = conn.execute(
+                "SELECT capability,mint,pool_address,fetched_at,payload_json "
+                "FROM solana_research_snapshots WHERE owner_id=? AND workspace_id=? "
+                "ORDER BY fetched_at,id", (owner_id, workspace_id)
+            )
+            snapshot_count = market_count = audit_count = 0
+            mints: set[str] = set()
+            pools: set[tuple[str, str]] = set()
+            groups: dict[tuple[str, str], list[datetime]] = {}
+            feature_counts = {
+                "price_usd": 0, "liquidity_usd": 0, "volume_h24_usd": 0,
+                "txns_h1_buys": 0, "txns_h1_sells": 0,
+            }
+            first_at: datetime | None = None
+            last_at: datetime | None = None
+            malformed_payloads = 0
+            for row in snapshot_rows:
+                snapshot_count += 1
+                if row["capability"] == "solana.token.audit":
+                    audit_count += 1
+                    continue
+                if row["capability"] != "solana.market.scan":
+                    continue
+                market_count += 1
+                mint, pool = row["mint"], row["pool_address"]
+                if isinstance(mint, str) and mint:
+                    mints.add(mint)
+                if isinstance(mint, str) and mint and isinstance(pool, str) and pool and pool != "__pending__":
+                    pools.add((mint, pool))
+                    try:
+                        stamp = datetime.fromisoformat(row["fetched_at"].replace("Z", "+00:00"))
+                        if stamp.tzinfo is not None:
+                            stamp = stamp.astimezone(timezone.utc)
+                            groups.setdefault((mint, pool), []).append(stamp)
+                            first_at = stamp if first_at is None or stamp < first_at else first_at
+                            last_at = stamp if last_at is None or stamp > last_at else last_at
+                    except (AttributeError, TypeError, ValueError):
+                        pass
+                try:
+                    payload = json.loads(row["payload_json"])
+                except (TypeError, ValueError):
+                    malformed_payloads += 1
+                    continue
+                evidence = payload.get("evidence") if isinstance(payload, dict) else None
+                if not isinstance(evidence, dict):
+                    continue
+                for key in feature_counts:
+                    value = evidence.get(key)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+                        feature_counts[key] += 1
+            label_rows = conn.execute(
+                "SELECT horizon_seconds,label_json FROM solana_research_labels "
+                "WHERE owner_id=? AND workspace_id=? ORDER BY horizon_seconds",
+                (owner_id, workspace_id),
+            )
+            label_counts: dict[str, dict[str, int]] = {}
+            for row in label_rows:
+                key = str(row["horizon_seconds"])
+                stats = label_counts.setdefault(key, {"labels": 0, "distinct_mints": 0, "price_returns_available": 0})
+                stats["labels"] += 1
+                try:
+                    label = json.loads(row["label_json"])
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(label, dict):
+                    if (
+                        isinstance(label.get("sampled_price_return_pct"), (int, float))
+                        and not isinstance(label.get("sampled_price_return_pct"), bool)
+                        and math.isfinite(label["sampled_price_return_pct"])
+                    ):
+                        stats["price_returns_available"] += 1
+            # Count distinct mints with SQL, avoiding a potentially large in-memory set.
+            distinct_by_horizon = conn.execute(
+                "SELECT horizon_seconds,COUNT(DISTINCT mint) AS n FROM solana_research_labels "
+                "WHERE owner_id=? AND workspace_id=? GROUP BY horizon_seconds",
+                (owner_id, workspace_id),
+            ).fetchall()
+            for row in distinct_by_horizon:
+                label_counts.setdefault(str(row["horizon_seconds"]), {
+                    "labels": 0, "distinct_mints": 0, "price_returns_available": 0,
+                })["distinct_mints"] = row["n"]
+        intervals: list[float] = []
+        gaps_over_10m = 0
+        for stamps in groups.values():
+            stamps.sort()
+            for previous, current in zip(stamps, stamps[1:]):
+                seconds = (current - previous).total_seconds()
+                if seconds > 0:
+                    intervals.append(seconds)
+                    if seconds > 600:
+                        gaps_over_10m += 1
+        intervals.sort()
+        median_interval = (
+            intervals[len(intervals) // 2] if intervals else None
+        )
+        coverage = {
+            key: round(count / market_count, 6) if market_count else 0.0
+            for key, count in feature_counts.items()
+        }
+        return {
+            "scope": {"owner_id": owner_id, "workspace_id": workspace_id},
+            "snapshots": {
+                "total": snapshot_count, "market_scans": market_count,
+                "token_audits": audit_count, "distinct_mints": len(mints),
+                "distinct_mint_pool_pairs": len(pools),
+                "first_observation_at": first_at.isoformat().replace("+00:00", "Z") if first_at else None,
+                "last_observation_at": last_at.isoformat().replace("+00:00", "Z") if last_at else None,
+                "observation_span_seconds": round((last_at - first_at).total_seconds(), 3) if first_at and last_at else 0,
+                "median_sample_interval_seconds": median_interval,
+                "sample_gaps_over_10_minutes": gaps_over_10m,
+                "malformed_payloads": malformed_payloads,
+            },
+            "feature_coverage": {
+                key: {"count": feature_counts[key], "fraction": coverage[key]}
+                for key in feature_counts
+            },
+            "labels_by_horizon_seconds": label_counts,
+            "training_gate": {
+                "ready": False,
+                "status": "RESEARCH_DATA_COLLECTION",
+                "reason": "No independently approved sample-size, coverage, regime-diversity, execution-cost, and out-of-sample acceptance thresholds have been configured.",
+            },
+            "limitations": [
+                "Provider samples are not OHLCV candles or executable quotes.",
+                "Reported rolling 24-hour volume is not interval volume.",
+                "Missing observations during outages are not backfilled.",
+                "A dataset report is descriptive and does not establish predictive performance.",
+            ],
+        }
+
+    def record_solana_execution_cost_evidence(
+        self, owner_id: str, workspace_id: str, label_id: str,
+        mint: str, pool_address: str, evidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Append immutable owner/workspace-scoped cost evidence for one exact label."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        label_id = _required_text(label_id, "label_id", 128)
+        mint = _required_text(mint, "mint", 64)
+        pool_address = _required_text(pool_address, "pool_address", 128)
+        if len(mint) < 32:
+            raise ValueError("mint must be a valid-length Solana address")
+        if not isinstance(evidence, dict):
+            raise ValueError("evidence must be an object")
+        # Identity is stored in the envelope, not trusted from nested component values.
+        envelope = dict(evidence)
+        for key, expected in (("label_id", label_id), ("mint", mint), ("pool_address", pool_address)):
+            supplied = envelope.get(key)
+            if supplied != expected:
+                raise ValueError(f"evidence {key} must match the requested label identity")
+        encoded = _encode_json(envelope)
+        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        now = _utc_now()
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            label = conn.execute(
+                "SELECT mint,pool_address FROM solana_research_labels "
+                "WHERE owner_id=? AND workspace_id=? AND id=?",
+                (owner_id, workspace_id, label_id),
+            ).fetchone()
+            if label is None or label["mint"] != mint or label["pool_address"] != pool_address:
+                raise LookupError("label not found")
+            existing = conn.execute(
+                "SELECT * FROM solana_execution_cost_evidence "
+                "WHERE owner_id=? AND workspace_id=? AND label_id=? AND evidence_sha256=?",
+                (owner_id, workspace_id, label_id, digest),
+            ).fetchone()
+            if existing is not None:
+                return self._solana_cost_evidence_dict(existing, duplicate=True)
+            record_id = str(uuid4())
+            conn.execute(
+                "INSERT INTO solana_execution_cost_evidence "
+                "(id,owner_id,workspace_id,label_id,mint,pool_address,evidence_json,evidence_sha256,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (record_id, owner_id, workspace_id, label_id, mint, pool_address, encoded, digest, now),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (str(uuid4()), owner_id, workspace_id, "solana.cost_evidence.recorded",
+                 _encode_json({"evidence_id": record_id, "label_id": label_id,
+                               "mint": mint, "pool_address": pool_address,
+                               "evidence_sha256": digest}), now),
+            )
+            row = conn.execute(
+                "SELECT * FROM solana_execution_cost_evidence WHERE id=?", (record_id,)
+            ).fetchone()
+        return self._solana_cost_evidence_dict(row, duplicate=False)
+
+    @staticmethod
+    def _solana_cost_evidence_dict(row: sqlite3.Row, *, duplicate: bool) -> dict[str, Any]:
+        raw = row["evidence_json"]
+        digest_valid = hashlib.sha256(raw.encode("utf-8")).hexdigest() == row["evidence_sha256"]
+        try:
+            evidence = json.loads(raw)
+        except (TypeError, ValueError):
+            evidence = None
+            digest_valid = False
+        return {
+            "id": row["id"], "label_id": row["label_id"], "mint": row["mint"],
+            "pool_address": row["pool_address"], "evidence": evidence,
+            "evidence_sha256": row["evidence_sha256"], "integrity_valid": digest_valid,
+            "created_at": row["created_at"], "duplicate": duplicate,
+        }
+
+    def list_solana_execution_cost_evidence(
+        self, owner_id: str, workspace_id: str, label_id: str | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("limit must be from 1 to 1000")
+        query = (
+            "SELECT * FROM solana_execution_cost_evidence "
+            "WHERE owner_id=? AND workspace_id=?"
+        )
+        params: list[Any] = [owner_id, workspace_id]
+        if label_id is not None:
+            query += " AND label_id=?"
+            params.append(_required_text(label_id, "label_id", 128))
+        query += " ORDER BY created_at DESC,id DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+        return [self._solana_cost_evidence_dict(row, duplicate=False) for row in rows]
+
+    def list_latest_solana_execution_cost_evidence(
+        self, owner_id: str, workspace_id: str, label_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Return one newest immutable evidence record per requested label."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if not isinstance(label_ids, list):
+            raise ValueError("label_ids must be a list")
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for label_id in label_ids:
+            value = _required_text(label_id, "label_id", 128)
+            if value not in seen:
+                normalized.append(value)
+                seen.add(value)
+        if not normalized:
+            with self._connection() as conn:
+                if not self._owns_workspace(conn, owner_id, workspace_id):
+                    raise LookupError("workspace not found")
+            return []
+
+        latest: dict[str, dict[str, Any]] = {}
+        # Keep each IN clause below SQLite's conservative bound-parameter limit.
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            for offset in range(0, len(normalized), 500):
+                batch = normalized[offset:offset + 500]
+                placeholders = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    "SELECT * FROM solana_execution_cost_evidence "
+                    f"WHERE owner_id=? AND workspace_id=? AND label_id IN ({placeholders}) "
+                    "ORDER BY label_id ASC,created_at DESC,id DESC",
+                    [owner_id, workspace_id, *batch],
+                ).fetchall()
+                for row in rows:
+                    if row["label_id"] not in latest:
+                        latest[row["label_id"]] = self._solana_cost_evidence_dict(
+                            row, duplicate=False
+                        )
+        return [latest[label_id] for label_id in normalized if label_id in latest]
+
+    def list_latest_solana_transaction_attestations(
+        self, owner_id: str, workspace_id: str, label_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Return the newest receipt attestation per requested label."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if not isinstance(label_ids, list):
+            raise ValueError("label_ids must be a list")
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for label_id in label_ids:
+            value = _required_text(label_id, "label_id", 128)
+            if value not in seen:
+                normalized.append(value)
+                seen.add(value)
+        if not normalized:
+            with self._connection() as conn:
+                if not self._owns_workspace(conn, owner_id, workspace_id):
+                    raise LookupError("workspace not found")
+            return []
+        latest: dict[str, dict[str, Any]] = {}
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            for offset in range(0, len(normalized), 500):
+                batch = normalized[offset:offset + 500]
+                placeholders = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    "SELECT * FROM solana_transaction_attestations "
+                    f"WHERE owner_id=? AND workspace_id=? AND label_id IN ({placeholders}) "
+                    "ORDER BY label_id ASC,created_at DESC,id DESC",
+                    [owner_id, workspace_id, *batch],
+                ).fetchall()
+                for row in rows:
+                    if row["label_id"] not in latest:
+                        latest[row["label_id"]] = self._solana_transaction_attestation_dict(
+                            row, duplicate=False
+                        )
+        return [latest[label_id] for label_id in normalized if label_id in latest]
+
+    def record_solana_transaction_attestation(
+        self, owner_id: str, workspace_id: str, label_id: str,
+        mint: str, pool_address: str, wallet_address: str,
+        attestation: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Append an RPC-generated finalized receipt observation; never assert a verified swap."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        label_id = _required_text(label_id, "label_id", 128)
+        mint = _required_text(mint, "mint", 64)
+        pool_address = _required_text(pool_address, "pool_address", 128)
+        wallet_address = _required_text(wallet_address, "wallet_address", 64)
+        if not isinstance(attestation, dict):
+            raise ValueError("attestation must be an object")
+        if (attestation.get("transaction_receipt_verified") is not True
+                or attestation.get("verified") is not False
+                or attestation.get("status") != "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED"):
+            raise ValueError("only finalized receipt observations may be attested")
+        signature = _required_text(attestation.get("signature"), "signature", 88)
+        for key, expected in (
+            ("mint", mint), ("expected_pool_address", pool_address),
+            ("wallet_address", wallet_address),
+        ):
+            if attestation.get(key) != expected:
+                raise ValueError(f"attestation {key} does not match requested identity")
+        encoded = _encode_json(attestation)
+        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        now = _utc_now()
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            label = conn.execute(
+                "SELECT mint,pool_address FROM solana_research_labels "
+                "WHERE owner_id=? AND workspace_id=? AND id=?",
+                (owner_id, workspace_id, label_id),
+            ).fetchone()
+            if label is None or label["mint"] != mint or label["pool_address"] != pool_address:
+                raise LookupError("label not found")
+            existing = conn.execute(
+                "SELECT * FROM solana_transaction_attestations WHERE owner_id=? AND workspace_id=? "
+                "AND label_id=? AND signature=? AND attestation_sha256=?",
+                (owner_id, workspace_id, label_id, signature, digest),
+            ).fetchone()
+            if existing is not None:
+                return self._solana_transaction_attestation_dict(existing, duplicate=True)
+            record_id = str(uuid4())
+            conn.execute(
+                "INSERT INTO solana_transaction_attestations "
+                "(id,owner_id,workspace_id,label_id,signature,mint,pool_address,wallet_address,"
+                "attestation_json,attestation_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (record_id, owner_id, workspace_id, label_id, signature, mint, pool_address,
+                 wallet_address, encoded, digest, now),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (str(uuid4()), owner_id, workspace_id, "solana.transaction_receipt.attested",
+                 _encode_json({"attestation_id": record_id, "label_id": label_id,
+                               "signature": signature, "attestation_sha256": digest}), now),
+            )
+            row = conn.execute(
+                "SELECT * FROM solana_transaction_attestations WHERE id=?", (record_id,)
+            ).fetchone()
+        return self._solana_transaction_attestation_dict(row, duplicate=False)
+
+    @staticmethod
+    def _solana_transaction_attestation_dict(row: sqlite3.Row, *, duplicate: bool) -> dict[str, Any]:
+        raw = row["attestation_json"]
+        integrity_valid = hashlib.sha256(raw.encode("utf-8")).hexdigest() == row["attestation_sha256"]
+        try:
+            attestation = json.loads(raw)
+        except (TypeError, ValueError):
+            attestation = None
+            integrity_valid = False
+        return {
+            "id": row["id"], "label_id": row["label_id"], "signature": row["signature"],
+            "mint": row["mint"], "pool_address": row["pool_address"],
+            "wallet_address": row["wallet_address"], "attestation": attestation,
+            "attestation_sha256": row["attestation_sha256"], "integrity_valid": integrity_valid,
+            "created_at": row["created_at"], "duplicate": duplicate,
+        }
+
+    def list_solana_transaction_attestations(
+        self, owner_id: str, workspace_id: str, label_id: str | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("limit must be from 1 to 1000")
+        query = ("SELECT * FROM solana_transaction_attestations "
+                 "WHERE owner_id=? AND workspace_id=?")
+        params: list[Any] = [owner_id, workspace_id]
+        if label_id is not None:
+            query += " AND label_id=?"
+            params.append(_required_text(label_id, "label_id", 128))
+        query += " ORDER BY created_at DESC,id DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+        return [self._solana_transaction_attestation_dict(row, duplicate=False) for row in rows]
+
+    def get_solana_research_label(
+        self, owner_id: str, workspace_id: str, label_id: str,
+    ) -> dict[str, Any]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        label_id = _required_text(label_id, "label_id", 128)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            row = conn.execute(
+                "SELECT id,mint,pool_address,label_json,created_at FROM solana_research_labels "
+                "WHERE owner_id=? AND workspace_id=? AND id=?",
+                (owner_id, workspace_id, label_id),
+            ).fetchone()
+        if row is None:
+            raise LookupError("label not found")
+        return {"id": row["id"], "mint": row["mint"], "pool_address": row["pool_address"],
+                "label": json.loads(row["label_json"]), "created_at": row["created_at"]}
+
+    def list_solana_research_labels(
+        self, owner_id: str, workspace_id: str, mint: str | None = None, limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("limit must be from 1 to 1000")
+        query = "SELECT * FROM solana_research_labels WHERE owner_id=? AND workspace_id=?"
+        params: list[Any] = [owner_id, workspace_id]
+        if mint is not None:
+            query += " AND mint=?"
+            params.append(_required_text(mint, "mint", 64))
+        query += " ORDER BY created_at DESC,id DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+        return [{"id": row["id"], "mint": row["mint"], "pool_address": row["pool_address"],
+                 "label": json.loads(row["label_json"]), "created_at": row["created_at"]}
+                for row in rows]
+
+    def record_solana_research_event(
+        self, owner_id: str, workspace_id: str, event_key: str,
+        source: str, event_type: str, mint: str, payload: Any,
+        source_timestamp: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist an idempotent, account-scoped Solana discovery event."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        event_key = _required_text(event_key, "event_key", 200)
+        source = _required_text(source, "source", 40)
+        mint = _required_text(mint, "mint", 64)
+        if source != "pumpportal":
+            raise ValueError("source must be pumpportal")
+        if event_type not in {"new_token", "migration"}:
+            raise ValueError("event_type must be new_token or migration")
+        if len(mint) < 32:
+            raise ValueError("mint must be a valid-length Solana address")
+        if source_timestamp is not None:
+            source_timestamp = _required_text(source_timestamp, "source_timestamp", 80)
+        encoded = _encode_json(payload)
+        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        now = _utc_now()
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            existing = conn.execute(
+                "SELECT * FROM solana_research_events WHERE owner_id=? AND workspace_id=? AND event_key=?",
+                (owner_id, workspace_id, event_key),
+            ).fetchone()
+            if existing is not None:
+                return self._solana_event_dict(
+                    existing, duplicate=True,
+                    payload_conflict=existing["payload_sha256"] != digest,
+                )
+            event_id = str(uuid4())
+            conn.execute(
+                "INSERT INTO solana_research_events(id,owner_id,workspace_id,event_key,source,event_type,"
+                "mint,source_timestamp,payload_json,payload_sha256,received_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (event_id, owner_id, workspace_id, event_key, source, event_type, mint,
+                 source_timestamp, encoded, digest, now),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (str(uuid4()), owner_id, workspace_id, "solana.event.ingested",
+                 _encode_json({"event_id": event_id, "event_key": event_key,
+                               "event_type": event_type, "mint": mint,
+                               "payload_sha256": digest}), now),
+            )
+            # The event and its first research task commit together. A replay
+            # returns above and cannot create a second scan task.
+            scan_task_id = str(uuid4())
+            scan_payload = {
+                "mint": mint,
+                "source_event_id": event_id,
+                "source_event_key": event_key,
+                "source_event_type": event_type,
+                "scheduled_by": "eti.solana.ingest",
+            }
+            conn.execute(
+                "INSERT INTO agent_tasks(id,owner_id,workspace_id,requester,target_capability,"
+                "status,input_json,max_attempts,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,'queued',?,3,?,?)",
+                (scan_task_id, owner_id, workspace_id, "eti.solana.ingest",
+                 "solana.market.scan", _encode_json(scan_payload), now, now),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (str(uuid4()), owner_id, workspace_id, "solana.scan.queued",
+                 _encode_json({"event_id": event_id, "task_id": scan_task_id, "mint": mint}), now),
+            )
+            row = conn.execute(
+                "SELECT * FROM solana_research_events WHERE id=?", (event_id,)
+            ).fetchone()
+        result = self._solana_event_dict(row, duplicate=False)
+        result["scan_task_id"] = scan_task_id
+        return result
+
+    @staticmethod
+    def _solana_event_dict(
+        row: sqlite3.Row, duplicate: bool = False, payload_conflict: bool = False
+    ) -> dict[str, Any]:
+        return {
+            "id": row["id"], "event_key": row["event_key"], "source": row["source"],
+            "event_type": row["event_type"], "mint": row["mint"],
+            "source_timestamp": row["source_timestamp"],
+            "payload": json.loads(row["payload_json"]),
+            "payload_sha256": row["payload_sha256"], "received_at": row["received_at"],
+            "duplicate": duplicate, "payload_conflict": payload_conflict,
+        }
+
+    def list_solana_research_snapshots(
+        self, owner_id: str, workspace_id: str, limit: int = 100,
+        mint: str | None = None,
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be an integer from 1 to 500")
+        query = ("SELECT * FROM solana_research_snapshots "
+                 "WHERE owner_id=? AND workspace_id=?")
+        params: list[Any] = [owner_id, workspace_id]
+        if mint is not None:
+            mint = _required_text(mint, "mint", 64)
+            query += " AND mint=?"
+            params.append(mint)
+        query += " ORDER BY fetched_at DESC, id DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+        return [{
+            "id": row["id"], "task_id": row["task_id"],
+            "capability": row["capability"], "mint": row["mint"],
+            "pool_address": row["pool_address"],
+            "schema_version": row["schema_version"],
+            "payload": json.loads(row["payload_json"]),
+            "payload_sha256": row["payload_sha256"],
+            "fetched_at": row["fetched_at"],
+        } for row in rows]
+
+    def list_solana_research_events(
+        self, owner_id: str, workspace_id: str, limit: int = 100,
+        mint: str | None = None,
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be an integer from 1 to 500")
+        query = ("SELECT * FROM solana_research_events "
+                 "WHERE owner_id=? AND workspace_id=?")
+        params: list[Any] = [owner_id, workspace_id]
+        if mint is not None:
+            mint = _required_text(mint, "mint", 64)
+            query += " AND mint=?"
+            params.append(mint)
+        query += " ORDER BY received_at DESC, id DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+        return [self._solana_event_dict(row) for row in rows]
+
+    def export_solana_research_dataset(
+        self, owner_id: str, workspace_id: str, limit: int = 5000,
+        mint: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a deterministic, bounded point-in-time export for this owner/workspace."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 5000:
+            raise ValueError("limit must be an integer from 1 to 5000")
+        query = (
+            "SELECT id,task_id,capability,mint,pool_address,schema_version,"
+            "payload_json,payload_sha256,fetched_at FROM solana_research_snapshots "
+            "WHERE owner_id=? AND workspace_id=?"
+        )
+        params: list[Any] = [owner_id, workspace_id]
+        if mint is not None:
+            mint = _required_text(mint, "mint", 64)
+            query += " AND mint=?"
+            params.append(mint)
+        query += " ORDER BY fetched_at ASC,id ASC LIMIT ?"
+        params.append(limit + 1)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+            truncated = len(rows) > limit
+            rows = rows[:limit]
+            label_query = (
+                "SELECT l.id,l.mint,l.pool_address,l.baseline_snapshot_id,l.target_snapshot_id,"
+                "l.horizon_seconds,l.label_json,l.created_at FROM solana_research_labels l "
+                "JOIN (SELECT id FROM solana_research_snapshots WHERE owner_id=? AND workspace_id=?"
+            )
+            label_params: list[Any] = [owner_id, workspace_id]
+            if mint is not None:
+                label_query += " AND mint=?"
+                label_params.append(mint)
+            label_query += (
+                " ORDER BY fetched_at ASC,id ASC LIMIT ?) selected "
+                "ON selected.id=l.baseline_snapshot_id "
+                "WHERE l.owner_id=? AND l.workspace_id=? ORDER BY l.created_at ASC,l.id ASC"
+            )
+            label_params.extend([limit, owner_id, workspace_id])
+            label_rows = conn.execute(label_query, label_params).fetchall()
+            exported_snapshot_ids = {row["id"] for row in rows}
+            baseline_rows = {row["id"]: row for row in rows}
+            target_rows = {}
+            target_ids = list(dict.fromkeys(row["target_snapshot_id"] for row in label_rows))
+            for offset in range(0, len(target_ids), 500):
+                batch = target_ids[offset:offset + 500]
+                if not batch:
+                    continue
+                placeholders = ",".join("?" for _ in batch)
+                referenced = conn.execute(
+                    "SELECT id,mint,pool_address,fetched_at FROM solana_research_snapshots "
+                    "WHERE owner_id=? AND workspace_id=? AND id IN (" + placeholders + ")",
+                    [owner_id, workspace_id, *batch],
+                ).fetchall()
+                target_rows.update({item["id"]: item for item in referenced})
+            labels = []
+            malformed_label_count = 0
+            label_reference_issue_count = 0
+            for row in label_rows:
+                try:
+                    label_value = json.loads(row["label_json"])
+                    label_parse_error = False
+                except (TypeError, ValueError):
+                    label_value = None
+                    label_parse_error = True
+                    malformed_label_count += 1
+                reference_issues = []
+                baseline = baseline_rows.get(row["baseline_snapshot_id"])
+                target = target_rows.get(row["target_snapshot_id"])
+                if baseline is None:
+                    reference_issues.append("baseline_snapshot_missing_or_outside_export")
+                if target is None:
+                    reference_issues.append("target_snapshot_missing_or_outside_workspace")
+                for role, snapshot in (("baseline", baseline), ("target", target)):
+                    if snapshot is not None and (
+                        snapshot["mint"] != row["mint"] or snapshot["pool_address"] != row["pool_address"]
+                    ):
+                        reference_issues.append(role + "_identity_mismatch")
+                if baseline is not None and target is not None:
+                    try:
+                        baseline_at = datetime.fromisoformat(baseline["fetched_at"].replace("Z", "+00:00"))
+                        target_at = datetime.fromisoformat(target["fetched_at"].replace("Z", "+00:00"))
+                        if baseline_at.tzinfo is None or target_at.tzinfo is None:
+                            raise ValueError("naive timestamp")
+                        elapsed = (target_at - baseline_at).total_seconds()
+                        if elapsed <= 0:
+                            reference_issues.append("target_not_after_baseline")
+                        if not isinstance(row["horizon_seconds"], int) or row["horizon_seconds"] <= 0 or elapsed < row["horizon_seconds"]:
+                            reference_issues.append("target_before_label_horizon")
+                    except (AttributeError, TypeError, ValueError):
+                        reference_issues.append("invalid_reference_timestamp")
+                if reference_issues:
+                    label_reference_issue_count += 1
+                labels.append({
+                    "id": row["id"], "mint": row["mint"], "pool_address": row["pool_address"],
+                    "baseline_snapshot_id": row["baseline_snapshot_id"],
+                    "target_snapshot_id": row["target_snapshot_id"],
+                    "baseline_snapshot_in_export": row["baseline_snapshot_id"] in exported_snapshot_ids,
+                    "target_snapshot_in_export": row["target_snapshot_id"] in exported_snapshot_ids,
+                    "horizon_seconds": row["horizon_seconds"],
+                    "label": label_value, "label_parse_error": label_parse_error,
+                    "reference_issues": reference_issues,
+                    "created_at": row["created_at"],
+                })
+        snapshots = []
+        for row in rows:
+            try:
+                payload_value = json.loads(row["payload_json"])
+            except (TypeError, ValueError):
+                payload_value = None
+            snapshots.append({
+                "id": row["id"], "task_id": row["task_id"], "capability": row["capability"],
+                "mint": row["mint"], "pool_address": row["pool_address"],
+                "schema_version": row["schema_version"], "payload": payload_value,
+                "payload_sha256": row["payload_sha256"], "fetched_at": row["fetched_at"],
+            })
+        from .solana_dataset import validate_snapshot_rows
+        validation = validate_snapshot_rows(snapshots)
+        validation["malformed_label_count"] = malformed_label_count
+        validation["label_reference_issue_count"] = label_reference_issue_count
+        return {
+            "schema": "eti.solana.research_dataset.v1",
+            "scope": {"workspace_id": workspace_id},
+            "truncated_at_limit": truncated,
+            "snapshot_count": len(snapshots),
+            "label_count": len(labels),
+            "snapshots": snapshots,
+            "labels": labels,
+            "validation": validation,
+            "limitations": [
+                "Observations are provider-sampled snapshots, not OHLCV candles or executable quotes.",
+                "Labels reference future observations; target_snapshot_in_export is false when the bounded snapshot export omits the target row.",
+                "Use baseline snapshot features only for prediction inputs; target snapshot fields are outcomes and must never leak into features.",
+                "This export is research data and does not authorize model training or live execution.",
+            ],
+        }
+

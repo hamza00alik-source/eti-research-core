@@ -1,4 +1,6 @@
+import sqlite3
 import time
+from datetime import datetime, timezone
 
 import pytest
 
@@ -257,3 +259,244 @@ def test_worker_auto_approves_only_quality_passed_calibrated_artifact(tmp_path, 
     assert model["approved_by"] == "eti.quality_gate"
     assert registered["registry"]["approval_required"] is False
     assert registered["registry"]["promotion_authority"] == "eti.quality_gate"
+
+
+def test_solana_scan_completion_queues_read_only_audit(tmp_path):
+    store = MemoryStore(tmp_path / "solana-followup.sqlite3")
+    workspace = _workspace(store)
+    store.create_agent_task(
+        "owner-1", workspace["id"], "eti.solana.ingest", "solana.market.scan",
+        {"mint": "A" * 40, "source_event_id": "event-1",
+         "scheduled_by": "eti.solana.ingest"}, max_attempts=2,
+    )
+    registry = AgentCapabilityRegistry()
+    registry.register("solana.market.scan", lambda payload: {
+        "mint": payload["mint"], "verdict": "PASS",
+        "observed_at_ms": 1760000000000,
+    })
+    registry.register("solana.token.audit", lambda payload: {
+        "mint": payload["mint"], "passed": False, "blocked": True,
+    })
+    worker = AgentWorker(store, registry=registry)
+
+    scan = worker.run_once()
+    assert scan["status"] == "completed"
+    snapshots = store.list_solana_research_snapshots("owner-1", workspace["id"])
+    assert len(snapshots) == 1
+    assert snapshots[0]["task_id"] == scan["id"]
+    assert snapshots[0]["capability"] == "solana.market.scan"
+    assert snapshots[0]["mint"] == "A" * 40
+    assert snapshots[0]["fetched_at"].startswith("2025-10-09T")
+    assert len(snapshots[0]["payload_sha256"]) == 64
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.list_solana_research_snapshots("owner-2", workspace["id"])
+    queued = store.list_agent_tasks("owner-1", workspace["id"], status="queued")
+    assert len(queued) == 1
+    assert queued[0]["target_capability"] == "solana.token.audit"
+    assert queued[0]["input"]["source_scan_task_id"] == scan["id"]
+
+    audit = worker.run_once()
+    assert audit["status"] == "completed"
+    assert audit["result"]["blocked"] is True
+    snapshots = store.list_solana_research_snapshots("owner-1", workspace["id"])
+    assert len(snapshots) == 2
+    assert {item["capability"] for item in snapshots} == {
+        "solana.market.scan", "solana.token.audit",
+    }
+    assert store.list_agent_tasks("owner-1", workspace["id"], status="queued") == []
+
+
+def test_solana_rejected_scan_does_not_queue_audit(tmp_path):
+    store = MemoryStore(tmp_path / "solana-rejected.sqlite3")
+    workspace = _workspace(store)
+    store.create_agent_task(
+        "owner-1", workspace["id"], "eti.solana.ingest", "solana.market.scan",
+        {"mint": "B" * 40, "scheduled_by": "eti.solana.ingest"}, max_attempts=2,
+    )
+    registry = AgentCapabilityRegistry()
+    registry.register("solana.market.scan", lambda payload: {
+        "mint": payload["mint"], "verdict": "REJECT",
+    })
+    worker = AgentWorker(store, registry=registry)
+    result = worker.run_once()
+    assert result["status"] == "completed"
+    assert store.list_agent_tasks("owner-1", workspace["id"], status="queued") == []
+
+
+def test_solana_refresh_scheduler_is_idempotent_and_owner_scoped(tmp_path):
+    store = MemoryStore(tmp_path / "solana-refresh.sqlite3")
+    workspace = _workspace(store)
+    job = store.schedule_solana_research_refresh(
+        "owner-1", workspace["id"], "A" * 40, "Pool111", interval_seconds=300
+    )
+    with sqlite3.connect(store.database_path) as conn:
+        conn.execute(
+            "UPDATE solana_research_refresh_jobs SET next_due_at=? WHERE id=?",
+            ("2000-01-01T00:00:00Z", job["id"]),
+        )
+    assert store.enqueue_due_solana_research_refreshes() == 1
+    assert store.enqueue_due_solana_research_refreshes() == 0
+    queued = store.list_agent_tasks("owner-1", workspace["id"], status="queued")
+    assert len(queued) == 1
+    assert queued[0]["target_capability"] == "solana.market.scan"
+    assert queued[0]["requester"] == "eti.solana.refresh"
+    assert queued[0]["input"]["scheduled_by"] == "eti.solana.refresh"
+
+
+def test_solana_delayed_labels_are_persisted_once_and_only_after_future_sample(tmp_path):
+    store = MemoryStore(tmp_path / "solana-labels.sqlite3")
+    workspace = _workspace(store)
+    base_ms = 1760000000000
+    for index, observed_ms in enumerate((base_ms, base_ms + 301000)):
+        task = store.create_agent_task(
+            "owner-1", workspace["id"], "test.solver", "solana.market.scan",
+            {"mint": "B" * 40}, max_attempts=1,
+        )
+        claimed = store.claim_next_agent_task(lease_seconds=120, now=1760000001 + index * 301)
+        result = {
+            "mint": "B" * 40, "verdict": "PASS", "observed_at_ms": observed_ms,
+            "evidence": {
+                "pair_address": "Pool222", "price_usd": 1.0 + index * 0.2,
+                "liquidity_usd": 100000 - index * 10000, "volume_h24_usd": 50000,
+            },
+        }
+        store.complete_claimed_agent_task(
+            claimed["id"], claimed["lease_token"], result,
+            now=1760000002 + index * 301,
+        )
+    before_horizon = store.generate_solana_research_labels(
+        "owner-1", workspace["id"],
+        now=datetime.fromtimestamp((base_ms + 299000) / 1000, timezone.utc),
+    )
+    assert before_horizon["generated"] == 0
+    after_horizon = store.generate_solana_research_labels(
+        "owner-1", workspace["id"],
+        now=datetime.fromtimestamp((base_ms + 400000) / 1000, timezone.utc),
+    )
+    assert after_horizon["generated"] == 1
+    repeated = store.generate_solana_research_labels(
+        "owner-1", workspace["id"],
+        now=datetime.fromtimestamp((base_ms + 400000) / 1000, timezone.utc),
+    )
+    assert repeated["generated"] == 0
+    labels = store.list_solana_research_labels("owner-1", workspace["id"])
+    assert len(labels) == 1
+    label = labels[0]["label"]
+    assert label["baseline_snapshot_id"] != label["target_snapshot_id"]
+    assert label["sampled_price_return_pct"] == 20.0
+    assert label["liquidity_change_pct"] == -10.0
+    assert label["exitability_status"] == "UNKNOWN"
+
+
+def test_new_mint_without_indexed_pool_is_rechecked_until_pool_appears(tmp_path):
+    store = MemoryStore(tmp_path / "solana-pending-pool.sqlite3")
+    workspace = _workspace(store)
+    initial = store.create_agent_task(
+        "owner-1", workspace["id"], "eti.solana.ingest", "solana.market.scan",
+        {"mint": "C" * 40, "scheduled_by": "eti.solana.ingest"}, max_attempts=2,
+    )
+    claimed = store.claim_next_agent_task()
+    assert claimed["id"] == initial["id"]
+    store.complete_claimed_agent_task(
+        claimed["id"], claimed["lease_token"],
+        {"mint": "C" * 40, "verdict": "WAIT", "observed_at_ms": 1760000000000},
+    )
+    with sqlite3.connect(store.database_path) as conn:
+        row = conn.execute(
+            "SELECT pool_address,enabled FROM solana_research_refresh_jobs WHERE mint=?",
+            ("C" * 40,),
+        ).fetchone()
+        assert row == ("__pending__", 1)
+        conn.execute(
+            "UPDATE solana_research_refresh_jobs SET next_due_at=? WHERE mint=?",
+            ("2000-01-01T00:00:00Z", "C" * 40),
+        )
+    assert store.enqueue_due_solana_research_refreshes() == 1
+
+    registry = AgentCapabilityRegistry()
+    registry.register("solana.market.scan", lambda payload: {
+        "mint": payload["mint"], "verdict": "PASS", "observed_at_ms": 1760000900000,
+        "evidence": {"pair_address": "Pool333", "price_usd": 0.5,
+                     "liquidity_usd": 60000, "volume_h24_usd": 10000},
+    })
+    registry.register("solana.token.audit", lambda payload: {
+        "mint": payload["mint"], "passed": False, "blocked": True,
+    })
+    worker = AgentWorker(store, registry=registry)
+    # The initial event's read-only audit task is ahead of the refresh task.
+    assert worker.run_once()["target_capability"] == "solana.token.audit"
+    refreshed = worker.run_once()
+    assert refreshed["target_capability"] == "solana.market.scan"
+    assert refreshed["status"] == "completed"
+    with sqlite3.connect(store.database_path) as conn:
+        rows = conn.execute(
+            "SELECT pool_address,enabled FROM solana_research_refresh_jobs WHERE mint=? ORDER BY pool_address",
+            ("C" * 40,),
+        ).fetchall()
+    assert ("__pending__", 0) in rows
+    assert ("Pool333", 1) in rows
+
+
+def test_solana_refresh_schedule_can_be_reconfigured_and_listed_with_owner_scope(tmp_path):
+    store = MemoryStore(tmp_path / "solana-refresh-config.sqlite3")
+    workspace = _workspace(store)
+    first = store.schedule_solana_research_refresh(
+        "owner-1", workspace["id"], "D" * 40, "Pool444", interval_seconds=300
+    )
+    updated = store.schedule_solana_research_refresh(
+        "owner-1", workspace["id"], "D" * 40, "Pool444", interval_seconds=1800
+    )
+    assert updated["interval_seconds"] == 1800
+    assert updated["next_due_at"] != first["next_due_at"]
+    listed = store.list_solana_research_refresh_jobs("owner-1", workspace["id"])
+    assert len(listed) == 1
+    assert listed[0]["status"] == "scheduled"
+    assert listed[0]["enabled"] is True
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.list_solana_research_refresh_jobs("owner-2", workspace["id"])
+
+
+def test_solana_dataset_report_counts_coverage_and_never_opens_training_gate(tmp_path):
+    store = MemoryStore(tmp_path / "solana-dataset-report.sqlite3")
+    workspace = _workspace(store)
+    observed_seconds = int(datetime.now(timezone.utc).timestamp())
+    observed = observed_seconds * 1000
+    task = store.create_agent_task(
+        "owner-1", workspace["id"], "test.solver", "solana.market.scan",
+        {"mint": "E" * 40}, max_attempts=1,
+    )
+    claimed = store.claim_next_agent_task(now=observed_seconds)
+    assert claimed["id"] == task["id"]
+    store.complete_claimed_agent_task(
+        claimed["id"], claimed["lease_token"],
+        {
+            "mint": "E" * 40, "verdict": "PASS", "observed_at_ms": observed,
+            "evidence": {
+                "pair_address": "Pool555", "price_usd": 0.25,
+                "liquidity_usd": 75000, "volume_h24_usd": 12000,
+                "txns_h1_buys": 12, "txns_h1_sells": 7,
+            },
+        },
+        now=observed_seconds + 1,
+    )
+    report = store.get_solana_research_dataset_report("owner-1", workspace["id"])
+    assert report["snapshots"]["market_scans"] == 1
+    assert report["snapshots"]["distinct_mints"] == 1
+    assert report["snapshots"]["distinct_mint_pool_pairs"] == 1
+    assert report["feature_coverage"]["price_usd"]["fraction"] == 1.0
+    assert report["feature_coverage"]["txns_h1_buys"]["count"] == 1
+    assert report["training_gate"]["ready"] is False
+    assert report["training_gate"]["status"] == "RESEARCH_DATA_COLLECTION"
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.get_solana_research_dataset_report("owner-2", workspace["id"])
+
+
+def test_solana_dataset_report_handles_empty_workspace(tmp_path):
+    store = MemoryStore(tmp_path / "solana-empty-report.sqlite3")
+    workspace = _workspace(store)
+    report = store.get_solana_research_dataset_report("owner-1", workspace["id"])
+    assert report["snapshots"]["total"] == 0
+    assert report["snapshots"]["observation_span_seconds"] == 0
+    assert report["feature_coverage"]["price_usd"]["fraction"] == 0.0
+    assert report["labels_by_horizon_seconds"] == {}
+    assert report["training_gate"]["ready"] is False
