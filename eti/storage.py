@@ -2326,7 +2326,7 @@ class MemoryStore:
         """Create or refresh an owner-scoped recurring scan for a known pool."""
         owner_id = _required_text(owner_id, "owner_id")
         workspace_id = _required_text(workspace_id, "workspace_id")
-        mint = _required_text(mint, "mint", 64)
+        mint = _required_text(mint, "mint", 48)
         pool_address = _required_text(pool_address, "pool_address", 128)
         if len(mint) < 32:
             raise ValueError("mint must be a valid-length Solana address")
