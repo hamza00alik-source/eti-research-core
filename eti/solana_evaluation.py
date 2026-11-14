@@ -972,6 +972,56 @@ def evaluate_solana_regime_persistence(
     }
 
 
+
+def evaluate_solana_regime_robustness(
+    history_rows: list[dict[str, Any]],
+    validation_rows: list[dict[str, Any]],
+    configurations: dict[str, dict[str, Any]],
+    *,
+    persistence_maximum_gap_seconds: int,
+    minimum_persistence_episodes: int = 20,
+    minimum_persistence_mints: int = 3,
+) -> dict[str, Any]:
+    """Run predeclared time-series configurations and compare regime stability.
+
+    Configuration names and thresholds must be chosen before inspecting
+    validation outcomes. This orchestrator performs diagnostics only.
+    """
+    if not isinstance(configurations, dict) or len(configurations) < 2:
+        raise ValueError("at least two named configurations are required")
+    reports: dict[str, dict[str, Any]] = {}
+    persistence: dict[str, dict[str, Any]] = {}
+    for name, config in configurations.items():
+        if not isinstance(name, str) or not name.strip() or not isinstance(config, dict):
+            raise ValueError("each configuration needs a non-empty name and config")
+        report = evaluate_solana_time_series_regimes(history_rows, validation_rows, config)
+        reports[name] = report
+        persistence[name] = evaluate_solana_regime_persistence(
+            report["classified_observations"],
+            maximum_gap_seconds=persistence_maximum_gap_seconds,
+            minimum_episodes=minimum_persistence_episodes,
+            minimum_mints=minimum_persistence_mints,
+        )
+    sensitivity = evaluate_solana_regime_sampling_sensitivity(reports)
+    return {
+        "status": "MULTI_CONFIGURATION_REGIME_ROBUSTNESS_DIAGNOSTICS_ONLY",
+        "configuration_names": sorted(reports),
+        "configuration_reports": reports,
+        "sampling_sensitivity": sensitivity,
+        "persistence_by_configuration": persistence,
+        "training_authorized": False,
+        "model_fitting_performed": False,
+        "limitations": [
+            "Configurations are diagnostic alternatives, not candidates selected by validation performance.",
+            "Thresholds and sampling settings must be predeclared; this report does not optimize them.",
+            "Only identical mint, pool, horizon and baseline timestamps are compared for assignment sensitivity.",
+            "Observed persistence spans are sampling-limited and right-censored at gaps, conflicts and sample ends.",
+            "Mint observations and episodes are dependent under shared market shocks and overlapping labels.",
+            "No causal inference, predictive edge, executable return, net P&L or training authorization is established.",
+        ],
+    }
+
+
 def evaluate_solana_regime_sampling_sensitivity(
     classification_reports: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
