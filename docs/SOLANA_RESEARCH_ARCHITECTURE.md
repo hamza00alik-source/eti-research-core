@@ -208,7 +208,7 @@ copy-trading, or live execution.
 
 
 A reusable `chronological_group_split` helper is now included for downstream
-evaluation. It keeps each mint/pool group wholly within one fold, requires
+evaluation. It keeps every pool belonging to the same mint wholly within one fold, requires
 training label outcomes to end before the validation boundary, applies an
 explicit embargo (default 24 hours), and purges groups crossing either
 boundary. It fails closed if there are too few distinct pools or if purging
@@ -239,7 +239,7 @@ snapshot uses task completion time.
 
 
 For model evaluation, `chronological_walk_forward_splits` now provides expanding
-training windows and sequential validation windows. Each mint/pool remains in
+training windows and sequential validation windows. All pools belonging to a mint remain in
 one group, labels crossing a fold boundary are purged, and validation begins
 only after the configured embargo. The helper refuses insufficient data or
 folds emptied by purging. The single chronological split helper remains
