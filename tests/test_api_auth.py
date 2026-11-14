@@ -626,3 +626,64 @@ def test_solana_cost_evidence_api_is_authenticated_and_owner_scoped(tmp_path, mo
         assert client.get(url, headers=headers_a).json()["items"][0]["id"] == saved.json()["id"]
         assert client.get(url, headers=headers_b).status_code == 404
         assert client.post(url, headers=headers_b, json=body).status_code == 404
+
+def test_solana_transaction_verification_api_is_authenticated_and_workspace_scoped(tmp_path, monkeypatch):
+    import eti.api as api_module
+
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "solana-tx-verify.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+    def b58(data):
+        number = int.from_bytes(data, "big")
+        encoded = ""
+        while number:
+            number, remainder = divmod(number, 58)
+            encoded = alphabet[remainder] + encoded
+        return "1" * (len(data) - len(data.lstrip(b"\\x00"))) + encoded
+
+    signature = b58(bytes(range(1, 65)))
+    mint = b58(bytes(range(65, 97)))
+
+    class FakeRpc:
+        def call(self, method, params):
+            if method == "getSignatureStatuses":
+                return {"value": [{
+                    "slot": 123,
+                    "err": None,
+                    "confirmationStatus": "finalized",
+                }]}
+            if method == "getTransaction":
+                return {
+                    "slot": 123,
+                    "blockTime": 1794672000,
+                    "transaction": {"signatures": [signature]},
+                    "meta": {
+                        "err": None,
+                        "preTokenBalances": [],
+                        "postTokenBalances": [{"mint": mint}],
+                    },
+                }
+            raise AssertionError(method)
+
+    monkeypatch.setattr(api_module, "SolanaRpcClient", lambda: FakeRpc())
+    with TestClient(app) as client:
+        owner = _register(client, "tx_verify_owner")
+        other = _register(client, "tx_verify_other")
+        owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+        other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+        workspace = client.post(
+            "/v1/workspaces", headers=owner_headers, json={"name": "tx verification"}
+        ).json()
+        url = f"/v1/workspaces/{workspace['id']}/solana/transaction-verification"
+        payload = {"signature": signature, "mint": mint}
+
+        assert client.post(url, json=payload).status_code == 401
+        assert client.post(url, headers=other_headers, json=payload).status_code == 404
+        response = client.post(url, headers=owner_headers, json=payload)
+        assert response.status_code == 200, response.text
+        assert response.json()["verified"] is True
+        assert response.json()["status"] == "FINALIZED_MINT_TRANSACTION_VERIFIED"
+
