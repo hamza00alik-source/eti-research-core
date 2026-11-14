@@ -488,12 +488,17 @@ excluded even if present in the preparation artifact. Conflicting prices at
 the same timestamp are excluded rather than averaged. Sparse histories below
 the configured minimum are withheld.
 
-The current classifier computes a first-to-last sampled price change and the
-sample standard deviation of adjacent sampled log returns. The latter is a
-per-observation volatility proxy, not time-normalized realized volatility:
-irregular snapshot intervals make values non-comparable across different
-sampling cadences. These observations are not OHLCV candles and can miss
-intraperiod price paths, wicks, and liquidity shocks. All lookback lengths and
-thresholds are caller-supplied and must be frozen before examining validation
-outcomes. This diagnostic does not fit thresholds, select strategies, authorize
-training, or enable live execution.
+The classifier computes a first-to-last sampled price change and a
+time-normalized volatility proxy: each adjacent log return (in percent) is
+divided by the square root of its elapsed hours, then the sample standard
+deviation is reported in percent per square-root-hour. This reduces the
+mechanical dependence on observation interval length but does not recover
+intraperiod paths or eliminate provider sampling bias. Configuration requires
+a maximum permitted gap and minimum total history span; rows violating either
+condition are withheld and counted. The report exposes aggregate sampling-span
+and gap diagnostics and separates regime outcome summaries by the prepared
+label's explicit horizon (or UNKNOWN). These observations are not OHLCV
+candles and can miss intraperiod price paths, wicks, and liquidity shocks.
+Thresholds must be predeclared in the stated volatility unit before examining
+validation outcomes. This diagnostic does not fit thresholds, select
+strategies, authorize training, or enable live execution.
