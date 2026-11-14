@@ -627,3 +627,65 @@ def test_solana_cost_evidence_latest_batch_is_deterministic_and_scoped(tmp_path)
             "owner-b", workspace["id"], ["label-a"]
         )
 
+
+
+def test_solana_transaction_attestation_is_append_only_scoped_and_integrity_checked(tmp_path):
+    store = MemoryStore(tmp_path / "eti.sqlite3")
+    workspace = store.create_workspace("owner-a", "solana")
+    mint, pool, wallet, label_id = "F" * 32, "pool-attest", "wallet-attest", "label-attest"
+    _insert_solana_label_for_cost_test(store, "owner-a", workspace["id"], label_id, mint, pool)
+    attestation = {
+        "status": "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED",
+        "verified": False,
+        "transaction_receipt_verified": True,
+        "signature": "signature-attest",
+        "mint": mint,
+        "expected_pool_address": pool,
+        "wallet_address": wallet,
+        "wallet_token_debit_raw": "25",
+    }
+    first = store.record_solana_transaction_attestation(
+        "owner-a", workspace["id"], label_id, mint, pool, wallet, attestation
+    )
+    duplicate = store.record_solana_transaction_attestation(
+        "owner-a", workspace["id"], label_id, mint, pool, wallet, attestation
+    )
+    assert first["integrity_valid"] is True
+    assert duplicate["id"] == first["id"]
+    assert duplicate["duplicate"] is True
+    assert first["attestation"]["verified"] is False
+    assert len(store.list_solana_transaction_attestations("owner-a", workspace["id"])) == 1
+    with pytest.raises(ValueError, match="only finalized"):
+        store.record_solana_transaction_attestation(
+            "owner-a", workspace["id"], label_id, mint, pool, wallet,
+            {**attestation, "verified": True},
+        )
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.list_solana_transaction_attestations("owner-b", workspace["id"])
+    with store._connection() as conn:
+        conn.execute(
+            "UPDATE solana_transaction_attestations SET attestation_json=? WHERE id=?",
+            ('{"verified":true}', first["id"]),
+        )
+    loaded = store.list_solana_transaction_attestations(
+        "owner-a", workspace["id"], label_id=label_id
+    )[0]
+    assert loaded["integrity_valid"] is False
+
+
+def test_solana_transaction_attestation_requires_exact_label_identity(tmp_path):
+    store = MemoryStore(tmp_path / "eti.sqlite3")
+    workspace = store.create_workspace("owner-a", "solana")
+    mint, pool, label_id = "G" * 32, "pool-exact", "label-exact"
+    _insert_solana_label_for_cost_test(store, "owner-a", workspace["id"], label_id, mint, pool)
+    report = {
+        "status": "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED",
+        "verified": False, "transaction_receipt_verified": True,
+        "signature": "signature-exact", "mint": mint,
+        "expected_pool_address": pool, "wallet_address": "wallet-exact",
+    }
+    with pytest.raises(LookupError, match="label not found"):
+        store.record_solana_transaction_attestation(
+            "owner-a", workspace["id"], label_id, mint, "different-pool",
+            "wallet-exact", report,
+        )
