@@ -386,3 +386,46 @@ def test_solana_delayed_labels_are_persisted_once_and_only_after_future_sample(t
     assert label["sampled_price_return_pct"] == 20.0
     assert label["liquidity_change_pct"] == -10.0
     assert label["exitability_status"] == "UNKNOWN"
+
+
+def test_new_mint_without_indexed_pool_is_rechecked_until_pool_appears(tmp_path):
+    store = MemoryStore(tmp_path / "solana-pending-pool.sqlite3")
+    workspace = _workspace(store)
+    initial = store.create_agent_task(
+        "owner-1", workspace["id"], "eti.solana.ingest", "solana.market.scan",
+        {"mint": "C" * 40, "scheduled_by": "eti.solana.ingest"}, max_attempts=2,
+    )
+    claimed = store.claim_next_agent_task()
+    assert claimed["id"] == initial["id"]
+    store.complete_claimed_agent_task(
+        claimed["id"], claimed["lease_token"],
+        {"mint": "C" * 40, "verdict": "WAIT", "observed_at_ms": 1760000000000},
+    )
+    with sqlite3.connect(store.database_path) as conn:
+        row = conn.execute(
+            "SELECT pool_address,enabled FROM solana_research_refresh_jobs WHERE mint=?",
+            ("C" * 40,),
+        ).fetchone()
+        assert row == ("__pending__", 1)
+        conn.execute(
+            "UPDATE solana_research_refresh_jobs SET next_due_at=? WHERE mint=?",
+            ("2000-01-01T00:00:00Z", "C" * 40),
+        )
+    assert store.enqueue_due_solana_research_refreshes() == 1
+
+    registry = AgentCapabilityRegistry()
+    registry.register("solana.market.scan", lambda payload: {
+        "mint": payload["mint"], "verdict": "PASS", "observed_at_ms": 1760000900000,
+        "evidence": {"pair_address": "Pool333", "price_usd": 0.5,
+                     "liquidity_usd": 60000, "volume_h24_usd": 10000},
+    })
+    worker = AgentWorker(store, registry=registry)
+    refreshed = worker.run_once()
+    assert refreshed["status"] == "completed"
+    with sqlite3.connect(store.database_path) as conn:
+        rows = conn.execute(
+            "SELECT pool_address,enabled FROM solana_research_refresh_jobs WHERE mint=? ORDER BY pool_address",
+            ("C" * 40,),
+        ).fetchall()
+    assert ("__pending__", 0) in rows
+    assert ("Pool333", 1) in rows
