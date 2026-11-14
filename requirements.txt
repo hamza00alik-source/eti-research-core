@@ -11,3 +11,4 @@ httpx>=0.27
 boto3>=1.34
 cryptography>=42
 yfinance>=0.2.50
+websockets>=12
