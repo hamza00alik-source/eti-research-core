@@ -81,3 +81,13 @@ def test_allocator_rejects_non_scan_reports_and_invalid_limits():
         allocate_research_budget({"candidates": []})
     with pytest.raises(ValueError):
         allocate_research_budget(scan(candidate()), max_model_fit_calls=0)
+
+
+
+def test_session_based_assets_are_not_misclassified_without_calendar():
+    equity = candidate("SPY", venue="yahoo", age=300, gap=86400, asset_class="equity")
+    result = allocate_research_budget(scan(equity))
+    row = result["candidates"][0]
+    assert row["data_readiness_score"] > 0
+    assert "session_calendar_not_applied" in row["eligibility_reasons"]
+    assert row["economic_evaluation_eligible"] is False
