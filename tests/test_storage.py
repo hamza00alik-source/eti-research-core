@@ -561,3 +561,24 @@ def test_solana_cost_evidence_rejects_wrong_label_identity_and_foreign_label(tmp
             "owner-a", workspace["id"], label_id, mint, pool,
             {**good, "label_id": "different-label"},
         )
+
+
+def test_solana_cost_evidence_read_detects_payload_tampering(tmp_path):
+    store = MemoryStore(tmp_path / "eti.sqlite3")
+    workspace = store.create_workspace("owner", "solana")
+    mint, pool, label_id = "D" * 32, "pool-tamper", "label-tamper"
+    _insert_solana_label_for_cost_test(store, "owner", workspace["id"], label_id, mint, pool)
+    evidence = {"label_id": label_id, "mint": mint, "pool_address": pool}
+    saved = store.record_solana_execution_cost_evidence(
+        "owner", workspace["id"], label_id, mint, pool, evidence
+    )
+    assert saved["integrity_valid"] is True
+    with store._connection() as conn:
+        conn.execute(
+            "UPDATE solana_execution_cost_evidence SET evidence_json=? WHERE id=?",
+            ('{"label_id":"tampered"}', saved["id"]),
+        )
+    loaded = store.list_solana_execution_cost_evidence(
+        "owner", workspace["id"], label_id=label_id
+    )[0]
+    assert loaded["integrity_valid"] is False
