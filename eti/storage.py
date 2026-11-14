@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -115,6 +116,22 @@ class MemoryStore:
                 CREATE INDEX IF NOT EXISTS idx_audit_owner_time
                     ON audit_events(owner_id, created_at);
 
+                CREATE TABLE IF NOT EXISTS solana_research_events (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    event_key TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    event_type TEXT NOT NULL CHECK(event_type IN ('new_token','migration')),
+                    mint TEXT NOT NULL,
+                    source_timestamp TEXT,
+                    payload_json TEXT NOT NULL,
+                    payload_sha256 TEXT NOT NULL,
+                    received_at TEXT NOT NULL,
+                    UNIQUE(owner_id, workspace_id, event_key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_solana_events_owner_time
+                    ON solana_research_events(owner_id, workspace_id, received_at);
                 CREATE TABLE IF NOT EXISTS agent_tasks (
                     id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
@@ -2132,3 +2149,90 @@ class MemoryStore:
                 (owner_id, limit),
             ).fetchall()
         return [self._live_order_dict(row) for row in rows]
+
+
+    def record_solana_research_event(
+        self, owner_id: str, workspace_id: str, event_key: str,
+        source: str, event_type: str, mint: str, payload: Any,
+        source_timestamp: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist an idempotent, account-scoped Solana discovery event."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        event_key = _required_text(event_key, "event_key", 200)
+        source = _required_text(source, "source", 40)
+        mint = _required_text(mint, "mint", 64)
+        if source != "pumpportal":
+            raise ValueError("source must be pumpportal")
+        if event_type not in {"new_token", "migration"}:
+            raise ValueError("event_type must be new_token or migration")
+        if len(mint) < 32:
+            raise ValueError("mint must be a valid-length Solana address")
+        if source_timestamp is not None:
+            source_timestamp = _required_text(source_timestamp, "source_timestamp", 80)
+        encoded = _encode_json(payload)
+        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        now = _utc_now()
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            existing = conn.execute(
+                "SELECT * FROM solana_research_events WHERE owner_id=? AND workspace_id=? AND event_key=?",
+                (owner_id, workspace_id, event_key),
+            ).fetchone()
+            if existing is not None:
+                return self._solana_event_dict(existing, duplicate=True)
+            event_id = str(uuid4())
+            conn.execute(
+                "INSERT INTO solana_research_events(id,owner_id,workspace_id,event_key,source,event_type,"
+                "mint,source_timestamp,payload_json,payload_sha256,received_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (event_id, owner_id, workspace_id, event_key, source, event_type, mint,
+                 source_timestamp, encoded, digest, now),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (str(uuid4()), owner_id, workspace_id, "solana.event.ingested",
+                 _encode_json({"event_id": event_id, "event_key": event_key,
+                               "event_type": event_type, "mint": mint,
+                               "payload_sha256": digest}), now),
+            )
+            row = conn.execute(
+                "SELECT * FROM solana_research_events WHERE id=?", (event_id,)
+            ).fetchone()
+        return self._solana_event_dict(row, duplicate=False)
+
+    @staticmethod
+    def _solana_event_dict(row: sqlite3.Row, duplicate: bool = False) -> dict[str, Any]:
+        return {
+            "id": row["id"], "event_key": row["event_key"], "source": row["source"],
+            "event_type": row["event_type"], "mint": row["mint"],
+            "source_timestamp": row["source_timestamp"],
+            "payload": json.loads(row["payload_json"]),
+            "payload_sha256": row["payload_sha256"], "received_at": row["received_at"],
+            "duplicate": duplicate,
+        }
+
+    def list_solana_research_events(
+        self, owner_id: str, workspace_id: str, limit: int = 100,
+        mint: str | None = None,
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be an integer from 1 to 500")
+        query = ("SELECT * FROM solana_research_events "
+                 "WHERE owner_id=? AND workspace_id=?")
+        params: list[Any] = [owner_id, workspace_id]
+        if mint is not None:
+            mint = _required_text(mint, "mint", 64)
+            query += " AND mint=?"
+            params.append(mint)
+        query += " ORDER BY received_at DESC, id DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+        return [self._solana_event_dict(row) for row in rows]
