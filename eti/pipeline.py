@@ -163,8 +163,8 @@ def estimate_nested_model_fits_from_rows(n_rows: int, horizon: int = 6,
 
 
 def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
-                          min_train: int = 400, validation_size: int = 100,
-                          test_size: int = 100, step_size: int = 200,
+                          min_train: int = 500, validation_size: int = 100,
+                          test_size: int = 100, step_size: int = 100,
                           timeframe: str = "1h", allow_short: bool = False,
                           funding_bps_per_bar: float = 0.0,
                           fee_bps: float = 6.0, slippage_bps: float = 2.0,
@@ -319,8 +319,8 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
 
 
 def run_multi_symbol_experiment(frames: dict[str, pd.DataFrame], horizon: int = 6,
-                                min_train: int = 400, validation_size: int = 100,
-                                test_size: int = 100, step_size: int = 200,
+                                min_train: int = 500, validation_size: int = 100,
+                                test_size: int = 100, step_size: int = 100,
                                 timeframe: str = "1h",
                                 max_model_fits: int | None = None) -> dict:
     """Run independent nested experiments per symbol; no cross-market leakage."""
