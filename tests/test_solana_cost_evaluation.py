@@ -69,13 +69,18 @@ class FakeLedger:
         self.rows_by_label = rows_by_label
         self.calls = []
 
-    def list_solana_execution_cost_evidence(self, owner, workspace, label_id=None, limit=500):
-        self.calls.append((owner, workspace, label_id, limit))
-        return sorted(
-            self.rows_by_label.get(label_id, []),
-            key=lambda item: (item["created_at"], item["id"]),
-            reverse=True,
-        )[:limit]
+    def list_latest_solana_execution_cost_evidence(self, owner, workspace, label_ids):
+        self.calls.append((owner, workspace, tuple(label_ids)))
+        selected = []
+        for label_id in label_ids:
+            records = sorted(
+                self.rows_by_label.get(label_id, []),
+                key=lambda item: (item["created_at"], item["id"]),
+                reverse=True,
+            )
+            if records:
+                selected.append(records[0])
+        return selected
 
 
 def test_stored_evaluation_uses_newest_intact_scoped_record():
