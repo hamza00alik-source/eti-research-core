@@ -923,7 +923,7 @@ class MemoryStore:
             query += " AND status = ?"
             params.append(status)
         query += " ORDER BY created_at DESC, id LIMIT ?"
-        params.append(limit)
+        params.append(limit + 1)
         with self._connection() as conn:
             rows = conn.execute(query, params).fetchall()
         return [
@@ -2788,6 +2788,8 @@ class MemoryStore:
             if not self._owns_workspace(conn, owner_id, workspace_id):
                 raise LookupError("workspace not found")
             rows = conn.execute(query, params).fetchall()
+            truncated = len(rows) > limit
+            rows = rows[:limit]
             label_query = (
                 "SELECT l.id,l.mint,l.pool_address,l.baseline_snapshot_id,l.target_snapshot_id,"
                 "l.horizon_seconds,l.label_json,l.created_at FROM solana_research_labels l "
@@ -2822,7 +2824,7 @@ class MemoryStore:
         return {
             "schema": "eti.solana.research_dataset.v1",
             "scope": {"workspace_id": workspace_id},
-            "truncated_at_limit": len(snapshots) == limit,
+            "truncated_at_limit": truncated,
             "snapshot_count": len(snapshots),
             "label_count": len(labels),
             "snapshots": snapshots,
