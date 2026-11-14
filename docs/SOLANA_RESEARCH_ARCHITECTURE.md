@@ -263,3 +263,24 @@ execution-cost, calibration, or out-of-sample acceptance thresholds have yet
 been independently approved. A high snapshot count alone is not a reason to
 train or deploy a model. The endpoint is descriptive, owner/workspace scoped,
 and does not expose another account's observations.
+
+## Research dataset export and feature diagnostics (implemented)
+
+The authenticated endpoint
+`GET /v1/workspaces/{workspace_id}/solana/dataset-export` provides a
+deterministically ordered, bounded JSON export of point-in-time snapshots and
+labels whose baseline snapshots are included. It supports an optional mint
+filter and a maximum of 5,000 snapshots per request. Each snapshot preserves
+its task ID, capability, mint/pool identity, schema version, sampled timestamp,
+normalized payload and SHA-256 digest. Labels retain their baseline and target
+snapshot references and horizon.
+
+The export includes non-mutating validation diagnostics for malformed payloads,
+missing evidence/features, invalid numeric values, negative values, zero price
+or liquidity, invalid timestamps, and duplicate entity/timestamp observations.
+Diagnostics flag data for review; they do not coerce, repair, impute, or discard
+source values. The export is account/workspace scoped and requires normal ETI
+authentication. It is a research artifact, not a training approval or execution
+authorization. When using labels, only baseline snapshot fields may be used as
+model inputs; target snapshot fields are outcomes and must never leak into
+features.
