@@ -107,3 +107,25 @@ def test_chronological_group_split_requires_enough_distinct_pools():
             "baseline_at": "2026-01-01T00:00:00Z",
             "target_at": "2026-01-01T00:05:00Z",
         }])
+
+
+def test_future_target_after_generation_cutoff_is_not_used():
+    rows = [
+        _snapshot("base", "2026-01-01T00:00:00Z", 1.0),
+        _snapshot("future", "2026-01-01T00:10:00Z", 2.0),
+    ]
+    assert build_forward_labels(
+        rows, now=datetime(2026, 1, 1, 0, 9, tzinfo=timezone.utc),
+        horizons_seconds=(300,),
+    ) == []
+
+
+def test_label_generation_rejects_naive_cutoff_datetime():
+    import pytest
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        build_forward_labels(
+            [_snapshot("base", "2026-01-01T00:00:00Z", 1.0)],
+            now=datetime(2026, 1, 1, 0, 10),
+            horizons_seconds=(300,),
+        )
