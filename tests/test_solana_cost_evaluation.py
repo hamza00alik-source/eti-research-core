@@ -85,11 +85,16 @@ class FakeLedger:
 
     def list_latest_solana_transaction_attestations(self, owner, workspace, label_ids):
         self.calls.append((owner, workspace, tuple(label_ids), "attestations"))
-        return [
-            {**record, "label_id": label_id}
-            for label_id in label_ids
-            for record in self.attestations_by_label.get(label_id, [])
-        ]
+        selected = []
+        for label_id in label_ids:
+            records = sorted(
+                self.attestations_by_label.get(label_id, []),
+                key=lambda item: (item["created_at"], item["id"]),
+                reverse=True,
+            )
+            if records:
+                selected.append({**records[0], "label_id": label_id})
+        return selected
 
 
 def test_stored_evaluation_uses_newest_intact_scoped_record():
@@ -198,3 +203,47 @@ def test_receipt_attestations_are_reported_separately_from_cost_and_exit_evidenc
     assert all(row["realized_pnl_available"] is False for row in receipt["rows"])
     assert report["execution_cost_evidence"]["complete_evidence_count"] == 0
     assert report["execution_cost_evidence"]["realized_pnl_available"] is False
+
+
+def test_tampered_newest_receipt_attestation_is_not_replaced_by_older_valid_record():
+    exported, prepared = _fixture()
+    attestations = {}
+    for label in exported:
+        attestations[label["id"]] = [
+            {
+                "id": f"newest-bad-{label['id']}",
+                "created_at": "2026-11-14T13:00:00Z",
+                "integrity_valid": False,
+                "signature": f"signature-new-{label['id']}",
+                "mint": label["mint"],
+                "pool_address": label["pool_address"],
+                "wallet_address": "wallet",
+                "attestation": {},
+            },
+            {
+                "id": f"older-good-{label['id']}",
+                "created_at": "2026-11-14T12:00:00Z",
+                "integrity_valid": True,
+                "signature": f"signature-old-{label['id']}",
+                "mint": label["mint"],
+                "pool_address": label["pool_address"],
+                "wallet_address": "wallet",
+                "attestation": {
+                    "status": "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED",
+                    "transaction_receipt_verified": True,
+                    "verified": False,
+                    "signature": f"signature-old-{label['id']}",
+                    "mint": label["mint"],
+                    "expected_pool_address": label["pool_address"],
+                    "wallet_address": "wallet",
+                },
+            },
+        ]
+    report = evaluate_stored_solana_walk_forward(
+        FakeLedger({}, attestations), "owner-1", "workspace-1", exported, prepared,
+        n_splits=2, min_train_groups=3, embargo_seconds=3600,
+    )
+    receipt = report["transaction_receipt_attestations"]
+    assert receipt["positive_receipt_observation_count"] == 0
+    assert receipt["invalid_record_count"] == receipt["validation_rows_checked"]
+    assert all(row["status"] == "NEWEST_RECORD_INTEGRITY_INVALID" for row in receipt["rows"])
