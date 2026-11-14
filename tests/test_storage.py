@@ -508,7 +508,7 @@ def _insert_solana_label_for_cost_test(store, owner_id, workspace_id, label_id, 
             "INSERT INTO solana_research_labels "
             "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
             "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (label_id, owner_id, workspace_id, mint, pool, "baseline", "target",
+            (label_id, owner_id, workspace_id, mint, pool, f"baseline-{label_id}", f"target-{label_id}",
              3600, json.dumps({"baseline_at": "2026-01-01T00:00:00Z"}), "2026-01-01T00:00:00Z"),
         )
 
