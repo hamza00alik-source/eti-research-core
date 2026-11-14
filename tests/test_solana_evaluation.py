@@ -87,6 +87,10 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
     assert report["status"] == "BENCHMARK_DIAGNOSTICS_ONLY"
     assert report["training_authorized"] is False
     assert report["walk_forward"]["training_rows_used_for_metrics"] is False
+    assert "3600" in report["by_horizon_seconds"]
+    assert report["by_horizon_seconds"]["3600"]["aggregate"]["always_long"]["trade_count"] > 0
+    assert report["validation_dependence"]["distinct_validation_mint_count"] == report["validation_dependence"]["validation_label_count"]
+    assert report["validation_dependence"]["overlapping_interval_pair_count"] == 0
     assert len(report["walk_forward"]["fold_metadata"]) == 2
     assert all(
         item["prepared_validation_count"] + item["unprepared_validation_count"]
