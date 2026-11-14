@@ -217,6 +217,7 @@ def prepare_solana_training_rows(dataset_export: dict[str, Any]) -> dict[str, An
             "pool_address": label.get("pool_address"),
             "baseline_snapshot_id": baseline_id,
             "target_snapshot_id": target_id,
+            "baseline_at": baseline.get("fetched_at"),
             "horizon_seconds": horizon,
             "features": features,
             "target_sampled_price_return_pct": outcome,
