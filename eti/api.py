@@ -122,6 +122,12 @@ class SolanaResearchEventPayload(BaseModel):
 
 
 
+class SolanaRefreshPayload(BaseModel):
+    mint: str = Field(min_length=32, max_length=64)
+    pool_address: str = Field(min_length=1, max_length=128)
+    interval_seconds: int = Field(default=900, ge=300, le=86400)
+
+
 class AgentTaskUpdatePayload(BaseModel):
     status: str = Field(min_length=1, max_length=20)
     result: Any = None
@@ -558,6 +564,40 @@ def list_solana_research_snapshots(
             account["id"], workspace_id, limit=limit, mint=mint
         )
         return {"items": items}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/refresh")
+def list_solana_research_refresh_jobs(
+    workspace_id: str,
+    mint: str | None = Query(default=None, min_length=32, max_length=64),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        items = _memory_store().list_solana_research_refresh_jobs(
+            account["id"], workspace_id, mint=mint
+        )
+        return {"items": items}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/refresh", status_code=201)
+def schedule_solana_research_refresh(
+    workspace_id: str,
+    payload: SolanaRefreshPayload,
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return _memory_store().schedule_solana_research_refresh(
+            account["id"], workspace_id, payload.mint, payload.pool_address,
+            interval_seconds=payload.interval_seconds,
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
     except ValueError as exc:
