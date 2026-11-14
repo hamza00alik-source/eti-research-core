@@ -254,7 +254,7 @@ def test_walk_forward_reports_missing_cost_evidence_as_incomplete_not_zero():
 def test_walk_forward_cost_evidence_rejects_cross_label_identity_reuse():
     from eti.solana_evaluation import evaluate_prepared_solana_walk_forward
 
-    exported, prepared, evidence_by_id = [], []
+    exported, prepared, evidence_by_id = [], [], {}
     for index in range(8):
         day = 1 + index * 2
         stamp = f"2026-01-{day:02d}T00:00:00Z"
