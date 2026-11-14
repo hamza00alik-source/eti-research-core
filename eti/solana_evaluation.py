@@ -824,6 +824,154 @@ def evaluate_solana_regime_transitions(
 
 
 
+
+
+def evaluate_solana_regime_persistence(
+    classified_observations: list[dict[str, Any]],
+    *,
+    maximum_gap_seconds: int,
+    minimum_episodes: int = 20,
+    minimum_mints: int = 3,
+) -> dict[str, Any]:
+    """Describe observed regime episode spans with explicit gap censoring.
+
+    Episode duration is the elapsed time between first and last observed
+    timestamps, not an estimate of the unobserved true regime duration.
+    A regime change closes an episode; a large data gap or end of sample
+    right-censors it. Conflicting timestamps break continuity.
+    """
+    for name, value in (
+        ("maximum_gap_seconds", maximum_gap_seconds),
+        ("minimum_episodes", minimum_episodes),
+        ("minimum_mints", minimum_mints),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(name + " must be a positive integer")
+
+    grouped: dict[tuple[str, str, str], dict[datetime, set[str]]] = {}
+    invalid_rows = 0
+    for row in classified_observations:
+        if not isinstance(row, dict):
+            invalid_rows += 1
+            continue
+        mint, pool, horizon, regime = (
+            row.get("mint"), row.get("pool_address"),
+            row.get("horizon_seconds"), row.get("regime"),
+        )
+        raw_stamp = row.get("baseline_at")
+        if not all(isinstance(v, str) and v.strip() for v in (mint, pool, horizon, regime)) or not isinstance(raw_stamp, str):
+            invalid_rows += 1
+            continue
+        try:
+            stamp = datetime.fromisoformat(raw_stamp.replace("Z", "+00:00"))
+        except ValueError:
+            invalid_rows += 1
+            continue
+        if stamp.tzinfo is None or stamp.utcoffset() is None:
+            invalid_rows += 1
+            continue
+        grouped.setdefault((mint, pool, horizon), {}).setdefault(stamp, set()).add(regime)
+
+    summaries: dict[str, dict[str, dict[str, Any]]] = {}
+    conflict_count = 0
+    episode_count = 0
+    for (mint, pool, horizon), timeline in sorted(grouped.items()):
+        observations: list[tuple[datetime, str | None]] = []
+        for stamp, regimes in sorted(timeline.items()):
+            if len(regimes) != 1:
+                conflict_count += 1
+                observations.append((stamp, None))
+            else:
+                observations.append((stamp, next(iter(regimes))))
+
+        episodes: list[dict[str, Any]] = []
+        current: list[tuple[datetime, str]] = []
+
+        def close_episode(censor_reason: str) -> None:
+            nonlocal episode_count
+            if not current:
+                return
+            first_at, regime = current[0]
+            last_at = current[-1][0]
+            duration = max(0.0, (last_at - first_at).total_seconds())
+            episodes.append({
+                "regime": regime,
+                "observed_span_seconds": duration,
+                "observation_count": len(current),
+                "right_censor_reason": censor_reason,
+            })
+            episode_count += 1
+            current.clear()
+
+        previous_at: datetime | None = None
+        for stamp, regime in observations:
+            if regime is None:
+                close_episode("CONFLICTING_TIMESTAMP")
+                previous_at = None
+                continue
+            if previous_at is not None and (stamp - previous_at).total_seconds() > maximum_gap_seconds:
+                close_episode("OBSERVATION_GAP")
+            if current and current[-1][1] != regime:
+                close_episode("REGIME_CHANGE")
+            current.append((stamp, regime))
+            previous_at = stamp
+        close_episode("END_OF_SAMPLE")
+
+        for episode in episodes:
+            item = summaries.setdefault(horizon, {}).setdefault(
+                episode["regime"],
+                {"episode_count": 0, "mint_ids": set(), "observed_spans_seconds": [],
+                 "right_censored_episode_count": 0, "observation_count": 0},
+            )
+            item["episode_count"] += 1
+            item["mint_ids"].add(mint)
+            item["observed_spans_seconds"].append(episode["observed_span_seconds"])
+            item["observation_count"] += episode["observation_count"]
+            if episode["right_censor_reason"] != "REGIME_CHANGE":
+                item["right_censored_episode_count"] += 1
+
+    output: dict[str, dict[str, Any]] = {}
+    for horizon, regimes in sorted(summaries.items()):
+        output[horizon] = {}
+        for regime, item in sorted(regimes.items()):
+            spans = sorted(item.pop("observed_spans_seconds"))
+            mints = item.pop("mint_ids")
+            n = len(spans)
+            median = spans[n // 2] if n % 2 else (spans[n // 2 - 1] + spans[n // 2]) / 2
+            item.update({
+                "distinct_mint_count": len(mints),
+                "minimum_observed_span_seconds": spans[0],
+                "median_observed_span_seconds": median,
+                "maximum_observed_span_seconds": spans[-1],
+                "status": (
+                    "DESCRIPTIVE_PERSISTENCE_THRESHOLD_MET"
+                    if item["episode_count"] >= minimum_episodes and len(mints) >= minimum_mints
+                    else "INSUFFICIENT_EPISODE_SAMPLE"
+                ),
+            })
+            output[horizon][regime] = item
+
+    return {
+        "status": "REGIME_PERSISTENCE_DIAGNOSTICS_ONLY",
+        "persistence_by_horizon_seconds": output,
+        "episode_count": episode_count,
+        "conflicting_timestamp_count": conflict_count,
+        "invalid_observation_count": invalid_rows,
+        "maximum_gap_seconds": maximum_gap_seconds,
+        "minimum_episodes_required": minimum_episodes,
+        "minimum_mints_required": minimum_mints,
+        "model_fitting_performed": False,
+        "training_authorized": False,
+        "limitations": [
+            "Observed spans are not true regime durations; sampling does not reveal exact transition times.",
+            "Episodes ending at gaps, conflicts or the sample boundary are right-censored.",
+            "A gap threshold is an explicit analysis assumption and should be predeclared and sensitivity-tested.",
+            "Episode counts are not independent samples; mints share market shocks and observations may overlap.",
+            "Persistence diagnostics do not establish predictive value, executable returns or training authorization.",
+        ],
+    }
+
+
 def evaluate_solana_regime_sampling_sensitivity(
     classification_reports: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
