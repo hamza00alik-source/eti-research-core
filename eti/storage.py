@@ -2728,6 +2728,48 @@ class MemoryStore:
             rows = conn.execute(query, params).fetchall()
         return [self._solana_cost_evidence_dict(row, duplicate=False) for row in rows]
 
+    def list_latest_solana_execution_cost_evidence(
+        self, owner_id: str, workspace_id: str, label_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Return one newest immutable evidence record per requested label."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if not isinstance(label_ids, list):
+            raise ValueError("label_ids must be a list")
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for label_id in label_ids:
+            value = _required_text(label_id, "label_id", 128)
+            if value not in seen:
+                normalized.append(value)
+                seen.add(value)
+        if not normalized:
+            with self._connection() as conn:
+                if not self._owns_workspace(conn, owner_id, workspace_id):
+                    raise LookupError("workspace not found")
+            return []
+
+        latest: dict[str, dict[str, Any]] = {}
+        # Keep each IN clause below SQLite's conservative bound-parameter limit.
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            for offset in range(0, len(normalized), 500):
+                batch = normalized[offset:offset + 500]
+                placeholders = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    "SELECT * FROM solana_execution_cost_evidence "
+                    f"WHERE owner_id=? AND workspace_id=? AND label_id IN ({placeholders}) "
+                    "ORDER BY label_id ASC,created_at DESC,id DESC",
+                    [owner_id, workspace_id, *batch],
+                ).fetchall()
+                for row in rows:
+                    if row["label_id"] not in latest:
+                        latest[row["label_id"]] = self._solana_cost_evidence_dict(
+                            row, duplicate=False
+                        )
+        return [latest[label_id] for label_id in normalized if label_id in latest]
+
     def list_solana_research_labels(
         self, owner_id: str, workspace_id: str, mint: str | None = None, limit: int = 500,
     ) -> list[dict[str, Any]]:
