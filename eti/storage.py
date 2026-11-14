@@ -2908,8 +2908,9 @@ class MemoryStore:
             if not self._owns_workspace(conn, owner_id, workspace_id):
                 raise LookupError("workspace not found")
             rows = conn.execute(query, params).fetchall()
-        return [{"id": row["id"], "label": json.loads(row["label_json"]),
-                 "created_at": row["created_at"]} for row in rows]
+        return [{"id": row["id"], "mint": row["mint"], "pool_address": row["pool_address"],
+                 "label": json.loads(row["label_json"]), "created_at": row["created_at"]}
+                for row in rows]
 
     def record_solana_research_event(
         self, owner_id: str, workspace_id: str, event_key: str,
