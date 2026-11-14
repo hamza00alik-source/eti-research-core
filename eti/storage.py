@@ -1008,8 +1008,8 @@ class MemoryStore:
         now = now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
         with self._connection() as conn:
             row = conn.execute(
-                "SELECT owner_id, workspace_id, status, lease_token, lease_expires_at "
-                "FROM agent_tasks WHERE id = ?",
+                "SELECT owner_id, workspace_id, status, lease_token, lease_expires_at, "
+                "requester, target_capability, input_json FROM agent_tasks WHERE id = ?",
                 (task_id,),
             ).fetchone()
             if row is None:
@@ -1029,6 +1029,37 @@ class MemoryStore:
                 (str(uuid4()), row["owner_id"], row["workspace_id"],
                  _encode_json({"task_id": task_id}), now),
             )
+            # Persist the audit follow-up in the same transaction as scan
+            # completion, eliminating a crash window between completion and enqueue.
+            task_input = json.loads(row["input_json"])
+            if (row["target_capability"] == "solana.market.scan"
+                    and row["requester"] == "eti.solana.ingest"
+                    and isinstance(task_input, dict)
+                    and task_input.get("scheduled_by") == "eti.solana.ingest"
+                    and isinstance(result, dict)
+                    and result.get("verdict") != "REJECT"):
+                mint = task_input.get("mint")
+                if isinstance(mint, str):
+                    audit_task_id = str(uuid4())
+                    audit_payload = {
+                        "mint": mint, "source_scan_task_id": task_id,
+                        "source_event_id": task_input.get("source_event_id"),
+                        "scheduled_by": "eti.solana.ingest",
+                    }
+                    conn.execute(
+                        "INSERT INTO agent_tasks(id,owner_id,workspace_id,requester,target_capability,"
+                        "status,input_json,max_attempts,created_at,updated_at) "
+                        "VALUES(?,?,?,?,'solana.token.audit','queued',?,2,?,?)",
+                        (audit_task_id, row["owner_id"], row["workspace_id"],
+                         "eti.solana.ingest", _encode_json(audit_payload), now, now),
+                    )
+                    conn.execute(
+                        "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                        "VALUES(?,?,?,'solana.audit.queued',?,?)",
+                        (str(uuid4()), row["owner_id"], row["workspace_id"],
+                         _encode_json({"scan_task_id": task_id, "audit_task_id": audit_task_id,
+                                       "mint": mint}), now),
+                    )
         return self.get_agent_task(row["owner_id"], row["workspace_id"], task_id)  # type: ignore[return-value]
 
     def fail_claimed_agent_task(
