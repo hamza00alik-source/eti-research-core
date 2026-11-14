@@ -8,8 +8,7 @@ def candidate(symbol="BTC/USD", venue="kraken", age=300, missing=0, gap=3600,
     return {
         "status": "data_ready",
         "instrument": {"venue": venue, "symbol": symbol, "asset_class": asset_class},
-        "timeframe_seconds": 3600,
-        "provenance": {"requested_rows": requested},
+        "provenance": {"requested_rows": requested, "timeframe": "1h"},
         "quality": {
             "rows": rows, "last_candle_age_seconds": age,
             "missing_interval_estimate": missing, "max_gap_seconds": gap,
