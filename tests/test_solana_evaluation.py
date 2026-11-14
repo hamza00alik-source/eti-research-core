@@ -643,6 +643,10 @@ def test_time_series_regimes_normalize_volatility_and_separate_horizons():
     report = evaluate_solana_time_series_regimes(history, validation, config)
     assert report["classified_row_count"] == 2
     assert set(report["regimes_by_horizon_seconds"]) == {"60", "300"}
+    stratum = next(iter(report["regimes_by_horizon_seconds"]["60"].values()))
+    assert stratum["status"] == "INSUFFICIENT_REGIME_HORIZON_ROWS"
+    assert stratum["summary"] is None
+    assert stratum["mint_cluster_bootstrap"]["status"] == "INSUFFICIENT_MINT_CLUSTERS"
     assert report["sampling_quality"]["mean_max_gap_seconds"] == 7200
     assert report["method"]["volatility_unit"] == "percent_per_sqrt_hour"
 
@@ -672,3 +676,36 @@ def test_time_series_regimes_reject_excessive_sampling_gaps():
     report = evaluate_solana_time_series_regimes(history, validation, config)
     assert report["classified_row_count"] == 0
     assert report["unclassified_reasons"]["sampling_gap_exceeds_configured_maximum"] == 1
+
+
+def test_time_series_regime_horizon_summary_requires_predeclared_row_count():
+    from datetime import datetime, timedelta, timezone
+    from eti.solana_evaluation import evaluate_solana_time_series_regimes
+
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    history = []
+    for index in range(3):
+        history.append({
+            "mint": "mint-a", "pool_address": "pool-a",
+            "baseline_at": (start + timedelta(hours=index)).isoformat(),
+            "features": {"price_usd": 100.0 + index},
+        })
+    validation = [{
+        "mint": "mint-a", "pool_address": "pool-a",
+        "baseline_at": (start + timedelta(hours=3)).isoformat(),
+        "horizon_seconds": 60, "target_sampled_price_return_pct": float(i),
+    } for i in range(5)]
+    config = {
+        "lookback_observations": 3, "minimum_observations": 3,
+        "trend_abs_return_pct": 1.0, "volatility_high_pct": 2.0,
+        "volatility_low_pct": 0.2, "max_gap_seconds": 3600,
+        "minimum_history_span_seconds": 3600,
+        "minimum_rows_per_regime_horizon": 5,
+    }
+    report = evaluate_solana_time_series_regimes(history, validation, config)
+    stratum = report["regimes_by_horizon_seconds"]["60"]["UPWARD_TREND_PROXY__LOW_TIME_NORMALIZED_VOLATILITY_PROXY"]
+    assert stratum["row_count"] == 5
+    assert stratum["status"] == "DESCRIPTIVE_SAMPLE_THRESHOLD_MET"
+    assert stratum["summary"]["observation_count"] == 5
+    assert stratum["distinct_mint_count"] == 1
+    assert stratum["mint_cluster_bootstrap"]["status"] == "INSUFFICIENT_MINT_CLUSTERS"
