@@ -31,6 +31,10 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 - The initial watchlist is owner-bounded. ETI only trades symbols with an approved, calibrated model; symbols without one are skipped. Candidate model approval remains a separate model-governance step.
 - Market orders can experience slippage and losses. This is an execution system, not a profitability guarantee. Start with a small allocation and verify exchange permissions and order history before increasing capital.
 
+## Market coverage diagnostics
+
+The authenticated agent capability market.coverage returns a machine-readable matrix of implemented research sources, supported market types, live execution boundaries and unsupported products. It reports implementation capability only; it does not probe venue uptime, guarantee historical candle depth, or certify a symbol as tradable. Use market.discover and market.snapshot to test a specific instrument and its actual data response.
+
 ## Architecture implemented
 
 | Layer | Current state |
