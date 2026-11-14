@@ -455,3 +455,23 @@ Validation-dependence counts are scoped to prepared validation rows whose baseli
 The fixed benchmark report includes an exploratory percentile bootstrap for the row-weighted mean sampled return. It resamples complete mint clusters (not individual labels), uses a deterministic seed and 1,000 replicates, and withholds the interval unless at least 20 distinct mint clusters are present. Rows without a usable mint are conservatively grouped into one shared missing-identity cluster rather than treated as independent observations.
 
 These intervals are descriptive sensitivity diagnostics, not significance tests or evidence of predictive performance. Mint clustering addresses within-mint dependence only; it does not account for common market shocks across different mints, regime drift, selection effects, provider sampling bias, overlapping cross-mint exposures, or executable trading constraints. No interval authorizes model training or live trading.
+
+
+### Baseline-proxy regime diagnostics
+
+The walk-forward evaluator accepts optional, caller-predeclared regime thresholds.
+When omitted, regime classification remains `NOT_CONFIGURED`; no thresholds
+are learned from validation outcomes. When supplied, the evaluator stratifies
+prepared validation observations using baseline 1-hour buy/sell pressure and
+the baseline 24-hour volume-to-liquidity ratio. These labels describe sampled
+flow and turnover proxies only (buy-dominant / balanced / sell-dominant crossed
+with high / mid / low turnover proxy).
+
+These snapshot fields do **not** establish trend, ranging structure, realized
+volatility, candle behavior, or market-wide regimes. The diagnostics therefore
+must not be described as trending/ranging/high-volatility/low-volatility
+classification. Missing or invalid inputs are excluded and counted. Thresholds
+must be set before inspecting validation outcomes and should be documented by
+the research operator; this feature does not select thresholds, fit a model,
+authorize training, or authorize live execution. Results remain sampled-mark
+validation diagnostics, not executable returns or net P&L.
