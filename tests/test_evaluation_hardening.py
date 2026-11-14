@@ -75,3 +75,18 @@ def test_multi_market_walk_forward_and_bootstrap_summary():
     assert result["market_count"] == 2
     ci = bootstrap_fold_confidence_interval([0.4, 0.5, 0.6], repetitions=200)
     assert ci["lower"] <= ci["mean"] <= ci["upper"]
+
+
+def test_budget_screen_estimates_model_fit_calls_before_training():
+    from eti.pipeline import estimate_nested_model_fits_from_rows
+
+    # 1,964 usable rows produce seven folds at these screening settings.
+    assert estimate_nested_model_fits_from_rows(
+        1964, horizon=6, min_train=400,
+        validation_size=100, test_size=100, step_size=200,
+    ) == 28
+    assert estimate_nested_model_fits_from_rows(
+        1964, horizon=6, min_train=400,
+        validation_size=100, test_size=100, step_size=200,
+        candidate_count=1,
+    ) == 14

@@ -145,15 +145,33 @@ def export_deployable_model(
     }
 
 
+def estimate_nested_model_fits_from_rows(n_rows: int, horizon: int = 6,
+                                          min_train: int = 400,
+                                          validation_size: int = 100,
+                                          test_size: int = 100,
+                                          step_size: int = 200,
+                                          candidate_count: int = 2) -> int:
+    """Estimate model fit calls before training; each candidate fits on validation and test."""
+    from .evaluation import walk_forward_folds
+    if isinstance(candidate_count, bool) or not isinstance(candidate_count, int) or candidate_count < 1:
+        raise ValueError("candidate_count must be a positive integer")
+    folds = walk_forward_folds(
+        n_rows, min_train=min_train, validation_size=validation_size,
+        test_size=test_size, step_size=step_size, purge_bars=horizon,
+    )
+    return len(folds) * candidate_count * 2
+
+
 def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
                           min_train: int = 500, validation_size: int = 100,
                           test_size: int = 100, step_size: int = 100,
                           timeframe: str = "1h", allow_short: bool = False,
                           funding_bps_per_bar: float = 0.0,
-                          fee_bps: float = 6.0, slippage_bps: float = 2.0) -> dict:
+                          fee_bps: float = 6.0, slippage_bps: float = 2.0,
+                          max_model_fits: int | None = None) -> dict:
     """Train candidates inside purged folds; configure long/short and explicit derivative cost assumptions."""
     from sklearn.dummy import DummyClassifier
-    from .evaluation import run_nested_walk_forward
+    from .evaluation import run_nested_walk_forward, walk_forward_folds
     frame = validate_ohlcv(frame)
     features = build_features(frame)
     feature_columns = feature_columns_for_frame(frame)
@@ -162,6 +180,19 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
     dataset["close"] = frame.loc[dataset.index, "close"].astype(float)
     if len(dataset) < min_train + validation_size + test_size + 2 * horizon:
         raise ValueError("Insufficient completed data for nested walk-forward training")
+    planned_folds = walk_forward_folds(
+        len(dataset), min_train=min_train, validation_size=validation_size,
+        test_size=test_size, step_size=step_size, purge_bars=horizon,
+    )
+    estimated_model_fits = len(planned_folds) * 2 * 2
+    if max_model_fits is not None:
+        if isinstance(max_model_fits, bool) or not isinstance(max_model_fits, int) or max_model_fits < 1:
+            raise ValueError("max_model_fits must be a positive integer")
+        if estimated_model_fits > max_model_fits:
+            raise ValueError(
+                f"Training stopped before fitting: estimated {estimated_model_fits} model fits "
+                f"exceed the configured cap of {max_model_fits}. Increase step_size or reduce data/folds."
+            )
     def fit_baseline(train_x, train_y, eval_x):
         return BaselineModel().fit(train_x, train_y).predict(eval_x)
     def fit_majority(train_x, train_y, eval_x):
@@ -276,6 +307,13 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
                                         "funding_bps_per_bar": float(funding_bps_per_bar),
                                         "allow_short": bool(allow_short)},
                    "training_performed": True,
+                   "compute_budget": {
+                       "estimated_model_fit_calls": estimated_model_fits,
+                       "max_model_fit_calls": max_model_fits,
+                       "fold_count": len(planned_folds),
+                       "candidate_count": 2,
+                       "note": "Fit-call count is a compute proxy, not a Kaggle dollar-cost estimate."
+                   },
                    "model_note": "HistGradientBoostingClassifier is fitted from scratch within each fold; majority-class is a naive comparator."})
     return report
 
@@ -283,16 +321,37 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
 def run_multi_symbol_experiment(frames: dict[str, pd.DataFrame], horizon: int = 6,
                                 min_train: int = 500, validation_size: int = 100,
                                 test_size: int = 100, step_size: int = 100,
-                                timeframe: str = "1h") -> dict:
+                                timeframe: str = "1h",
+                                max_model_fits: int | None = None) -> dict:
     """Run independent nested experiments per symbol; no cross-market leakage."""
     if not frames:
         raise ValueError("At least one symbol dataset is required")
+    planned_fits = 0
+    for frame in frames.values():
+        clean_frame = validate_ohlcv(frame)
+        feature_frame = build_features(clean_frame)
+        feature_cols = feature_columns_for_frame(clean_frame)
+        labels = make_labels(clean_frame, horizon=horizon)
+        usable = feature_frame.join(labels.rename("label")).dropna(subset=feature_cols + ["label"])
+        planned_fits += estimate_nested_model_fits_from_rows(
+            len(usable), horizon, min_train, validation_size, test_size, step_size
+        )
+    if max_model_fits is not None and planned_fits > max_model_fits:
+        raise ValueError(
+            f"Multi-market training stopped before fitting: estimated {planned_fits} model fits "
+            f"exceed the configured cap of {max_model_fits}."
+        )
     reports = {}
     for symbol, frame in sorted(frames.items()):
         reports[symbol] = run_nested_experiment(
             frame, horizon, min_train, validation_size, test_size, step_size,
             timeframe=timeframe)
     return {"symbol_count": len(reports), "symbols": reports,
+            "compute_budget": {
+                "estimated_model_fit_calls": planned_fits,
+                "max_model_fit_calls": max_model_fits,
+                "note": "Fit-call count is a compute proxy, not a Kaggle dollar-cost estimate."
+            },
             "warning": "Each market is evaluated independently. These results are not a portfolio backtest."}
 
 
@@ -321,6 +380,13 @@ def main():
     parser.add_argument("--evaluation", choices=["holdout", "nested"], default="holdout", help="nested performs repeated from-scratch candidate fitting")
     parser.add_argument("--timeframe", default="1h")
     parser.add_argument("--limit", type=int, default=3000)
+    parser.add_argument("--horizon", type=int, default=6)
+    parser.add_argument("--min-train", type=int, default=400)
+    parser.add_argument("--validation-size", type=int, default=100)
+    parser.add_argument("--test-size", type=int, default=100)
+    parser.add_argument("--step-size", type=int, default=200)
+    parser.add_argument("--max-model-fits", type=int, default=32,
+                        help="Pre-fit cap for nested model fits; a compute proxy, not a dollar estimate")
     parser.add_argument("--csv", type=Path, help="Use a local OHLCV CSV instead of downloading")
     parser.add_argument("--output", type=Path, default=Path("artifacts/baseline_metrics.json"))
     parser.add_argument("--save-model", action="store_true",
@@ -336,19 +402,34 @@ def main():
         frame = pd.read_csv(args.csv)
         now_ms = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
         frame = drop_incomplete_candles(frame, int(_timeframe_seconds(args.timeframe) * 1000), now_ms)
-        metrics = run_nested_experiment(frame, timeframe=args.timeframe) if args.evaluation == "nested" else run_experiment(frame, timeframe=args.timeframe)
+        metrics = run_nested_experiment(
+            frame, horizon=args.horizon, min_train=args.min_train,
+            validation_size=args.validation_size, test_size=args.test_size,
+            step_size=args.step_size, timeframe=args.timeframe,
+            max_model_fits=args.max_model_fits,
+        ) if args.evaluation == "nested" else run_experiment(frame, horizon=args.horizon, timeframe=args.timeframe)
     elif args.symbols:
         symbols = [item.strip() for item in args.symbols.split(",") if item.strip()]
         if not symbols:
             parser.error("--symbols must contain at least one symbol")
         frames = {symbol: fetch_ohlcv(args.exchange, symbol, args.timeframe, args.limit)
                   for symbol in symbols}
-        metrics = run_multi_symbol_experiment(frames, timeframe=args.timeframe) if args.evaluation == "nested" else {
-            symbol: run_experiment(data, timeframe=args.timeframe)
+        metrics = run_multi_symbol_experiment(
+            frames, horizon=args.horizon, min_train=args.min_train,
+            validation_size=args.validation_size, test_size=args.test_size,
+            step_size=args.step_size, timeframe=args.timeframe,
+            max_model_fits=args.max_model_fits,
+        ) if args.evaluation == "nested" else {
+            symbol: run_experiment(data, horizon=args.horizon, timeframe=args.timeframe)
             for symbol, data in frames.items()}
     else:
         frame = fetch_ohlcv(args.exchange, args.symbol, args.timeframe, args.limit)
-        metrics = run_nested_experiment(frame) if args.evaluation == "nested" else run_experiment(frame, timeframe=args.timeframe)
+        metrics = run_nested_experiment(
+            frame, horizon=args.horizon, min_train=args.min_train,
+            validation_size=args.validation_size, test_size=args.test_size,
+            step_size=args.step_size, timeframe=args.timeframe,
+            max_model_fits=args.max_model_fits,
+        ) if args.evaluation == "nested" else run_experiment(frame, horizon=args.horizon, timeframe=args.timeframe)
     if args.save_model:
         if args.csv:
             training_ref = "csv:" + args.csv.name

@@ -9,4 +9,6 @@ def test_canonical_kaggle_notebook_is_valid_and_uses_nested_pipeline():
                      for cell in notebook["cells"] if cell["cell_type"] == "code")
     assert "--evaluation" in code
     assert "nested" in code
-    assert "--symbols" in code
+    assert "--symbol" in code
+    assert "MAX_MODEL_FITS = 32" in code
+    assert "--max-model-fits" in code
