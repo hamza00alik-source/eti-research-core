@@ -732,8 +732,7 @@ def attest_solana_research_transaction(
         label = next((item for item in labels if item["id"] == payload.label_id), None)
         if label is None:
             raise HTTPException(status_code=404, detail="label not found")
-        identity = label["label"]
-        if identity.get("mint") != payload.mint or identity.get("pool_address") != payload.expected_pool_address:
+        if label.get("mint") != payload.mint or label.get("pool_address") != payload.expected_pool_address:
             raise HTTPException(status_code=422, detail="label identity does not match transaction request")
         report = verify_finalized_transaction_for_mint(
             SolanaRpcClient(), payload.signature, payload.mint,
