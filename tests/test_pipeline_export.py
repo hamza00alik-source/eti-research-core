@@ -125,8 +125,8 @@ def test_training_cli_exports_only_when_explicit_flag_is_set(tmp_path, monkeypat
         lambda *args, **kwargs: {"test": {"balanced_accuracy": 0.4}},
     )
 
-    def fake_export(frame, model_id, version, training_data_ref):
-        calls.update(model_id=model_id, version=version, training_data_ref=training_data_ref)
+    def fake_export(frame, model_id, version, training_data_ref, horizon=6):
+        calls.update(model_id=model_id, version=version, training_data_ref=training_data_ref, horizon=horizon)
         return {"artifact_uri": "artifact://sha256/" + "d" * 64,
                 "calibration_status": "uncalibrated"}
 
@@ -138,6 +138,7 @@ def test_training_cli_exports_only_when_explicit_flag_is_set(tmp_path, monkeypat
         "model_id": "eti-test",
         "version": "0.2.0",
         "training_data_ref": "ccxt:binance:BTC/USDT:1h:3000",
+        "horizon": 6,
     }
     assert report["exported_model"]["calibration_status"] == "uncalibrated"
     assert "candidate artifact only" in report["warning"]
