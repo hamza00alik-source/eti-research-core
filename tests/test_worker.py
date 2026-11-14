@@ -278,6 +278,14 @@ def test_solana_scan_completion_queues_read_only_audit(tmp_path):
 
     scan = worker.run_once()
     assert scan["status"] == "completed"
+    snapshots = store.list_solana_research_snapshots("owner-1", workspace["id"])
+    assert len(snapshots) == 1
+    assert snapshots[0]["task_id"] == scan["id"]
+    assert snapshots[0]["capability"] == "solana.market.scan"
+    assert snapshots[0]["mint"] == "A" * 40
+    assert len(snapshots[0]["payload_sha256"]) == 64
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.list_solana_research_snapshots("owner-2", workspace["id"])
     queued = store.list_agent_tasks("owner-1", workspace["id"], status="queued")
     assert len(queued) == 1
     assert queued[0]["target_capability"] == "solana.token.audit"
@@ -286,6 +294,11 @@ def test_solana_scan_completion_queues_read_only_audit(tmp_path):
     audit = worker.run_once()
     assert audit["status"] == "completed"
     assert audit["result"]["blocked"] is True
+    snapshots = store.list_solana_research_snapshots("owner-1", workspace["id"])
+    assert len(snapshots) == 2
+    assert {item["capability"] for item in snapshots} == {
+        "solana.market.scan", "solana.token.audit",
+    }
     assert store.list_agent_tasks("owner-1", workspace["id"], status="queued") == []
 
 
