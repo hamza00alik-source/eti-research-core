@@ -108,15 +108,17 @@ def fetch_ohlcv(
         raise ValueError(f"Invalid timeframe: {timeframe}")
     timeframe_ms = int(timeframe_seconds * 1000)
     rows: list[list[float]] = []
+    page_count = 0
     cursor = since_ms
     if cursor is None:
         cursor = exchange.milliseconds() - timeframe_ms * limit
     page_size = min(1000, limit)
     while len(rows) < limit:
-        requested = min(page_size, limit - len(rows))
-        batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=cursor, limit=requested)
+        page_request = min(page_size, limit - len(rows))
+        batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=cursor, limit=page_request)
         if not batch:
             break
+        page_count += 1
         rows.extend(batch)
         next_cursor = int(batch[-1][0]) + 1
         if next_cursor <= cursor:
@@ -132,7 +134,22 @@ def fetch_ohlcv(
     if not rows:
         raise RuntimeError(f"No OHLCV data returned for {exchange_id} {symbol} {timeframe}")
     frame = pd.DataFrame(rows, columns=OHLCV_COLUMNS)
-    return drop_incomplete_candles(frame, timeframe_ms, exchange.milliseconds()).tail(limit).reset_index(drop=True)
+    completed = drop_incomplete_candles(frame, timeframe_ms, exchange.milliseconds()).tail(limit).reset_index(drop=True)
+    completed.attrs["source_metadata"] = {
+        "provider": "ccxt-public",
+        "exchange": exchange_id,
+        "market_type": market_type,
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "requested_candles": limit,
+        "raw_candles_received": len(rows),
+        "completed_candles_returned": len(completed),
+        "fetch_pages": page_count,
+        "source": "public_exchange_ohlcv",
+        "first_returned_candle": completed["timestamp"].iloc[0].isoformat(),
+        "last_returned_candle": completed["timestamp"].iloc[-1].isoformat(),
+    }
+    return completed
 
 
 

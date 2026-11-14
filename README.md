@@ -219,6 +219,8 @@ If the calibration window has fewer than 30 rows, fewer than five examples of an
 
 
 ## OHLCV data-quality diagnostics
+Provider-backed market snapshots, strategy reports and model-training reports also expose `provider_metadata`: source/provider identity, instrument and timeframe, requested versus returned completed candles, and first/last returned timestamps. CCXT collection additionally records raw rows received and fetch-page count; Yahoo Finance reports its downloaded interval and history window; CSV reports the user-supplied source. These fields describe the provider response and do not imply exhaustive history or guaranteed feed availability.
+
 Training candidate reports also include the raw OHLCV quality diagnostics. Crypto freshness is a blocking review gate because these venues trade continuously; stale latest candles prevent the candidate evaluation from passing. For Yahoo/session-based instruments, freshness and elapsed-calendar gaps remain informational until provider-specific exchange calendars are implemented. Calendar coverage and gap counts never independently reject an equity, forex, commodity or index candidate, and ETI never fills missing candles.
 
 
