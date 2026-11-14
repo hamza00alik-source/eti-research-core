@@ -2807,23 +2807,41 @@ class MemoryStore:
             label_params.extend([limit, owner_id, workspace_id])
             label_rows = conn.execute(label_query, label_params).fetchall()
             exported_snapshot_ids = {row["id"] for row in rows}
-            labels = [{
-                "id": row["id"], "mint": row["mint"], "pool_address": row["pool_address"],
-                "baseline_snapshot_id": row["baseline_snapshot_id"],
-                "target_snapshot_id": row["target_snapshot_id"],
-                "baseline_snapshot_in_export": row["baseline_snapshot_id"] in exported_snapshot_ids,
-                "target_snapshot_in_export": row["target_snapshot_id"] in exported_snapshot_ids,
-                "horizon_seconds": row["horizon_seconds"],
-                "label": json.loads(row["label_json"]), "created_at": row["created_at"],
-            } for row in label_rows]
-        snapshots = [{
-            "id": row["id"], "task_id": row["task_id"], "capability": row["capability"],
-            "mint": row["mint"], "pool_address": row["pool_address"],
-            "schema_version": row["schema_version"], "payload": json.loads(row["payload_json"]),
-            "payload_sha256": row["payload_sha256"], "fetched_at": row["fetched_at"],
-        } for row in rows]
+            labels = []
+            malformed_label_count = 0
+            for row in label_rows:
+                try:
+                    label_value = json.loads(row["label_json"])
+                    label_parse_error = False
+                except (TypeError, ValueError):
+                    label_value = None
+                    label_parse_error = True
+                    malformed_label_count += 1
+                labels.append({
+                    "id": row["id"], "mint": row["mint"], "pool_address": row["pool_address"],
+                    "baseline_snapshot_id": row["baseline_snapshot_id"],
+                    "target_snapshot_id": row["target_snapshot_id"],
+                    "baseline_snapshot_in_export": row["baseline_snapshot_id"] in exported_snapshot_ids,
+                    "target_snapshot_in_export": row["target_snapshot_id"] in exported_snapshot_ids,
+                    "horizon_seconds": row["horizon_seconds"],
+                    "label": label_value, "label_parse_error": label_parse_error,
+                    "created_at": row["created_at"],
+                })
+        snapshots = []
+        for row in rows:
+            try:
+                payload_value = json.loads(row["payload_json"])
+            except (TypeError, ValueError):
+                payload_value = None
+            snapshots.append({
+                "id": row["id"], "task_id": row["task_id"], "capability": row["capability"],
+                "mint": row["mint"], "pool_address": row["pool_address"],
+                "schema_version": row["schema_version"], "payload": payload_value,
+                "payload_sha256": row["payload_sha256"], "fetched_at": row["fetched_at"],
+            })
         from .solana_dataset import validate_snapshot_rows
         validation = validate_snapshot_rows(snapshots)
+        validation["malformed_label_count"] = malformed_label_count
         return {
             "schema": "eti.solana.research_dataset.v1",
             "scope": {"workspace_id": workspace_id},
