@@ -179,6 +179,20 @@ class MemoryStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_solana_labels_owner_mint
                     ON solana_research_labels(owner_id, workspace_id, mint, horizon_seconds);
+                CREATE TABLE IF NOT EXISTS solana_execution_cost_evidence (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    label_id TEXT NOT NULL,
+                    mint TEXT NOT NULL,
+                    pool_address TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL,
+                    evidence_sha256 TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(owner_id, workspace_id, label_id, evidence_sha256)
+                );
+                CREATE INDEX IF NOT EXISTS idx_solana_cost_evidence_label
+                    ON solana_execution_cost_evidence(owner_id, workspace_id, label_id, created_at);
                 CREATE TABLE IF NOT EXISTS agent_tasks (
                     id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
@@ -2613,6 +2627,100 @@ class MemoryStore:
                 "A dataset report is descriptive and does not establish predictive performance.",
             ],
         }
+
+    def record_solana_execution_cost_evidence(
+        self, owner_id: str, workspace_id: str, label_id: str,
+        mint: str, pool_address: str, evidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Append immutable owner/workspace-scoped cost evidence for one exact label."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        label_id = _required_text(label_id, "label_id", 128)
+        mint = _required_text(mint, "mint", 64)
+        pool_address = _required_text(pool_address, "pool_address", 128)
+        if len(mint) < 32:
+            raise ValueError("mint must be a valid-length Solana address")
+        if not isinstance(evidence, dict):
+            raise ValueError("evidence must be an object")
+        # Identity is stored in the envelope, not trusted from nested component values.
+        envelope = dict(evidence)
+        for key, expected in (("label_id", label_id), ("mint", mint), ("pool_address", pool_address)):
+            supplied = envelope.get(key)
+            if supplied != expected:
+                raise ValueError(f"evidence {key} must match the requested label identity")
+        encoded = _encode_json(envelope)
+        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        now = _utc_now()
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            label = conn.execute(
+                "SELECT mint,pool_address FROM solana_research_labels "
+                "WHERE owner_id=? AND workspace_id=? AND id=?",
+                (owner_id, workspace_id, label_id),
+            ).fetchone()
+            if label is None or label["mint"] != mint or label["pool_address"] != pool_address:
+                raise LookupError("label not found")
+            existing = conn.execute(
+                "SELECT * FROM solana_execution_cost_evidence "
+                "WHERE owner_id=? AND workspace_id=? AND label_id=? AND evidence_sha256=?",
+                (owner_id, workspace_id, label_id, digest),
+            ).fetchone()
+            if existing is not None:
+                return self._solana_cost_evidence_dict(existing, duplicate=True)
+            record_id = str(uuid4())
+            conn.execute(
+                "INSERT INTO solana_execution_cost_evidence "
+                "(id,owner_id,workspace_id,label_id,mint,pool_address,evidence_json,evidence_sha256,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (record_id, owner_id, workspace_id, label_id, mint, pool_address, encoded, digest, now),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (str(uuid4()), owner_id, workspace_id, "solana.cost_evidence.recorded",
+                 _encode_json({"evidence_id": record_id, "label_id": label_id,
+                               "mint": mint, "pool_address": pool_address,
+                               "evidence_sha256": digest}), now),
+            )
+            row = conn.execute(
+                "SELECT * FROM solana_execution_cost_evidence WHERE id=?", (record_id,)
+            ).fetchone()
+        return self._solana_cost_evidence_dict(row, duplicate=False)
+
+    @staticmethod
+    def _solana_cost_evidence_dict(row: sqlite3.Row, *, duplicate: bool) -> dict[str, Any]:
+        return {
+            "id": row["id"], "label_id": row["label_id"], "mint": row["mint"],
+            "pool_address": row["pool_address"],
+            "evidence": json.loads(row["evidence_json"]),
+            "evidence_sha256": row["evidence_sha256"], "created_at": row["created_at"],
+            "duplicate": duplicate,
+        }
+
+    def list_solana_execution_cost_evidence(
+        self, owner_id: str, workspace_id: str, label_id: str | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("limit must be from 1 to 1000")
+        query = (
+            "SELECT * FROM solana_execution_cost_evidence "
+            "WHERE owner_id=? AND workspace_id=?"
+        )
+        params: list[Any] = [owner_id, workspace_id]
+        if label_id is not None:
+            query += " AND label_id=?"
+            params.append(_required_text(label_id, "label_id", 128))
+        query += " ORDER BY created_at DESC,id DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+        return [self._solana_cost_evidence_dict(row, duplicate=False) for row in rows]
 
     def list_solana_research_labels(
         self, owner_id: str, workspace_id: str, mint: str | None = None, limit: int = 500,
