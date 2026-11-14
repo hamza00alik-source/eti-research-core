@@ -394,6 +394,9 @@ def main():
     parser.add_argument("--model-id", default="eti-baseline")
     parser.add_argument("--model-version", default="0.1.0")
     args = parser.parse_args()
+    if args.save_model and args.max_model_fits < 2:
+        parser.error("--save-model requires a fit cap of at least 2 (one final deployable fit plus evaluation)")
+    nested_fit_cap = args.max_model_fits - (1 if args.save_model else 0)
     if args.csv and args.symbols:
         parser.error("--csv cannot be combined with --symbols")
     if args.save_model and args.symbols:
@@ -406,7 +409,7 @@ def main():
             frame, horizon=args.horizon, min_train=args.min_train,
             validation_size=args.validation_size, test_size=args.test_size,
             step_size=args.step_size, timeframe=args.timeframe,
-            max_model_fits=args.max_model_fits,
+            max_model_fits=nested_fit_cap,
         ) if args.evaluation == "nested" else run_experiment(frame, horizon=args.horizon, timeframe=args.timeframe)
     elif args.symbols:
         symbols = [item.strip() for item in args.symbols.split(",") if item.strip()]
@@ -418,7 +421,7 @@ def main():
             frames, horizon=args.horizon, min_train=args.min_train,
             validation_size=args.validation_size, test_size=args.test_size,
             step_size=args.step_size, timeframe=args.timeframe,
-            max_model_fits=args.max_model_fits,
+            max_model_fits=nested_fit_cap,
         ) if args.evaluation == "nested" else {
             symbol: run_experiment(data, horizon=args.horizon, timeframe=args.timeframe)
             for symbol, data in frames.items()}
@@ -428,7 +431,7 @@ def main():
             frame, horizon=args.horizon, min_train=args.min_train,
             validation_size=args.validation_size, test_size=args.test_size,
             step_size=args.step_size, timeframe=args.timeframe,
-            max_model_fits=args.max_model_fits,
+            max_model_fits=nested_fit_cap,
         ) if args.evaluation == "nested" else run_experiment(frame, horizon=args.horizon, timeframe=args.timeframe)
     if args.save_model:
         if args.csv:
@@ -436,8 +439,12 @@ def main():
         else:
             training_ref = f"ccxt:{args.exchange}:{args.symbol}:{args.timeframe}:{args.limit}"
         metrics["exported_model"] = export_deployable_model(
-            frame, args.model_id, args.model_version, training_ref
+            frame, args.model_id, args.model_version, training_ref, horizon=args.horizon
         )
+        budget = metrics.setdefault("compute_budget", {})
+        budget["deployable_model_fit_calls"] = 1
+        budget["total_estimated_model_fit_calls"] = int(budget.get("estimated_model_fit_calls", 0)) + 1
+        budget["max_model_fit_calls"] = args.max_model_fits
         metrics["warning"] = (
             str(metrics.get("warning", "")) +
             " Exported model is a candidate artifact only; it is not registered, "
