@@ -313,3 +313,56 @@ def test_walk_forward_rejects_prepared_row_mint_or_pool_identity_mismatch():
             {"status": "PREPARATION_ONLY", "training_authorized": False, "rows": prepared},
             n_splits=2, min_train_groups=3, embargo_seconds=3600,
         )
+
+
+def test_walk_forward_transaction_receipts_are_integrity_checked_and_never_verified_swaps():
+    import hashlib
+    import json
+    from eti.solana_evaluation import evaluate_prepared_solana_walk_forward
+
+    exported, prepared, attestations = [], [], {}
+    for index in range(8):
+        day = 1 + index * 2
+        stamp = f"2026-01-{day:02d}T00:00:00Z"
+        label_id = f"receipt-label-{index}"
+        mint = f"receipt-mint-{index}"
+        pool = f"receipt-pool-{index}"
+        exported.append({
+            "id": label_id, "mint": mint, "pool_address": pool, "horizon_seconds": 3600,
+            "label": {"baseline_at": stamp, "target_at": f"2026-01-{day:02d}T01:00:00Z"},
+        })
+        prepared.append({
+            "label_id": label_id, "mint": mint, "pool_address": pool,
+            "baseline_at": stamp, "horizon_seconds": 3600,
+            "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
+            "target_sampled_price_return_pct": 2.0,
+        })
+        attestation = {
+            "status": "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED",
+            "verified": False, "transaction_receipt_verified": True,
+            "signature": f"signature-{index}", "mint": mint,
+            "expected_pool_address": pool, "wallet_address": f"wallet-{index}",
+        }
+        encoded = json.dumps(attestation, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        attestations[label_id] = [{
+            "id": f"attestation-{index}", "label_id": label_id, "signature": f"signature-{index}",
+            "mint": mint, "pool_address": pool, "wallet_address": f"wallet-{index}",
+            "attestation": attestation,
+            "attestation_sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+            "integrity_valid": True,
+        }]
+
+    report = evaluate_prepared_solana_walk_forward(
+        exported,
+        {"status": "PREPARATION_ONLY", "training_authorized": False, "rows": prepared},
+        n_splits=2, min_train_groups=3, embargo_seconds=3600,
+        transaction_attestations_by_label_id=attestations,
+    )
+    receipt = report["transaction_receipt_attestations"]
+    assert receipt["status"] == "RECEIPT_OBSERVATION_DIAGNOSTICS_ONLY"
+    assert receipt["validation_rows_checked"] > 0
+    assert receipt["attestation_record_count"] == receipt["validation_rows_checked"]
+    assert receipt["integrity_valid_record_count"] == receipt["finalized_receipt_observation_count"]
+    assert receipt["verified_swap_count"] == 0
+    assert receipt["net_return_pct"] is None
+    assert receipt["realized_pnl_available"] is False
