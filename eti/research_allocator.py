@@ -61,13 +61,21 @@ def _candidate_score(candidate: dict[str, Any], *, max_age_seconds: float) -> tu
         return 0.0, ["ohlcv_quality_not_validated"]
     if age > max_age_seconds:
         reasons.append("stale_last_candle")
-    if max_gap > interval * 3:
-        reasons.append("excessive_max_gap")
-
+    asset_class = str(candidate.get("instrument", {}).get("asset_class", "")).lower()
     history_score = min(rows / requested, 1.0) * 40.0
     freshness_score = max(0.0, 30.0 * (1.0 - age / max_age_seconds)) if max_age_seconds else 0.0
-    missing_fraction = min(missing / max(rows - 1.0, 1.0), 1.0)
-    continuity_score = 30.0 * (1.0 - missing_fraction)
+    if asset_class == "crypto":
+        if max_gap > interval * 3:
+            reasons.append("excessive_max_gap")
+        missing_fraction = min(missing / max(rows - 1.0, 1.0), 1.0)
+        continuity_score = 30.0 * (1.0 - missing_fraction)
+    else:
+        # Session closures differ by venue and instrument. Without a verified
+        # exchange calendar, raw gaps cannot safely be called missing candles.
+        # Withhold continuity credit and block economic eligibility pending
+        # calendar-aware validation rather than misclassifying weekends as gaps.
+        continuity_score = 0.0
+        reasons.append("session_calendar_not_applied")
     score = history_score + freshness_score + continuity_score
     if reasons:
         score = 0.0
