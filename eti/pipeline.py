@@ -379,7 +379,7 @@ def main():
     parser.add_argument("--symbols", help="Comma-separated symbols for independent nested evaluation")
     parser.add_argument("--evaluation", choices=["holdout", "nested"], default="holdout", help="nested performs repeated from-scratch candidate fitting")
     parser.add_argument("--timeframe", default="1h")
-    parser.add_argument("--limit", type=int, default=2000)
+    parser.add_argument("--limit", type=int, default=3000)
     parser.add_argument("--horizon", type=int, default=6)
     parser.add_argument("--min-train", type=int, default=400)
     parser.add_argument("--validation-size", type=int, default=100)
