@@ -280,10 +280,16 @@ consumers must check the target flag before attempting to join the target row.
 Only baseline snapshot fields may be used as prediction inputs.
 
 The export includes non-mutating validation diagnostics for malformed payloads,
-missing evidence/features, invalid numeric values, negative values, zero price
-or liquidity, invalid timestamps, and duplicate entity/timestamp observations.
-Diagnostics flag data for review; they do not coerce, repair, impute, or discard
-source values. The export is account/workspace scoped and requires normal ETI
+unsupported snapshot schema versions, missing evidence/features, invalid numeric
+values, negative values, zero price or liquidity, invalid timestamps, and duplicate
+entity/timestamp observations. It also checks each label's baseline and target
+snapshot references for existence, mint/pool identity consistency, chronological
+ordering, and minimum horizon elapsed; `label_reference_issue_count` and each
+label's `reference_issues` expose failed checks. A target that exists in the same
+workspace but falls outside a bounded export is still checked for integrity, while
+`target_snapshot_in_export` separately indicates whether it is present in the
+returned snapshot list. Diagnostics flag data for review; they do not coerce,
+repair, impute, or discard source values. The export is account/workspace scoped and requires normal ETI
 authentication. It is a research artifact, not a training approval or execution
 authorization. When using labels, only baseline snapshot fields may be used as
 model inputs; target snapshot fields are outcomes and must never leak into
