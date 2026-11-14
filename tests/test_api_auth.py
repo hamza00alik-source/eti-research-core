@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -586,3 +587,42 @@ def test_solana_dataset_export_api_requires_auth_and_isolates_workspaces(tmp_pat
             headers=owner_headers,
         )
         assert invalid_mint.status_code == 422
+
+
+def test_solana_cost_evidence_api_is_authenticated_and_owner_scoped(tmp_path, monkeypatch):
+    database = tmp_path / "solana-cost-api.sqlite3"
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(database))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        account_a = _register(client, "cost_owner_a")
+        account_b = _register(client, "cost_owner_b")
+        headers_a = {"Authorization": f"Bearer {account_a['access_token']}"}
+        headers_b = {"Authorization": f"Bearer {account_b['access_token']}"}
+        workspace = client.post(
+            "/v1/workspaces", headers=headers_a, json={"name": "cost research"}
+        ).json()
+        workspace_id = workspace["id"]
+        mint, pool, label_id = "E" * 32, "pool-api", "cost-api-label"
+        store = MemoryStore(database)
+        with store._connection() as conn:
+            conn.execute(
+                "INSERT INTO solana_research_labels "
+                "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
+                "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (label_id, account_a["account"]["id"], workspace_id, mint, pool,
+                 "baseline", "target", 3600, json.dumps({}), "2026-01-01T00:00:00Z"),
+            )
+        body = {
+            "label_id": label_id, "mint": mint, "pool_address": pool,
+            "evidence": {"label_id": label_id, "mint": mint, "pool_address": pool,
+                         "cost_components": {}},
+        }
+        url = f"/v1/workspaces/{workspace_id}/solana/cost-evidence"
+        assert client.post(url, json=body).status_code == 401
+        saved = client.post(url, headers=headers_a, json=body)
+        assert saved.status_code == 201, saved.text
+        assert saved.json()["integrity_valid"] is True
+        assert client.get(url, headers=headers_a).json()["items"][0]["id"] == saved.json()["id"]
+        assert client.get(url, headers=headers_b).status_code == 404
+        assert client.post(url, headers=headers_b, json=body).status_code == 404
