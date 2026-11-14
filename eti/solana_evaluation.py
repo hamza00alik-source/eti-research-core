@@ -303,6 +303,154 @@ def evaluate_solana_regime_diagnostics(
     }
 
 
+def evaluate_solana_time_series_regimes(
+    history_rows: list[dict[str, Any]],
+    validation_rows: list[dict[str, Any]],
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Classify each validation row using only its own mint/pool baseline history.
+
+    Volatility is the standard deviation of adjacent sampled log returns per
+    observation, not time-normalized realized volatility from market candles.
+    """
+    if config is None:
+        return {
+            "status": "NOT_CONFIGURED",
+            "classified_row_count": 0,
+            "unclassified_row_count": len(validation_rows),
+            "regimes": {},
+            "note": "Explicit lookback and thresholds are required; no outcomes are used to set them.",
+        }
+    required = {
+        "lookback_observations", "minimum_observations",
+        "trend_abs_return_pct", "volatility_high_pct", "volatility_low_pct",
+    }
+    if not isinstance(config, dict) or set(config) != required:
+        raise ValueError("time-series regime config must contain exactly: " + ", ".join(sorted(required)))
+    lookback = config["lookback_observations"]
+    minimum = config["minimum_observations"]
+    if (isinstance(lookback, bool) or not isinstance(lookback, int)
+            or isinstance(minimum, bool) or not isinstance(minimum, int)
+            or minimum < 3 or lookback < minimum):
+        raise ValueError("lookback_observations must be >= minimum_observations >= 3")
+    for key in ("trend_abs_return_pct", "volatility_high_pct", "volatility_low_pct"):
+        if not _finite(config[key]) or config[key] < 0:
+            raise ValueError(key + " must be a finite non-negative number")
+    if config["volatility_low_pct"] >= config["volatility_high_pct"]:
+        raise ValueError("volatility thresholds must satisfy low < high")
+
+    def parse_stamp(row: dict[str, Any]) -> datetime | None:
+        raw = row.get("baseline_at")
+        if not isinstance(raw, str):
+            return None
+        try:
+            stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return stamp if stamp.tzinfo is not None and stamp.utcoffset() is not None else None
+
+    histories: dict[tuple[str, str], list[tuple[datetime, float]]] = {}
+    for row in history_rows:
+        if not isinstance(row, dict):
+            continue
+        mint, pool = row.get("mint"), row.get("pool_address")
+        features = row.get("features")
+        stamp = parse_stamp(row)
+        price = features.get("price_usd") if isinstance(features, dict) else None
+        if (not isinstance(mint, str) or not mint.strip()
+                or not isinstance(pool, str) or not pool.strip()
+                or stamp is None or not _finite(price) or price <= 0):
+            continue
+        histories.setdefault((mint, pool), []).append((stamp, float(price)))
+
+    groups: dict[str, list[float]] = {}
+    classified = 0
+    unclassified = 0
+    reason_counts: dict[str, int] = {}
+    for row in validation_rows:
+        if not isinstance(row, dict):
+            unclassified += 1
+            reason_counts["malformed_validation_row"] = reason_counts.get("malformed_validation_row", 0) + 1
+            continue
+        mint, pool = row.get("mint"), row.get("pool_address")
+        stamp = parse_stamp(row)
+        outcome = row.get("target_sampled_price_return_pct")
+        if (not isinstance(mint, str) or not isinstance(pool, str)
+                or stamp is None or not _finite(outcome)):
+            unclassified += 1
+            reason_counts["invalid_validation_identity_time_or_outcome"] = reason_counts.get("invalid_validation_identity_time_or_outcome", 0) + 1
+            continue
+        eligible = sorted(
+            (time, price) for time, price in histories.get((mint, pool), [])
+            if time <= stamp
+        )
+        # Duplicate timestamps are ambiguous unless every duplicate carries
+        # exactly the same price. Conflicts are not silently averaged.
+        by_time: dict[datetime, set[float]] = {}
+        for time, price in eligible:
+            by_time.setdefault(time, set()).add(price)
+        if any(len(prices) != 1 for prices in by_time.values()):
+            unclassified += 1
+            reason_counts["conflicting_prices_at_same_timestamp"] = reason_counts.get("conflicting_prices_at_same_timestamp", 0) + 1
+            continue
+        points = [(time, next(iter(prices))) for time, prices in sorted(by_time.items())]
+        points = points[-lookback:]
+        if len(points) < minimum:
+            unclassified += 1
+            reason_counts["insufficient_prior_baseline_observations"] = reason_counts.get("insufficient_prior_baseline_observations", 0) + 1
+            continue
+        log_returns = [
+            math.log(points[index][1] / points[index - 1][1]) * 100.0
+            for index in range(1, len(points))
+        ]
+        if not log_returns or not all(math.isfinite(value) for value in log_returns):
+            unclassified += 1
+            reason_counts["invalid_sampled_price_path"] = reason_counts.get("invalid_sampled_price_path", 0) + 1
+            continue
+        trend_return = (points[-1][1] / points[0][1] - 1.0) * 100.0
+        mean_log_return = sum(log_returns) / len(log_returns)
+        variance = sum((value - mean_log_return) ** 2 for value in log_returns) / (len(log_returns) - 1)
+        volatility = math.sqrt(variance)
+        if volatility >= config["volatility_high_pct"]:
+            vol_regime = "HIGH_SAMPLED_VOLATILITY"
+        elif volatility <= config["volatility_low_pct"]:
+            vol_regime = "LOW_SAMPLED_VOLATILITY"
+        else:
+            vol_regime = "MID_SAMPLED_VOLATILITY"
+        if trend_return >= config["trend_abs_return_pct"]:
+            trend_regime = "UPWARD_TREND_PROXY"
+        elif trend_return <= -config["trend_abs_return_pct"]:
+            trend_regime = "DOWNWARD_TREND_PROXY"
+        else:
+            trend_regime = "RANGE_BOUND_RETURN_PROXY"
+        groups.setdefault(trend_regime + "__" + vol_regime, []).append(float(outcome))
+        classified += 1
+    return {
+        "status": "TIME_SERIES_PROXY_REGIME_DIAGNOSTICS_ONLY",
+        "config": dict(config),
+        "classified_row_count": classified,
+        "unclassified_row_count": unclassified,
+        "unclassified_reasons": reason_counts,
+        "regimes": {name: _summarize(values) for name, values in sorted(groups.items())},
+        "method": {
+            "history_scope": "same_mint_and_pool_only",
+            "future_baseline_observations_excluded": True,
+            "same_timestamp_conflicts": "excluded_not_averaged",
+            "trend_proxy": "first_to_last_percent_change_over_sampled_baseline_prices",
+            "volatility_proxy": "sample_standard_deviation_of_adjacent_log_returns_per_observation",
+            "time_normalized": False,
+            "ohlcv_candles_required": False,
+        },
+        "limitations": [
+            "These are sampled-price path proxies, not exchange-candle trend or realized volatility.",
+            "Volatility is per observation and is not comparable across irregular sampling intervals without time normalization.",
+            "Sparse snapshots can miss intraperiod jumps, wicks, liquidity events and market-wide shocks.",
+            "Classification thresholds and lookback must be predeclared independently of validation outcomes.",
+            "Regime-stratified outcomes remain sampled-mark diagnostics, not executable returns, net P&L, or training authorization.",
+        ],
+    }
+
+
 def evaluate_prepared_solana_walk_forward(
     exported_labels: list[dict[str, Any]],
     prepared_dataset: dict[str, Any],
@@ -314,6 +462,7 @@ def evaluate_prepared_solana_walk_forward(
     execution_cost_evidence_by_label_id: dict[Any, dict[str, Any]] | None = None,
     transaction_attestations_by_label_id: dict[Any, list[dict[str, Any]]] | None = None,
     regime_thresholds: dict[str, float] | None = None,
+    time_series_regime_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Join prepared rows to fixed chronological validation folds and benchmark.
 
@@ -516,6 +665,9 @@ def evaluate_prepared_solana_walk_forward(
     ]
     report["regime_diagnostics"] = evaluate_solana_regime_diagnostics(
         validation_rows_for_regimes, regime_thresholds
+    )
+    report["time_series_regime_diagnostics"] = evaluate_solana_time_series_regimes(
+        prepared_rows, validation_rows_for_regimes, time_series_regime_config
     )
     by_horizon: dict[str, Any] = {}
     for horizon, entries in sorted(horizon_folds.items()):
