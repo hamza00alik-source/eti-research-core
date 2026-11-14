@@ -40,7 +40,9 @@ class MainActivity : Activity() {
             builtInZoomControls = false
             displayZoomControls = false
             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            safeBrowsingEnabled = true
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                safeBrowsingEnabled = true
+            }
             loadsImagesAutomatically = true
         }
         webView.webChromeClient = WebChromeClient()
@@ -83,7 +85,10 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.rgb(12, 18, 32))
             gravity = android.view.Gravity.CENTER
             setPadding(32, 32, 32, 32)
-            setOnClickListener { webView.reload() }
+            setOnClickListener {
+                setContentView(webView)
+                webView.reload()
+            }
         }
         setContentView(message)
     }
