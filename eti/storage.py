@@ -2342,7 +2342,7 @@ class MemoryStore:
                 "INSERT INTO solana_research_refresh_jobs(id,owner_id,workspace_id,mint,pool_address,"
                 "interval_seconds,next_due_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(owner_id,workspace_id,mint,pool_address) DO UPDATE SET "
-                "interval_seconds=excluded.interval_seconds,enabled=1,updated_at=excluded.updated_at",
+                "interval_seconds=excluded.interval_seconds,next_due_at=excluded.next_due_at,enabled=1,updated_at=excluded.updated_at",
                 (str(uuid4()), owner_id, workspace_id, mint, pool_address,
                  interval_seconds, due, now, now),
             )
