@@ -566,3 +566,23 @@ def test_autonomous_market_discovery_queues_top_instrument_training_once(tmp_pat
     assert queued[0]["target_capability"] == "model.train_research"
     assert queued[0]["input"]["symbol"] == "BTC/USDT:USDT"
     assert queued[0]["input"]["source_discovery_task_id"] == task["id"]
+
+
+
+def test_market_coverage_report_distinguishes_research_from_execution():
+    from eti.agents import default_capabilities, market_coverage_report
+
+    report = market_coverage_report({})
+    assert report["kind"] == "market_coverage_report"
+    assert report["research"]["crypto"]["market_types"] == ["spot", "swap", "future"]
+    assert report["research"]["commodity"]["venue"] == "yahoo"
+    assert report["live_execution"]["market_types"] == ["spot"]
+    assert report["live_execution"]["derivatives_enabled"] is False
+    assert "options" in report["not_implemented"]
+    assert "market.coverage" in default_capabilities().capabilities()
+
+
+def test_market_coverage_report_rejects_non_object_payload():
+    from eti.agents import market_coverage_report
+    with pytest.raises(ValueError, match="JSON object"):
+        market_coverage_report(["not", "an", "object"])
