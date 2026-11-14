@@ -419,8 +419,14 @@ def test_new_mint_without_indexed_pool_is_rechecked_until_pool_appears(tmp_path)
         "evidence": {"pair_address": "Pool333", "price_usd": 0.5,
                      "liquidity_usd": 60000, "volume_h24_usd": 10000},
     })
+    registry.register("solana.token.audit", lambda payload: {
+        "mint": payload["mint"], "passed": False, "blocked": True,
+    })
     worker = AgentWorker(store, registry=registry)
+    # The initial event's read-only audit task is ahead of the refresh task.
+    assert worker.run_once()["target_capability"] == "solana.token.audit"
     refreshed = worker.run_once()
+    assert refreshed["target_capability"] == "solana.market.scan"
     assert refreshed["status"] == "completed"
     with sqlite3.connect(store.database_path) as conn:
         rows = conn.execute(
