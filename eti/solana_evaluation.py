@@ -64,7 +64,7 @@ def evaluate_solana_research_folds(
             raise ValueError("each fold must contain a validation list")
         valid: list[tuple[float, dict[str, Any]]] = []
         for row in fold["validation"]:
-            if not isinstance(row, dict) or not _finite(row.get("target_sampled_price_return_pct")):
+            if not isinstance(row, dict) or not _finite(row.get("target_sampled_price_return_pct")) or row.get("target_sampled_price_return_pct") <= -100:
                 excluded_rows += 1
                 continue
             features = row.get("features")
@@ -86,7 +86,7 @@ def evaluate_solana_research_folds(
         for outcome, row in valid:
             features = row["features"]
             total = features["txns_h1_buys"] + features["txns_h1_sells"]
-            if total > 0 and features["txns_h1_buys"] / total >= buy_pressure_threshold:
+            if math.isfinite(total) and total > 0 and features["txns_h1_buys"] / total >= buy_pressure_threshold:
                 pressure.append(outcome)
         all_returns["always_long"].extend(always)
         all_returns["buy_pressure"].extend(pressure)
