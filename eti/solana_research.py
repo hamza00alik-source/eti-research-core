@@ -233,6 +233,13 @@ def scan_pair(
         "h1_change_pct": h1_change,
         "pool_age_minutes": age,
         "pair_address": pair.get("pairAddress"),
+        "price_usd": _number(pair.get("priceUsd")),
+        "volume_h24_usd": _number((pair.get("volume") or {}).get("h24")),
+        "txns_h1_buys": _number(((pair.get("txns") or {}).get("h1") or {}).get("buys")),
+        "txns_h1_sells": _number(((pair.get("txns") or {}).get("h1") or {}).get("sells")),
+        "dex_id": pair.get("dexId"),
+        "quote_token_address": ((pair.get("quoteToken") or {}).get("address")
+                                if isinstance(pair.get("quoteToken"), dict) else None),
     }
     failures = []
     unknown = []
