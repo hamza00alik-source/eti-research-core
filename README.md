@@ -219,5 +219,7 @@ If the calibration window has fewer than 30 rows, fewer than five examples of an
 
 
 ## OHLCV data-quality diagnostics
+Training candidate reports also include the raw OHLCV quality diagnostics. Crypto freshness is a blocking review gate because these venues trade continuously; stale latest candles prevent the candidate evaluation from passing. For Yahoo/session-based instruments, freshness and elapsed-calendar gaps remain informational until provider-specific exchange calendars are implemented. Calendar coverage and gap counts never independently reject an equity, forex, commodity or index candidate, and ETI never fills missing candles.
+
 
 Market snapshots now include a `data_quality` report with observed candle count, first/latest candle timestamps, elapsed-calendar coverage ratio, gap count, largest gap in candle intervals, latest-candle age and a freshness label. The diagnostic never fills missing candles or fabricates prices. It explicitly notes that elapsed-calendar gaps can reflect exchange sessions, weekends, holidays or maintenance; those calendars are not yet modeled, so the report is evidence for review rather than an automatic market rejection rule.
