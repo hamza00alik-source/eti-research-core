@@ -129,3 +129,45 @@ def test_label_generation_rejects_naive_cutoff_datetime():
             now=datetime(2026, 1, 1, 0, 10),
             horizons_seconds=(300,),
         )
+
+
+def test_expanding_walk_forward_splits_are_chronological_grouped_and_purged():
+    from eti.solana_labels import chronological_walk_forward_splits
+
+    rows = []
+    origin = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for day in range(10):
+        start = origin.replace(day=1 + day)
+        end = start.replace(minute=5)
+        rows.append({
+            "mint": f"Mint{day}", "pool_address": f"Pool{day}",
+            "baseline_at": start.isoformat().replace("+00:00", "Z"),
+            "target_at": end.isoformat().replace("+00:00", "Z"),
+        })
+    folds = chronological_walk_forward_splits(
+        rows, n_splits=3, min_train_groups=3, embargo_seconds=3600
+    )
+    assert len(folds) == 3
+    previous_validation_start = None
+    for fold in folds:
+        train_groups = {(x["mint"], x["pool_address"]) for x in fold["train"]}
+        validation_groups = {(x["mint"], x["pool_address"]) for x in fold["validation"]}
+        assert train_groups.isdisjoint(validation_groups)
+        assert all(x["target_at"] < fold["boundary_at"] for x in fold["train"])
+        assert all(x["baseline_at"] >= fold["validation_start_at"] for x in fold["validation"])
+        assert fold["purged_group_count"] >= 1
+        if previous_validation_start is not None:
+            assert fold["validation_start_at"] > previous_validation_start
+        previous_validation_start = fold["validation_start_at"]
+    assert folds[0]["train_group_count"] < folds[-1]["train_group_count"]
+
+
+def test_walk_forward_split_rejects_insufficient_groups():
+    from eti.solana_labels import chronological_walk_forward_splits
+
+    with pytest.raises(ValueError, match="not enough distinct"):
+        chronological_walk_forward_splits([{
+            "mint": "Mint1", "pool_address": "Pool1",
+            "baseline_at": "2026-01-01T00:00:00Z",
+            "target_at": "2026-01-01T00:05:00Z",
+        }])
