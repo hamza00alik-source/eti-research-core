@@ -201,3 +201,34 @@ def test_dataset_export_flags_label_reference_identity_and_time_corruption(tmp_p
     assert "target_identity_mismatch" in label["reference_issues"]
     assert "target_before_label_horizon" in label["reference_issues"]
     assert exported["validation"]["label_reference_issue_count"] == 1
+
+
+def test_label_generation_skips_malformed_and_unsupported_snapshot_rows(tmp_path):
+    import hashlib
+
+    store = MemoryStore(tmp_path / "label-generation-invalid-snapshots.sqlite3")
+    workspace = store.create_workspace("owner-1", "label-generation")
+    payload = '{"evidence":{"price_usd":1,"liquidity_usd":2,"volume_h24_usd":3,"txns_h1_buys":4,"txns_h1_sells":5}}'
+    digest = hashlib.sha256(payload.encode()).hexdigest()
+    with store._connection() as conn:
+        rows = [
+            ("bad-json", 1, "{not-json", "2026-01-01T00:00:00Z"),
+            ("future-schema", 2, payload, "2026-01-01T00:06:00Z"),
+        ]
+        for snapshot_id, schema_version, stored_payload, stamp in rows:
+            conn.execute(
+                "INSERT INTO solana_research_snapshots "
+                "(id,owner_id,workspace_id,task_id,capability,mint,pool_address,schema_version,"
+                "payload_json,payload_sha256,fetched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (snapshot_id, "owner-1", workspace["id"], "task-" + snapshot_id,
+                 "solana.market.scan", "A" * 40, "PoolA", schema_version,
+                 stored_payload, digest, stamp),
+            )
+
+    result = store.generate_solana_research_labels(
+        "owner-1", workspace["id"],
+        now=datetime(2026, 1, 1, 0, 20, tzinfo=timezone.utc),
+    )
+    assert result == {
+        "generated": 0, "available": 0, "skipped_invalid_snapshots": 2,
+    }
