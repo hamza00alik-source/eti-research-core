@@ -822,6 +822,81 @@ def evaluate_solana_regime_transitions(
     }
 
 
+
+
+def evaluate_solana_regime_sampling_sensitivity(
+    classification_reports: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Compare point-in-time regime assignments across predeclared configurations.
+
+    Only identical mint/pool/horizon/timestamp observations are compared. This
+    measures classification sensitivity, not predictive or trading performance.
+    """
+    if not isinstance(classification_reports, dict) or len(classification_reports) < 2:
+        raise ValueError("at least two named classification reports are required")
+    assignments: dict[str, dict[tuple[str, str, str, str], str]] = {}
+    for name, report in classification_reports.items():
+        if not isinstance(name, str) or not name.strip() or not isinstance(report, dict):
+            raise ValueError("each configuration must have a non-empty name and report")
+        observations = report.get("classified_observations")
+        if not isinstance(observations, list):
+            raise ValueError("each report must include classified_observations")
+        current: dict[tuple[str, str, str, str], str] = {}
+        for row in observations:
+            if not isinstance(row, dict):
+                continue
+            key_values = (row.get("mint"), row.get("pool_address"),
+                          row.get("horizon_seconds"), row.get("baseline_at"))
+            regime = row.get("regime")
+            if not all(isinstance(value, str) and value.strip() for value in key_values) or not isinstance(regime, str) or not regime.strip():
+                continue
+            key = key_values
+            # Ambiguous duplicate identities are withheld rather than arbitrarily selected.
+            if key in current and current[key] != regime:
+                current.pop(key, None)
+                continue
+            current[key] = regime
+        assignments[name] = current
+
+    names = sorted(assignments)
+    pairwise: dict[str, Any] = {}
+    for index, left_name in enumerate(names):
+        for right_name in names[index + 1:]:
+            left, right = assignments[left_name], assignments[right_name]
+            common = set(left) & set(right)
+            agreement = sum(left[key] == right[key] for key in common)
+            pairwise[left_name + " vs " + right_name] = {
+                "matched_observation_count": len(common),
+                "matching_regime_count": agreement,
+                "different_regime_count": len(common) - agreement,
+                "exact_regime_agreement_rate": agreement / len(common) if common else None,
+                "left_only_observation_count": len(set(left) - set(right)),
+                "right_only_observation_count": len(set(right) - set(left)),
+            }
+
+    common_all = set.intersection(*(set(assignments[name]) for name in names))
+    unanimous = sum(
+        len({assignments[name][key] for name in names}) == 1
+        for key in common_all
+    )
+    return {
+        "status": "REGIME_SAMPLING_SENSITIVITY_DIAGNOSTICS_ONLY",
+        "configuration_names": names,
+        "pairwise_comparisons": pairwise,
+        "all_configuration_common_observation_count": len(common_all),
+        "all_configuration_unanimous_regime_count": unanimous,
+        "all_configuration_unanimous_agreement_rate": unanimous / len(common_all) if common_all else None,
+        "model_fitting_performed": False,
+        "training_authorized": False,
+        "limitations": [
+            "Only identical mint, pool, horizon and baseline timestamps are compared.",
+            "Different eligibility caused by lookback and sampling controls is reported as unmatched coverage, not agreement.",
+            "Agreement is sensitivity to the supplied configurations, not proof that a regime label is objectively true.",
+            "These are classification diagnostics, not evidence of predictive edge, executable returns or independent observations.",
+        ],
+    }
+
+
 def evaluate_solana_fold_time_series_regime_stability(
     history_rows: list[dict[str, Any]],
     folds: list[dict[str, Any]],
