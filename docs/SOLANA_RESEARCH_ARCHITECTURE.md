@@ -229,3 +229,10 @@ Refresh schedules can be inspected or configured through authenticated routes:
 - `GET /v1/workspaces/{workspace_id}/solana/refresh`
 - `POST /v1/workspaces/{workspace_id}/solana/refresh` with `mint`,
   `pool_address`, and `interval_seconds` (300–86400; default 300).
+
+
+Timestamp semantics: the scanner's `observed_at_ms` is ETI's scan-time timestamp
+for when it sampled the public provider response. The current DexScreener
+adapter does not expose a reliable quote-observation timestamp, so this must
+not be represented as an exchange trade timestamp. If missing or invalid, the
+snapshot uses task completion time.
