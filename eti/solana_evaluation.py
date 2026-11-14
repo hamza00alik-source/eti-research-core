@@ -209,16 +209,37 @@ def evaluate_prepared_solana_walk_forward(
             if prepared is None:
                 missing_prepared += 1
                 continue
+            if (
+                prepared.get("mint") != label.get("mint")
+                or prepared.get("pool_address") != label.get("pool_address")
+            ):
+                raise ValueError("prepared row identity does not match its exported label")
             validation_rows.append(prepared)
             if execution_cost_evidence_by_label_id is not None:
                 from eti.solana_costs import evaluate_execution_cost_evidence
+                evidence = execution_cost_evidence_by_label_id.get(label.get("id"))
                 cost_result = evaluate_execution_cost_evidence(
                     prepared.get("target_sampled_price_return_pct"),
-                    execution_cost_evidence_by_label_id.get(label.get("id")),
+                    evidence,
                 )
-                validation_cost_evidence.append({
+                expected_identity = {
                     "label_id": label.get("id"),
                     "mint": label.get("mint"),
+                    "pool_address": label.get("pool_address"),
+                }
+                supplied_identity = {
+                    key: evidence.get(key) for key in expected_identity
+                } if isinstance(evidence, dict) else {}
+                if supplied_identity != expected_identity:
+                    cost_result["status"] = "COST_EVIDENCE_INCOMPLETE"
+                    cost_result["cost_evidence_complete"] = False
+                    cost_result["cost_adjusted_sampled_mark_scenario_return_pct"] = None
+                    cost_result["measured_round_trip_cost_bps"] = None
+                    cost_result["invalid_components"].append(
+                        "evidence_identity_mismatch" if supplied_identity else "evidence_identity_missing"
+                    )
+                validation_cost_evidence.append({
+                    **expected_identity,
                     "horizon_seconds": prepared.get("horizon_seconds"),
                     **cost_result,
                 })
