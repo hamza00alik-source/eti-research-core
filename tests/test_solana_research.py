@@ -143,3 +143,18 @@ def test_solana_research_capabilities_are_allowlisted():
     assert "solana.market.scan" in capabilities
     assert "solana.token.audit" in capabilities
     assert "live.tick" not in capabilities
+
+
+def test_pumpportal_event_normalizer_accepts_only_known_event_shapes():
+    from eti.solana_ingest import normalize_pumpportal_event
+
+    base = {"mint": "A" * 40, "signature": "sig-001"}
+    created = normalize_pumpportal_event({**base, "txType": "create", "timestamp": 123})
+    assert created["event_type"] == "new_token"
+    assert created["event_key"] == "pumpportal:sig-001:new_token"
+    assert created["source_timestamp"] == "123"
+    migrated = normalize_pumpportal_event({**base, "txType": "migrate"})
+    assert migrated["event_type"] == "migration"
+    assert normalize_pumpportal_event({**base, "txType": "buy"}) is None
+    assert normalize_pumpportal_event({"mint": "short", "signature": "sig", "txType": "create"}) is None
+    assert normalize_pumpportal_event({**base, "txType": "create"}) is not None
