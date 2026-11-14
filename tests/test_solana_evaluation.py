@@ -90,8 +90,8 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
     })
     prepared.append({
         "label_id": "label-6-longer",
-        "mint": "mint-0",
-        "pool_address": "pool-0",
+        "mint": "mint-6",
+        "pool_address": "pool-6",
         "baseline_at": "2026-01-13T00:00:00Z",
         "horizon_seconds": 7200,
         "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
