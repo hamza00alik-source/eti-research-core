@@ -270,6 +270,7 @@ def test_solana_scan_completion_queues_read_only_audit(tmp_path):
     registry = AgentCapabilityRegistry()
     registry.register("solana.market.scan", lambda payload: {
         "mint": payload["mint"], "verdict": "PASS",
+        "observed_at_ms": 1760000000000,
     })
     registry.register("solana.token.audit", lambda payload: {
         "mint": payload["mint"], "passed": False, "blocked": True,
@@ -283,6 +284,7 @@ def test_solana_scan_completion_queues_read_only_audit(tmp_path):
     assert snapshots[0]["task_id"] == scan["id"]
     assert snapshots[0]["capability"] == "solana.market.scan"
     assert snapshots[0]["mint"] == "A" * 40
+    assert snapshots[0]["fetched_at"].startswith("2025-10-09T")
     assert len(snapshots[0]["payload_sha256"]) == 64
     with pytest.raises(LookupError, match="workspace not found"):
         store.list_solana_research_snapshots("owner-2", workspace["id"])
