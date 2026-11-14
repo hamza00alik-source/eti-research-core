@@ -353,3 +353,25 @@ overlapping baseline-to-target intervals within each mint. Repeated and
 overlapping labels are dependent observations, not independent trades or
 independent samples. These diagnostics do not de-duplicate or reweight the
 underlying observations and do not establish statistical significance.
+
+
+## Fail-closed execution-cost evidence diagnostics (implemented)
+
+`eti/solana_costs.py` validates five required measured cost contributions:
+spread, pool price impact, protocol fee, priority fee, and latency slippage.
+Each component must be a non-negative finite value expressed as
+`bps_of_entry_notional`, explicitly measured (not estimated), with a source
+identifier and timezone-aware observation timestamp. Values are defined as
+round-trip contributions relative to entry notional; missing components are
+not silently treated as zero.
+
+The diagnostic also requires sourced, timestamped evidence of an observed
+successful exit. Missing evidence, a failed exit, malformed timestamps,
+unsourced values, estimates, wrong units, negative values, and non-finite
+values keep the cost evidence gate closed. When all fields pass, the module
+may report a cost-adjusted sampled-mark scenario for research comparison.
+It always leaves `net_return_pct=null` and
+`realized_pnl_available=false`: sampled provider marks are not executable
+fills, and a separately observed exit does not prove the baseline/target
+marks were executable. This module does not simulate or execute transactions,
+approve training, or authorize trading.
