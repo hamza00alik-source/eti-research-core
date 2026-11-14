@@ -582,3 +582,48 @@ def test_solana_cost_evidence_read_detects_payload_tampering(tmp_path):
         "owner", workspace["id"], label_id=label_id
     )[0]
     assert loaded["integrity_valid"] is False
+
+def test_solana_cost_evidence_latest_batch_is_deterministic_and_scoped(tmp_path):
+    store = MemoryStore(tmp_path / "eti.sqlite3")
+    workspace = store.create_workspace("owner-a", "solana")
+    mint, pool = "E" * 32, "pool-latest"
+    _insert_solana_label_for_cost_test(store, "owner-a", workspace["id"], "label-a", mint, pool)
+    _insert_solana_label_for_cost_test(store, "owner-a", workspace["id"], "label-b", mint, pool)
+    first = store.record_solana_execution_cost_evidence(
+        "owner-a", workspace["id"], "label-a", mint, pool,
+        {"label_id": "label-a", "mint": mint, "pool_address": pool, "revision": 1},
+    )
+    second = store.record_solana_execution_cost_evidence(
+        "owner-a", workspace["id"], "label-a", mint, pool,
+        {"label_id": "label-a", "mint": mint, "pool_address": pool, "revision": 2},
+    )
+    other = store.record_solana_execution_cost_evidence(
+        "owner-a", workspace["id"], "label-b", mint, pool,
+        {"label_id": "label-b", "mint": mint, "pool_address": pool},
+    )
+    with store._connection() as conn:
+        conn.execute(
+            "UPDATE solana_execution_cost_evidence SET created_at=? WHERE id=?",
+            ("2026-01-01T00:00:00Z", first["id"]),
+        )
+        conn.execute(
+            "UPDATE solana_execution_cost_evidence SET created_at=? WHERE id=?",
+            ("2026-01-02T00:00:00Z", second["id"]),
+        )
+        conn.execute(
+            "UPDATE solana_execution_cost_evidence SET created_at=? WHERE id=?",
+            ("2026-01-03T00:00:00Z", other["id"]),
+        )
+
+    latest = store.list_latest_solana_execution_cost_evidence(
+        "owner-a", workspace["id"], ["label-a", "label-b", "missing", "label-a"]
+    )
+    assert [item["label_id"] for item in latest] == ["label-a", "label-b"]
+    assert latest[0]["id"] == second["id"]
+    assert latest[0]["evidence"]["revision"] == 2
+    assert latest[1]["id"] == other["id"]
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.list_latest_solana_execution_cost_evidence(
+            "owner-b", workspace["id"], ["label-a"]
+        )
+
