@@ -395,3 +395,14 @@ ledger or independently verified provider integration.
 Walk-forward cost diagnostics now require each supplied evidence envelope to repeat the exact `label_id`, `mint`, and `pool_address` for the validation label being evaluated. Missing or mismatched envelope identity forces that row to remain incomplete; cost values are not used in the scenario aggregate. Prepared-row mint and pool identity must also match the exported label or evaluation fails closed. This prevents accidental cross-label or cross-pool evidence reuse inside the in-memory evaluator.
 
 This is an identity-consistency check, not durable provenance verification. Evidence is still caller-supplied and is not yet authenticated against a provider, immutable ledger, transaction receipt, owner, or workspace. Durable owner/workspace-scoped evidence storage and source-integrity verification remain separate work.
+
+
+### Durable execution-cost evidence ledger
+
+The research store now has an append-only `solana_execution_cost_evidence` ledger. Each record is scoped to authenticated owner/workspace, references an existing label, and must match that label's mint and pool. The canonical JSON envelope is SHA-256 hashed. Re-submitting identical evidence is idempotent; changed evidence creates a new immutable record rather than overwriting prior provenance. Reads recompute the digest and expose `integrity_valid=false` if stored JSON no longer matches its recorded hash.
+
+Authenticated API:
+- `POST /v1/workspaces/{workspace_id}/solana/cost-evidence` with `label_id`, `mint`, `pool_address`, and an evidence envelope containing the same identity fields.
+- `GET /v1/workspaces/{workspace_id}/solana/cost-evidence` with optional `label_id` and bounded `limit`.
+
+The API derives owner identity from the verified bearer token. Workspace and label lookups are owner-scoped and foreign records are not disclosed. The ledger preserves caller-supplied evidence; it does not independently prove provider authenticity, on-chain execution, transaction finality, or the economic correctness of cost measurements. A valid hash proves stored-byte consistency, not source truth. The SQLite implementation remains single-instance oriented; production multi-replica writes require a PostgreSQL migration and operational controls.
