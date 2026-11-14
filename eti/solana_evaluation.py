@@ -6,6 +6,7 @@ The fixed buy-pressure rule is a transparent comparator, not a fitted strategy.
 from __future__ import annotations
 
 import math
+from datetime import datetime
 from typing import Any, Iterable
 
 
@@ -187,6 +188,8 @@ def evaluate_prepared_solana_walk_forward(
     )
     benchmark_folds: list[dict[str, Any]] = []
     fold_metadata: list[dict[str, Any]] = []
+    horizon_folds: dict[int, list[dict[str, Any]]] = {}
+    validation_intervals: list[tuple[str, datetime, datetime]] = []
     for index, fold in enumerate(folds, start=1):
         validation_rows: list[dict[str, Any]] = []
         missing_prepared = 0
@@ -196,6 +199,17 @@ def evaluate_prepared_solana_walk_forward(
                 missing_prepared += 1
                 continue
             validation_rows.append(prepared)
+            horizon = prepared.get("horizon_seconds")
+            if isinstance(horizon, int) and not isinstance(horizon, bool) and horizon > 0:
+                horizon_folds.setdefault(horizon, []).append({"fold": index, "row": prepared})
+            try:
+                start = datetime.fromisoformat(str(label["baseline_at"]).replace("Z", "+00:00"))
+                end = datetime.fromisoformat(str(label["target_at"]).replace("Z", "+00:00"))
+                mint = label.get("mint")
+                if isinstance(mint, str) and start.tzinfo is not None and end.tzinfo is not None and end > start:
+                    validation_intervals.append((mint, start, end))
+            except (KeyError, TypeError, ValueError):
+                pass
         benchmark_folds.append({"fold": index, "validation": validation_rows})
         fold_metadata.append({
             "fold": index,
@@ -214,6 +228,45 @@ def evaluate_prepared_solana_walk_forward(
         benchmark_folds,
         buy_pressure_threshold=buy_pressure_threshold,
     )
+    by_horizon: dict[str, Any] = {}
+    for horizon, entries in sorted(horizon_folds.items()):
+        grouped_folds: dict[int, list[dict[str, Any]]] = {}
+        for entry in entries:
+            grouped_folds.setdefault(entry["fold"], []).append(entry["row"])
+        horizon_report = evaluate_solana_research_folds(
+            [{"fold": fold_number, "validation": rows}
+             for fold_number, rows in sorted(grouped_folds.items())],
+            buy_pressure_threshold=buy_pressure_threshold,
+        )
+        by_horizon[str(horizon)] = {
+            "folds": horizon_report["folds"],
+            "aggregate": horizon_report["aggregate"],
+            "excluded_validation_rows": horizon_report["excluded_validation_rows"],
+        }
+
+    overlap_comparisons = 0
+    overlapping_pairs = 0
+    intervals_by_mint: dict[str, list[tuple[datetime, datetime]]] = {}
+    for mint, start, end in validation_intervals:
+        intervals_by_mint.setdefault(mint, []).append((start, end))
+    for intervals in intervals_by_mint.values():
+        intervals.sort(key=lambda pair: pair[0])
+        active: list[tuple[datetime, datetime]] = []
+        for start, end in intervals:
+            active = [(a, b) for a, b in active if b > start]
+            overlap_comparisons += len(active)
+            overlapping_pairs += sum(1 for a, b in active if a < end and start < b)
+            active.append((start, end))
+
+    report["by_horizon_seconds"] = by_horizon
+    report["validation_dependence"] = {
+        "validation_label_count": len(validation_intervals),
+        "distinct_validation_mint_count": len(intervals_by_mint),
+        "repeated_mint_label_count": len(validation_intervals) - len(intervals_by_mint),
+        "overlapping_interval_pair_count": overlapping_pairs,
+        "overlap_comparison_count": overlap_comparisons,
+        "note": "Overlapping labels and repeated mints are dependent observations; aggregate metrics must not be interpreted as independent trades or independent samples.",
+    }
     report["walk_forward"] = {
         "method": "chronological_expanding_mint_grouped_purged_embargo_v1",
         "fold_metadata": fold_metadata,
