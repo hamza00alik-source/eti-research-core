@@ -133,3 +133,20 @@ No wallet, signing, swap, copy-trading, or live Solana execution capability is
 registered. The scan completion and audit-task insertion commit in one SQLite transaction,
 so a completed scan cannot be left without its eligible audit task due to a
 worker process crash between those operations.
+
+
+## Point-in-time research snapshots (implemented)
+
+Every completed `solana.market.scan` and `solana.token.audit` task now
+persists an immutable snapshot in `solana_research_snapshots` within the same
+SQLite transaction as task completion. Each record includes owner/workspace,
+source task and capability, mint, pool address when known, schema version,
+normalized result payload, SHA-256 digest and fetched timestamp. The task ID is
+unique per owner/workspace, so a task cannot create multiple snapshots.
+
+Authenticated retrieval is available at
+`GET /v1/workspaces/{workspace_id}/solana/snapshots`, with optional `mint`
+filter and bounded limit. These snapshots are point-in-time observations, not
+OHLCV candles or proof of executable liquidity. Future labels must be generated
+only after their prediction horizon has elapsed, and sampled price marks must
+remain clearly distinguished from exchange or pool candle data.
