@@ -2365,7 +2365,7 @@ class MemoryStore:
         params: list[Any] = [owner_id, workspace_id]
         if mint is not None:
             query += " AND mint=?"
-            params.append(_required_text(mint, "mint", 64))
+            params.append(_required_text(mint, "mint", 48))
         query += " ORDER BY next_due_at,id"
         with self._connection() as conn:
             if not self._owns_workspace(conn, owner_id, workspace_id):
