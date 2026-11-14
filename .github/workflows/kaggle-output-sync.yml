@@ -1,10 +1,8 @@
 name: Retrieve ETI Kaggle Training Output
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/kaggle-output-sync.yml'
+  schedule:
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       kernel:
@@ -14,6 +12,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: eti-kaggle-output-sync
+  cancel-in-progress: false
 
 jobs:
   retrieve-training-output:
@@ -30,7 +32,7 @@ jobs:
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY || secrets.HAMZA00ALIK }}
         run: |
           if [ -z "$KAGGLE_USERNAME" ] || [ -z "$KAGGLE_KEY" ]; then
-            echo "::error::Kaggle credentials unavailable. Add KAGGLE_KEY as an environment secret named HAMZA00ALIK in environment hamza00alik, or add KAGGLE_USERNAME and KAGGLE_KEY as repository secrets."
+            echo "::error::Kaggle credentials unavailable. Configure the existing HAMZA00ALIK environment secret or KAGGLE_USERNAME/KAGGLE_KEY repository secrets."
             exit 1
           fi
           mkdir -p "$HOME/.kaggle"
@@ -47,76 +49,108 @@ jobs:
           KERNEL: ${{ inputs.kernel || 'hamza00alik/eti-first-training-kaggle' }}
         run: |
           mkdir -p downloaded
-          echo "Retrieving Kaggle output for $KERNEL"
+          echo "Retrieving latest output for $KERNEL"
           kaggle kernels output "$KERNEL" -p downloaded
           echo "Downloaded files:"
-          find downloaded -type f -printf '%p (%s bytes)\\n' | sort
+          find downloaded -type f -printf '%p (%s bytes)\n' | sort
 
-      - name: Validate and summarize ETI outputs
+      - name: Validate and summarize ETI research report
         run: |
           python - <<'PY'
           import json
           import os
           from pathlib import Path
+
           root = Path("downloaded")
-          metrics_files = list(root.rglob("eti_training_metrics.json"))
-          candidate_files = list(root.rglob("eti_candidate_0.1.0.zip"))
-          mobile_files = list(root.rglob("eti_mobile_model_bundle.zip"))
-          if not metrics_files:
-              raise SystemExit("Missing eti_training_metrics.json; confirm the Kaggle run completed.")
-          if not candidate_files:
-              raise SystemExit("Missing eti_candidate_0.1.0.zip; candidate export did not complete.")
-          metrics = json.loads(metrics_files[0].read_text())
-          folds = metrics.get("folds", [])
+          report_names = {"eti_budget_screen.json", "eti_training_metrics.json", "baseline_metrics.json"}
+          reports = [p for p in root.rglob("*.json") if p.name in report_names]
+          if not reports:
+              available = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
+              raise SystemExit(
+                  "No ETI metrics JSON found. Expected eti_budget_screen.json, "
+                  "eti_training_metrics.json, or baseline_metrics.json. "
+                  f"Downloaded files: {available}"
+              )
+
+          reports.sort(key=lambda p: (p.name != "eti_budget_screen.json", -p.stat().st_mtime))
+          report_path = reports[0]
+          metrics = json.loads(report_path.read_text())
+          if not isinstance(metrics, dict):
+              raise SystemExit(f"ETI report must be a JSON object: {report_path}")
+
+          folds = metrics.get("folds") or []
           candidate_names = sorted({
-              name for fold in folds
+              name for fold in folds if isinstance(fold, dict)
               for name in (fold.get("test_candidate_metrics") or {})
           })
-          candidate_test_summary = {}
+          candidate_test_comparison = {}
           for name in candidate_names:
               rows = [
                   fold["test_candidate_metrics"][name]
                   for fold in folds
                   if name in (fold.get("test_candidate_metrics") or {})
               ]
-              candidate_test_summary[name] = {
-                  "folds_scored": len(rows),
-                  "mean_balanced_accuracy": sum(row["balanced_accuracy"] for row in rows) / len(rows),
-                  "mean_accuracy": sum(row["accuracy"] for row in rows) / len(rows),
-              }
+              scored = [row for row in rows if isinstance(row, dict)]
+              if scored:
+                  ba = [float(row["balanced_accuracy"]) for row in scored if row.get("balanced_accuracy") is not None]
+                  acc = [float(row["accuracy"]) for row in scored if row.get("accuracy") is not None]
+                  candidate_test_comparison[name] = {
+                      "folds_scored": len(scored),
+                      "mean_balanced_accuracy": sum(ba) / len(ba) if ba else None,
+                      "mean_accuracy": sum(acc) / len(acc) if acc else None,
+                  }
+
+          trading = metrics.get("trading_performance") or {}
+          trading_summary = trading.get("summary", trading) if isinstance(trading, dict) else trading
+          cost = metrics.get("cost_sensitivity") or {}
           summary = {
+              "source_report": str(report_path),
               "training_performed": metrics.get("training_performed"),
               "rows": metrics.get("rows"),
               "fold_count": metrics.get("fold_count"),
+              "horizon": metrics.get("horizon"),
+              "timeframe": metrics.get("timeframe"),
               "mean_test_balanced_accuracy": metrics.get("mean_test_balanced_accuracy"),
-              "candidate_test_comparison": candidate_test_summary,
+              "test_balanced_accuracy_ci": metrics.get("test_balanced_accuracy_ci"),
+              "candidate_summary": metrics.get("candidate_summary"),
+              "candidate_outer_test_diagnostics": candidate_test_comparison,
               "selected_candidate_counts": {
-                  name: sum(fold.get("selected_candidate") == name for fold in folds)
-                  for name in sorted({fold.get("selected_candidate") for fold in folds if fold.get("selected_candidate")})
+                  name: sum(fold.get("selected_candidate") == name for fold in folds if isinstance(fold, dict))
+                  for name in sorted({
+                      fold.get("selected_candidate") for fold in folds
+                      if isinstance(fold, dict) and fold.get("selected_candidate")
+                  })
               },
-              "trading_performance": metrics.get("trading_performance"),
-              "exported_model": metrics.get("exported_model"),
+              "trading_performance_summary": trading.get("summary") if isinstance(trading, dict) else trading,
+              "cost_sensitivity": cost,
+              "cost_assumptions": metrics.get("cost_assumptions"),
+              "compute_budget": metrics.get("compute_budget"),
               "warning": metrics.get("warning"),
-              "mobile_bundle_found": bool(mobile_files),
+              "model_note": metrics.get("model_note"),
+              "exported_model_present": bool(metrics.get("exported_model")),
+              "candidate_archive_present": any(root.rglob("eti_candidate_0.1.0.zip")),
+              "mobile_bundle_present": any(root.rglob("eti_mobile_model_bundle.zip")),
           }
           Path("training-summary.json").write_text(json.dumps(summary, indent=2))
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
-              f.write("# ETI Kaggle training output\\n\\n")
-              f.write(f"- Training performed: `{summary['training_performed']}`\\n")
-              f.write(f"- Rows: `{summary['rows']}`\\n")
-              f.write(f"- Evaluation folds: `{summary['fold_count']}`\\n")
-              f.write(f"- Mean test balanced accuracy: `{summary['mean_test_balanced_accuracy']}`\\n")
-              f.write(f"- Mobile bundle found: `{summary['mobile_bundle_found']}`\\n\\n")
-              f.write("## Outer test comparison (diagnostic only)\\n\\n```json\\n")
-              f.write(json.dumps({"candidate_test_comparison": summary["candidate_test_comparison"], "selected_candidate_counts": summary["selected_candidate_counts"]}, indent=2))
-              f.write("\\n```\\n\\n")
-              f.write("## Trading performance and warnings\\n\\n```json\\n")
-              f.write(json.dumps({"trading_performance": summary["trading_performance"], "warning": summary["warning"]}, indent=2))
-              f.write("\\n```\\n")
           print(json.dumps(summary, indent=2))
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("# ETI Kaggle research output\n\n")
+              f.write(f"- Source report: `{summary['source_report']}`\n")
+              f.write(f"- Training performed: `{summary['training_performed']}`\n")
+              f.write(f"- Rows / folds: `{summary['rows']} / {summary['fold_count']}`\n")
+              f.write(f"- Mean balanced accuracy: `{summary['mean_test_balanced_accuracy']}`\n")
+              f.write(f"- Exported model present: `{summary['exported_model_present']}`\n\n")
+              f.write("## Trading performance summary\n\n```json\n")
+              f.write(json.dumps(summary["trading_performance_summary"], indent=2))
+              f.write("\n```\n\n## Cost sensitivity\n\n```json\n")
+              f.write(json.dumps(summary["cost_sensitivity"], indent=2))
+              f.write("\n```\n")
+
+          (Path("downloaded") / "source-report-path.txt").write_text(str(report_path))
           PY
 
-      - name: Publish downloadable research artifacts
+      - name: Publish research report and compact summary
         uses: actions/upload-artifact@v4
         with:
           name: eti-kaggle-training-output
