@@ -60,11 +60,33 @@ jobs:
           if not candidate_files:
               raise SystemExit("Missing eti_candidate_0.1.0.zip; candidate export did not complete.")
           metrics = json.loads(metrics_files[0].read_text())
+          folds = metrics.get("folds", [])
+          candidate_names = sorted({
+              name for fold in folds
+              for name in (fold.get("test_candidate_metrics") or {})
+          })
+          candidate_test_summary = {}
+          for name in candidate_names:
+              rows = [
+                  fold["test_candidate_metrics"][name]
+                  for fold in folds
+                  if name in (fold.get("test_candidate_metrics") or {})
+              ]
+              candidate_test_summary[name] = {
+                  "folds_scored": len(rows),
+                  "mean_balanced_accuracy": sum(row["balanced_accuracy"] for row in rows) / len(rows),
+                  "mean_accuracy": sum(row["accuracy"] for row in rows) / len(rows),
+              }
           summary = {
               "training_performed": metrics.get("training_performed"),
               "rows": metrics.get("rows"),
               "fold_count": metrics.get("fold_count"),
               "mean_test_balanced_accuracy": metrics.get("mean_test_balanced_accuracy"),
+              "candidate_test_comparison": candidate_test_summary,
+              "selected_candidate_counts": {
+                  name: sum(fold.get("selected_candidate") == name for fold in folds)
+                  for name in sorted({fold.get("selected_candidate") for fold in folds if fold.get("selected_candidate")})
+              },
               "trading_performance": metrics.get("trading_performance"),
               "exported_model": metrics.get("exported_model"),
               "warning": metrics.get("warning"),
@@ -78,6 +100,9 @@ jobs:
               f.write(f"- Evaluation folds: `{summary['fold_count']}`\n")
               f.write(f"- Mean test balanced accuracy: `{summary['mean_test_balanced_accuracy']}`\n")
               f.write(f"- Mobile bundle found: `{summary['mobile_bundle_found']}`\n\n")
+              f.write("## Outer test comparison (diagnostic only)\n\n```json\n")
+              f.write(json.dumps({"candidate_test_comparison": summary["candidate_test_comparison"], "selected_candidate_counts": summary["selected_candidate_counts"]}, indent=2))
+              f.write("\n```\n\n")
               f.write("## Trading performance and warnings\n\n```json\n")
               f.write(json.dumps({"trading_performance": summary["trading_performance"], "warning": summary["warning"]}, indent=2))
               f.write("\n```\n")
