@@ -706,6 +706,6 @@ def test_time_series_regime_horizon_summary_requires_predeclared_row_count():
     stratum = report["regimes_by_horizon_seconds"]["60"]["UPWARD_TREND_PROXY__LOW_TIME_NORMALIZED_VOLATILITY_PROXY"]
     assert stratum["row_count"] == 5
     assert stratum["status"] == "DESCRIPTIVE_SAMPLE_THRESHOLD_MET"
-    assert stratum["summary"]["observation_count"] == 5
+    assert stratum["summary"]["trade_count"] == 5
     assert stratum["distinct_mint_count"] == 1
     assert stratum["mint_cluster_bootstrap"]["status"] == "INSUFFICIENT_MINT_CLUSTERS"
