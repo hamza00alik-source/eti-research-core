@@ -912,6 +912,10 @@ def evaluate_prepared_solana_walk_forward(
     report["regime_diagnostics"] = evaluate_solana_regime_diagnostics(
         validation_rows_for_regimes, regime_thresholds
     )
+    report["fold_regime_stability"] = evaluate_solana_fold_regime_stability(
+        benchmark_folds, regime_thresholds,
+        buy_pressure_threshold=buy_pressure_threshold,
+    )
     report["time_series_regime_diagnostics"] = evaluate_solana_time_series_regimes(
         prepared_rows, validation_rows_for_regimes, time_series_regime_config
     )
