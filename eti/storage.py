@@ -2201,10 +2201,35 @@ class MemoryStore:
                                "event_type": event_type, "mint": mint,
                                "payload_sha256": digest}), now),
             )
+            # The event and its first research task commit together. A replay
+            # returns above and cannot create a second scan task.
+            scan_task_id = str(uuid4())
+            scan_payload = {
+                "mint": mint,
+                "source_event_id": event_id,
+                "source_event_key": event_key,
+                "source_event_type": event_type,
+                "scheduled_by": "eti.solana.ingest",
+            }
+            conn.execute(
+                "INSERT INTO agent_tasks(id,owner_id,workspace_id,requester,target_capability,"
+                "status,input_json,max_attempts,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,'queued',?,3,?,?)",
+                (scan_task_id, owner_id, workspace_id, "eti.solana.ingest",
+                 "solana.market.scan", _encode_json(scan_payload), now, now),
+            )
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (str(uuid4()), owner_id, workspace_id, "solana.scan.queued",
+                 _encode_json({"event_id": event_id, "task_id": scan_task_id, "mint": mint}), now),
+            )
             row = conn.execute(
                 "SELECT * FROM solana_research_events WHERE id=?", (event_id,)
             ).fetchone()
-        return self._solana_event_dict(row, duplicate=False)
+        result = self._solana_event_dict(row, duplicate=False)
+        result["scan_task_id"] = scan_task_id
+        return result
 
     @staticmethod
     def _solana_event_dict(
