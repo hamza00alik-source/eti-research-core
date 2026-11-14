@@ -30,6 +30,7 @@ def evaluate_stored_solana_walk_forward(
 
     evidence_by_label_id: dict[str, dict[str, Any]] = {}
     selection_by_label_id: dict[str, dict[str, Any]] = {}
+    label_ids: list[str] = []
     for exported in exported_labels:
         if not isinstance(exported, dict):
             raise ValueError("every exported label must be an object")
@@ -38,19 +39,19 @@ def evaluate_stored_solana_walk_forward(
             raise ValueError("stored-ledger evaluation requires string label IDs")
         if label_id in selection_by_label_id:
             raise ValueError("export contains duplicate label IDs")
+        label_ids.append(label_id)
+        selection_by_label_id[label_id] = {
+            "status": "NO_LEDGER_EVIDENCE",
+            "record_id": None,
+        }
 
-        records = store.list_solana_execution_cost_evidence(
-            owner_id, workspace_id, label_id=label_id, limit=1000
+    newest_by_label_id = {
+        record["label_id"]: record
+        for record in store.list_latest_solana_execution_cost_evidence(
+            owner_id, workspace_id, label_ids
         )
-        if not records:
-            selection_by_label_id[label_id] = {
-                "status": "NO_LEDGER_EVIDENCE",
-                "record_id": None,
-            }
-            continue
-
-        # Storage orders newest first by created_at DESC, then id DESC.
-        newest = records[0]
+    }
+    for label_id, newest in newest_by_label_id.items():
         if newest.get("integrity_valid") is not True:
             selection_by_label_id[label_id] = {
                 "status": "NEWEST_RECORD_INTEGRITY_INVALID",
