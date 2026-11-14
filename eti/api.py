@@ -13,7 +13,7 @@ from .runtime import runtime_lifespan
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr
 
-from .agents import default_capabilities, derivatives_market_context, discover_market_universe
+from .agents import default_capabilities, derivatives_market_context, discover_market_universe, market_coverage_report
 from .artifacts import ModelArtifactError, ModelArtifactStore
 from .auth import AuthManager, AuthenticationError, RateLimitExceeded, RegistrationDisabled
 from .config import AppConfig
@@ -915,6 +915,12 @@ def supported_markets():
         "execution_market_types": ["spot"],
         "live_execution_enabled": False,
     }
+
+
+@app.get("/v1/markets/coverage")
+def get_market_coverage(account: dict[str, str] = Depends(current_account)):
+    """Return the implemented research and live-execution capability matrix."""
+    return market_coverage_report({})
 
 
 @app.get("/v1/markets/discover")
