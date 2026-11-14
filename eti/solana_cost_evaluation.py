@@ -83,6 +83,86 @@ def evaluate_stored_solana_walk_forward(
         **evaluation_options,
     )
 
+    # Receipt attestations are a separate diagnostic stream: they never
+    # satisfy exit_evidence, alter cost scenarios, or establish realized P&L.
+    newest_attestations = {
+        record["label_id"]: record
+        for record in store.list_latest_solana_transaction_attestations(
+            owner_id, workspace_id, label_ids
+        )
+    }
+    receipt_rows: list[dict[str, Any]] = []
+    for validation_row in report.get("execution_cost_evidence", {}).get("rows", []):
+        label_id = validation_row.get("label_id")
+        record = newest_attestations.get(label_id)
+        row = {
+            "label_id": label_id,
+            "mint": validation_row.get("mint"),
+            "pool_address": validation_row.get("pool_address"),
+            "status": "NO_RECEIPT_ATTESTATION",
+            "receipt_observation_present": False,
+            "record_id": None,
+            "integrity_valid": None,
+            "verified_swap": False,
+            "realized_pnl_available": False,
+        }
+        if record is not None:
+            row["record_id"] = record.get("id")
+            row["integrity_valid"] = record.get("integrity_valid") is True
+            if record.get("integrity_valid") is not True:
+                row["status"] = "NEWEST_RECORD_INTEGRITY_INVALID"
+            else:
+                attestation = record.get("attestation")
+                identity_ok = (
+                    record.get("label_id") == label_id
+                    and record.get("mint") == validation_row.get("mint")
+                    and record.get("pool_address") == validation_row.get("pool_address")
+                    and isinstance(attestation, dict)
+                    and attestation.get("signature") == record.get("signature")
+                    and attestation.get("mint") == validation_row.get("mint")
+                    and attestation.get("expected_pool_address") == validation_row.get("pool_address")
+                    and attestation.get("wallet_address") == record.get("wallet_address")
+                )
+                if not identity_ok:
+                    row["status"] = "NEWEST_RECORD_IDENTITY_INVALID"
+                elif (
+                    attestation.get("status") == "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED"
+                    and attestation.get("transaction_receipt_verified") is True
+                    and attestation.get("verified") is False
+                ):
+                    row["status"] = "FINALIZED_RECEIPT_OBSERVATION_PRESENT"
+                    row["receipt_observation_present"] = True
+                    row["signature"] = record.get("signature")
+                    row["slot"] = attestation.get("slot")
+                else:
+                    row["status"] = "NEWEST_RECORD_NOT_A_POSITIVE_RECEIPT_OBSERVATION"
+        receipt_rows.append(row)
+
+    report["transaction_receipt_attestations"] = {
+        "status": "RECEIPT_DIAGNOSTICS_ONLY",
+        "validation_rows_checked": len(receipt_rows),
+        "positive_receipt_observation_count": sum(
+            item["receipt_observation_present"] for item in receipt_rows
+        ),
+        "missing_attestation_count": sum(
+            item["status"] == "NO_RECEIPT_ATTESTATION" for item in receipt_rows
+        ),
+        "invalid_record_count": sum(
+            item["status"] in {
+                "NEWEST_RECORD_INTEGRITY_INVALID",
+                "NEWEST_RECORD_IDENTITY_INVALID",
+                "NEWEST_RECORD_NOT_A_POSITIVE_RECEIPT_OBSERVATION",
+            } for item in receipt_rows
+        ),
+        "rows": receipt_rows,
+        "note": (
+            "Receipt observations establish only the recorded public-RPC inclusion and "
+            "owner-attributed mint-balance debit. They do not prove swap instruction causality, "
+            "fill price, exit, measured costs, realized P&L, or training eligibility; they are "
+            "not substituted for cost evidence or exit_evidence."
+        ),
+    }
+
     cost_report = report.get("execution_cost_evidence", {})
     rows = cost_report.get("rows", [])
     for row in rows:
