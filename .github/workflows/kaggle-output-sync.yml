@@ -1,0 +1,95 @@
+name: Retrieve ETI Kaggle Training Output
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel:
+        description: "Kaggle notebook slug"
+        required: true
+        default: "hamza00alik/eti-first-training-kaggle"
+
+permissions:
+  contents: read
+
+jobs:
+  retrieve-training-output:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Install Kaggle CLI
+        run: python -m pip install --upgrade kaggle
+
+      - name: Configure Kaggle credentials
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          if [ -z "$KAGGLE_USERNAME" ] || [ -z "$KAGGLE_KEY" ]; then
+            echo "::error::Add KAGGLE_USERNAME and KAGGLE_KEY in repository Actions secrets."
+            exit 1
+          fi
+          mkdir -p "$HOME/.kaggle"
+          python - <<'PY'
+          import json, os
+          p = os.path.expanduser("~/.kaggle/kaggle.json")
+          with open(p, "w") as f:
+              json.dump({"username": os.environ["KAGGLE_USERNAME"], "key": os.environ["KAGGLE_KEY"]}, f)
+          os.chmod(p, 0o600)
+          PY
+
+      - name: Download latest Kaggle notebook output
+        env:
+          KERNEL: ${{ inputs.kernel }}
+        run: |
+          mkdir -p downloaded
+          kaggle kernels output "$KERNEL" -p downloaded
+          echo "Downloaded files:"
+          find downloaded -type f -printf '%p (%s bytes)\n' | sort
+
+      - name: Validate and summarize ETI outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path("downloaded")
+          metrics_files = list(root.rglob("eti_training_metrics.json"))
+          candidate_files = list(root.rglob("eti_candidate_0.1.0.zip"))
+          mobile_files = list(root.rglob("eti_mobile_model_bundle.zip"))
+          if not metrics_files:
+              raise SystemExit("Missing eti_training_metrics.json; confirm the Kaggle run completed.")
+          if not candidate_files:
+              raise SystemExit("Missing eti_candidate_0.1.0.zip; candidate export did not complete.")
+          metrics = json.loads(metrics_files[0].read_text())
+          summary = {
+              "training_performed": metrics.get("training_performed"),
+              "rows": metrics.get("rows"),
+              "fold_count": metrics.get("fold_count"),
+              "mean_test_balanced_accuracy": metrics.get("mean_test_balanced_accuracy"),
+              "trading_performance": metrics.get("trading_performance"),
+              "exported_model": metrics.get("exported_model"),
+              "warning": metrics.get("warning"),
+              "mobile_bundle_found": bool(mobile_files),
+          }
+          Path("training-summary.json").write_text(json.dumps(summary, indent=2))
+          with open(__import__("os").environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("# ETI Kaggle training output\n\n")
+              f.write(f"- Training performed: `{summary['training_performed']}`\n")
+              f.write(f"- Rows: `{summary['rows']}`\n")
+              f.write(f"- Evaluation folds: `{summary['fold_count']}`\n")
+              f.write(f"- Mean test balanced accuracy: `{summary['mean_test_balanced_accuracy']}`\n")
+              f.write(f"- Mobile bundle found: `{summary['mobile_bundle_found']}`\n\n")
+              f.write("## Trading performance and warnings\n\n```json\n")
+              f.write(json.dumps({"trading_performance": summary["trading_performance"], "warning": summary["warning"]}, indent=2))
+              f.write("\n```\n")
+          print(json.dumps(summary, indent=2))
+          PY
+
+      - name: Publish downloadable research artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: eti-kaggle-training-output
+          path: |
+            downloaded/
+            training-summary.json
+          if-no-files-found: error
+          retention-days: 30
