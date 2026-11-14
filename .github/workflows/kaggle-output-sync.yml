@@ -57,6 +57,7 @@ jobs:
       - name: Validate and summarize ETI research report
         run: |
           python - <<'PY'
+          import hashlib
           import json
           import os
           from pathlib import Path
@@ -77,6 +78,21 @@ jobs:
           metrics = json.loads(report_path.read_text())
           if not isinstance(metrics, dict):
               raise SystemExit(f"ETI report must be a JSON object: {report_path}")
+
+          exported = metrics.get("exported_model")
+          if not isinstance(exported, dict):
+              raise SystemExit("No exported_model manifest. Re-run the canonical Kaggle notebook with model export enabled.")
+          digest = exported.get("artifact_sha256")
+          uri = exported.get("artifact_uri")
+          if not isinstance(digest, str) or len(digest) != 64 or not isinstance(uri, str) or not uri.endswith(digest):
+              raise SystemExit("Invalid exported model URI/checksum manifest.")
+          model_files = list(root.rglob(digest + ".joblib"))
+          if len(model_files) != 1:
+              raise SystemExit(f"Expected exactly one model artifact; found {[str(p) for p in model_files]}")
+          model_path = model_files[0]
+          actual_digest = hashlib.sha256(model_path.read_bytes()).hexdigest()
+          if actual_digest != digest:
+              raise SystemExit("Exported model checksum verification failed.")
 
           folds = metrics.get("folds") or []
           candidate_names = sorted({
@@ -127,7 +143,17 @@ jobs:
               "compute_budget": metrics.get("compute_budget"),
               "warning": metrics.get("warning"),
               "model_note": metrics.get("model_note"),
-              "exported_model_present": bool(metrics.get("exported_model")),
+              "exported_model_present": True,
+              "exported_model": {
+                  "artifact_uri": uri,
+                  "artifact_sha256": digest,
+                  "artifact_file": str(model_path),
+                  "artifact_bytes": model_path.stat().st_size,
+                  "verified": True,
+                  "input_schema": exported.get("input_schema"),
+                  "calibration_status": exported.get("calibration_status"),
+                  "training_data_ref": exported.get("training_data_ref"),
+              },
               "candidate_archive_present": any(root.rglob("eti_candidate_0.1.0.zip")),
               "mobile_bundle_present": any(root.rglob("eti_mobile_model_bundle.zip")),
           }

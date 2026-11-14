@@ -25,7 +25,7 @@ For a single symbol, use `--symbol BTC/USDT`. For a CSV, supply the required col
 - `HistGradientBoostingClassifier`: a tabular model fitted from scratch in each fold.
 - `DummyClassifier`: a naive majority-class comparator.
 - Candidate selection uses each fold's validation segment. The outer test segment is reserved for reporting.
-- Models are not exported or promoted automatically. No strategy is approved for live use.
+- The canonical Kaggle notebook explicitly exports one deployable BTC/USDT candidate after nested evaluation. The artifact is stored as a content-addressed `.joblib` file with a SHA-256 checksum and feature/calibration metadata. It is not registered, approved, or enabled for live use.
 
 ## Budget-aware training policy
 
