@@ -388,3 +388,10 @@ cost-adjusted sampled-mark scenario. It always keeps `net_return_pct=null`
 and `realized_pnl_available=false`. This is diagnostic integration only;
 the evidence is supplied to the evaluator and is not yet a durable evidence
 ledger or independently verified provider integration.
+
+
+### Cost-evidence identity binding
+
+Walk-forward cost diagnostics now require each supplied evidence envelope to repeat the exact `label_id`, `mint`, and `pool_address` for the validation label being evaluated. Missing or mismatched envelope identity forces that row to remain incomplete; cost values are not used in the scenario aggregate. Prepared-row mint and pool identity must also match the exported label or evaluation fails closed. This prevents accidental cross-label or cross-pool evidence reuse inside the in-memory evaluator.
+
+This is an identity-consistency check, not durable provenance verification. Evidence is still caller-supplied and is not yet authenticated against a provider, immutable ledger, transaction receipt, owner, or workspace. Durable owner/workspace-scoped evidence storage and source-integrity verification remain separate work.
