@@ -53,7 +53,11 @@ jobs:
             echo "kernel=$REQUESTED_KERNEL" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          kaggle kernels list --mine --csv --page-size 100 > kernels.csv
+          if ! kaggle kernels list --mine --csv > kernels.csv 2> kernels-list-error.txt; then
+            echo "Kaggle kernel listing failed:"
+            cat kernels-list-error.txt
+            exit 1
+          fi
           python - <<'PY'
           import csv, os
           from pathlib import Path
@@ -70,7 +74,7 @@ jobs:
           if len(matches) != 1 or not matches[0].get("ref"):
               raise SystemExit("Could not uniquely identify the ETI notebook. Supply its exact Kaggle URL slug as the workflow input.")
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              output.write("kernel=" + matches[0]["ref"] + "\\n")
+              output.write("kernel=" + matches[0]["ref"] + "\n")
           PY
 
       - name: Download latest Kaggle notebook output
