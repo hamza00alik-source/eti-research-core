@@ -435,3 +435,22 @@ def test_new_mint_without_indexed_pool_is_rechecked_until_pool_appears(tmp_path)
         ).fetchall()
     assert ("__pending__", 0) in rows
     assert ("Pool333", 1) in rows
+
+
+def test_solana_refresh_schedule_can_be_reconfigured_and_listed_with_owner_scope(tmp_path):
+    store = MemoryStore(tmp_path / "solana-refresh-config.sqlite3")
+    workspace = _workspace(store)
+    first = store.schedule_solana_research_refresh(
+        "owner-1", workspace["id"], "D" * 40, "Pool444", interval_seconds=300
+    )
+    updated = store.schedule_solana_research_refresh(
+        "owner-1", workspace["id"], "D" * 40, "Pool444", interval_seconds=1800
+    )
+    assert updated["interval_seconds"] == 1800
+    assert updated["next_due_at"] != first["next_due_at"]
+    listed = store.list_solana_research_refresh_jobs("owner-1", workspace["id"])
+    assert len(listed) == 1
+    assert listed[0]["status"] == "scheduled"
+    assert listed[0]["enabled"] is True
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.list_solana_research_refresh_jobs("owner-2", workspace["id"])
