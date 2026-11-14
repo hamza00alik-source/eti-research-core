@@ -81,8 +81,9 @@ def test_finalized_successful_wallet_debit_and_expected_pool_are_verified():
     rpc = FakeRpc(_status(), _transaction())
     result = _verify(rpc)
 
-    assert result["status"] == "FINALIZED_MINT_TRANSACTION_VERIFIED"
-    assert result["verified"] is True
+    assert result["status"] == "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED"
+    assert result["verified"] is False
+    assert result["transaction_receipt_verified"] is True
     assert result["slot"] == 12345
     assert result["wallet_token_debit_raw"] == "50"
     assert result["direction"] == "wallet_mint_balance_decreased"
