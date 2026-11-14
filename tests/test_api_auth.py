@@ -698,6 +698,7 @@ def test_solana_transaction_verification_api_is_authenticated_and_workspace_scop
         assert client.post(url, headers=other_headers, json=payload).status_code == 404
         response = client.post(url, headers=owner_headers, json=payload)
         assert response.status_code == 200, response.text
-        assert response.json()["verified"] is True
-        assert response.json()["status"] == "FINALIZED_MINT_TRANSACTION_VERIFIED"
+        assert response.json()["verified"] is False
+        assert response.json()["transaction_receipt_verified"] is True
+        assert response.json()["status"] == "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED"
 
