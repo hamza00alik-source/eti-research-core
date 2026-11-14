@@ -33,3 +33,13 @@ def test_nested_training_pipeline_orchestrates_market_folds(monkeypatch):
     assert result["training_performed"] is True
     assert result["fold_count"] > 0
     assert "hist_gradient_boosting" in result["folds"][0]["validation_scores"]
+    assert "candidate_summary" in result
+    assert "hist_gradient_boosting" in result["candidate_summary"]
+    scenarios = result["cost_sensitivity"]["scenarios"]
+    assert [item["cost_multiplier"] for item in scenarios] == [1.0, 1.5, 2.0]
+    assert all(
+        "mean_net_return" in item
+        and "positive_return_folds" in item
+        and "mean_max_drawdown" in item
+        for item in scenarios
+    )

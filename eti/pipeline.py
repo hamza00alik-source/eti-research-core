@@ -200,6 +200,47 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
                 allow_short=allow_short, bars_per_year=bars_per_year,
             ),
         })
+    # Re-run the same frozen outer-test predictions under harsher execution costs.
+    # These scenarios are sensitivity diagnostics, not additional model selection.
+    cost_sensitivity = []
+    for multiplier in (1.0, 1.5, 2.0):
+        scenario_folds = []
+        for fold in report["folds"]:
+            start = fold["boundaries"]["test_start"]
+            end = fold["boundaries"]["test_end"]
+            close_test = dataset["close"].iloc[start:end].reset_index(drop=True)
+            actual_test = pd.Series(fold["test_actual"], dtype=int)
+            prediction_test = pd.Series(fold["test_predictions"], dtype=int)
+            scenario = evaluate_predictions(
+                close_test, actual_test, prediction_test,
+                fee_bps=fee_bps * multiplier,
+                slippage_bps=slippage_bps * multiplier,
+                funding_bps_per_bar=funding_bps_per_bar * multiplier,
+                allow_short=allow_short, bars_per_year=bars_per_year,
+            )
+            scenario_folds.append(scenario["trading"])
+        model_scenario = [item["model"] for item in scenario_folds]
+        buy_hold_scenario = [item["buy_and_hold"] for item in scenario_folds]
+        no_trade_scenario = [item["no_trade"] for item in scenario_folds]
+        cost_sensitivity.append({
+            "cost_multiplier": multiplier,
+            "fee_bps": float(fee_bps * multiplier),
+            "slippage_bps": float(slippage_bps * multiplier),
+            "mean_net_return": float(np.mean([item["total_return"] for item in model_scenario])),
+            "median_net_return": float(np.median([item["total_return"] for item in model_scenario])),
+            "positive_return_folds": int(sum(item["total_return"] > 0 for item in model_scenario)),
+            "folds_beating_buy_and_hold": int(sum(
+                model["total_return"] > benchmark["total_return"]
+                for model, benchmark in zip(model_scenario, buy_hold_scenario)
+            )),
+            "folds_beating_no_trade": int(sum(
+                model["total_return"] > benchmark["total_return"]
+                for model, benchmark in zip(model_scenario, no_trade_scenario)
+            )),
+            "mean_max_drawdown": float(np.mean([item["max_drawdown"] for item in model_scenario])),
+            "mean_sharpe_annualized": float(np.mean([item["sharpe_annualized"] for item in model_scenario])),
+            "fold_count": len(model_scenario),
+        })
     def mean_metric(strategy_name: str, metric_name: str) -> float:
         values = [item["trading"][strategy_name][metric_name] for item in performance_folds]
         return float(np.mean(values))
@@ -225,6 +266,10 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
             "fold_count": len(performance_folds),
         },
         "warning": "Fold metrics are averaged descriptively; overlapping test windows are dependent. Costs are illustrative assumptions, not exchange-specific quotes.",
+    }
+    report["cost_sensitivity"] = {
+        "scenarios": cost_sensitivity,
+        "note": "The same untouched outer-test predictions are re-simulated at 1.0x, 1.5x and 2.0x fee/slippage assumptions. This is a robustness diagnostic, not a forecast of actual execution costs.",
     }
     report.update({"rows": len(dataset), "horizon": horizon, "timeframe": timeframe,
                    "cost_assumptions": {"fee_bps": float(fee_bps), "slippage_bps": float(slippage_bps),
