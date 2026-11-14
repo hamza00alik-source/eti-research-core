@@ -144,3 +144,26 @@ This is a documentation/status correctness defect, not proof that the order path
 ### Current CI observation
 
 The latest visible main-branch GitHub Actions run checked on 2026-11-14 completed successfully. Its test job passed dependency installation, Python compileall, frontend syntax checks, pytest, Compose validation and production container image build. This is useful evidence of repository test/build health, not proof of live exchange execution safety, profitability, or provider uptime.
+
+
+## Grok Bot hosting and workflow assumptions
+
+The article's Grok Bot premise is partly supported by current product documentation: Grok Bot has a persistent Cursor-hosted cloud computer, can work in the background, supports parallel Bots, and its public pricing page lists Premium at $30/month. The article's quoted subscription price and basic cloud-computer concept are therefore plausible.
+
+However, the following are not guaranteed merely by having a cloud computer:
+- A user process is not the same as a supported managed always-on service. Official documentation says idle cloud computers can hibernate automatically. A long-running Python polling process, public FastAPI listener, WebSocket stream, or Telegram long-poll loop needs an explicit uptime/restart/supervision test; the article provides no service-level guarantee for that process.
+- A persistent cloud computer does not automatically provide a public HTTPS port, static hosting, inbound webhooks, unrestricted network egress, durable process supervision, or reliable push delivery. The article correctly proposes two hosting modes, but each needs an actual end-to-end proof in the target account.
+- The article's "Plan B" writes private JSON data to static hosting under a random path. A long random path is a bearer secret, not server-side authentication or authorization. Anyone who obtains the path can read the files; hosting logs, copied URLs, browser extensions, screenshots, referrers and cache behavior can leak it. Do not store private account/position data this way.
+- A static `APP_TOKEN` kept in browser localStorage is exposed to any successful same-origin script injection and has no described rotation/revocation lifecycle. Prefer server-side sessions, short-lived tokens, secure cookie or platform-appropriate storage, and revocation.
+- "First Telegram /start owns the bot" is a race-to-claim design. An attacker who discovers the bot can claim it before the owner. Pair the bot to a preconfigured chat ID or a one-time high-entropy pairing challenge delivered through a trusted channel.
+- One Python process hosting API, scanner, Risk poller and Telegram long polling creates a shared failure domain. A crash, blocking call or memory leak can stop all functions. Separate provider ingestion, task workers, API and notifier with health checks, durable queues and restart policies before production.
+- Multiple Bots on the same account share the same cloud computer, browser sessions and files. Separate Bot names are not a credential isolation boundary. Never give one Bot a secret or session that another Bot should not access.
+
+Grok Bot is a development/work-computer environment, not the trading system's data provider, durable database, exchange, or execution engine. The article's claims about the complete deployed app must be proven by observing the actual process, URL, restart behavior, provider calls, notifications and persistence—not by the agent saying it completed the build.
+
+## Additional verification notes
+
+- **TypeSafe endpoint:** `POST https://api.typesafe.ai/v1/systemone`, Bearer authentication and the `model/state/questions` body are supported by the reviewed TypeSafe API material. The article's model call shape is substantially correct. Pin a version rather than depending on a moving alias for repeatable experiments.
+- **Jev economics and quotas:** the article's exact `$0.042 / 1M input tokens` and `1,200 requests/minute` claims were not established from the primary API reference reviewed. Check the current account/model pricing and rate-limit headers before budgeting.
+- **FOMO economics and referral:** the claimed fee bands, 10% lifetime referral discount and zero-gas statement were not verified against a current first-party FOMO fee schedule in this audit. They must not be used as fixed paper-trading assumptions.
+- **RugCheck:** both the full report and insider-graph routes are documented by public API references. The report summary also exposes fields such as `lpLockedPct`, but a token-level aggregate is not necessarily the same as the exact Scanner pool's LP lock percentage. The article's pool-to-LP mapping still requires raw-response validation and should remain UNKNOWN until it is proven for the selected pair.
