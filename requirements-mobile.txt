@@ -1,5 +1,5 @@
 # Optional dependencies for exporting ETI candidate models to mobile ONNX.
 # Install after requirements.txt in the Kaggle training notebook.
-skl2onnx>=1.20,<2
+skl2onnx>=1.21,<2
 onnx>=1.17,<2
 onnxruntime>=1.20,<2
