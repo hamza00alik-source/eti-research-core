@@ -136,6 +136,9 @@ class SolanaTransactionVerificationPayload(BaseModel):
     expected_pool_address: str = Field(min_length=32, max_length=44)
     wallet_address: str = Field(min_length=32, max_length=44)
 
+class SolanaTransactionAttestationPayload(SolanaTransactionVerificationPayload):
+    label_id: str = Field(min_length=1, max_length=128)
+
 
 class SolanaResearchEventPayload(BaseModel):
     event_key: str = Field(min_length=1, max_length=200)
@@ -713,6 +716,61 @@ def verify_solana_research_transaction(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ProviderError as exc:
         raise HTTPException(status_code=502, detail="Solana RPC verification unavailable") from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/transaction-attestations", status_code=201)
+def attest_solana_research_transaction(
+    workspace_id: str,
+    payload: SolanaTransactionAttestationPayload,
+    account: dict[str, str] = Depends(current_account),
+):
+    """Verify against public RPC and persist only a positive receipt observation."""
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        labels = store.list_solana_research_labels(account["id"], workspace_id, limit=1000)
+        label = next((item for item in labels if item["id"] == payload.label_id), None)
+        if label is None:
+            raise HTTPException(status_code=404, detail="label not found")
+        identity = label["label"]
+        if identity.get("mint") != payload.mint or identity.get("pool_address") != payload.expected_pool_address:
+            raise HTTPException(status_code=422, detail="label identity does not match transaction request")
+        report = verify_finalized_transaction_for_mint(
+            SolanaRpcClient(), payload.signature, payload.mint,
+            expected_pool_address=payload.expected_pool_address,
+            wallet_address=payload.wallet_address,
+        )
+        if report.get("transaction_receipt_verified") is not True:
+            return {"recorded": False, "verification": report}
+        record = store.record_solana_transaction_attestation(
+            account["id"], workspace_id, payload.label_id, payload.mint,
+            payload.expected_pool_address, payload.wallet_address, report,
+        )
+        return {"recorded": True, "verification": report, "attestation": record}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace or label not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail="Solana RPC verification unavailable") from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/transaction-attestations")
+def list_solana_transaction_attestations(
+    workspace_id: str,
+    label_id: str | None = Query(default=None, min_length=1, max_length=128),
+    limit: int = Query(default=500, ge=1, le=1000),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        items = _memory_store().list_solana_transaction_attestations(
+            account["id"], workspace_id, label_id=label_id, limit=limit
+        )
+        return {"items": items}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/v1/workspaces/{workspace_id}/solana/cost-evidence", status_code=201)
