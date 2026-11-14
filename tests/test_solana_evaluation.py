@@ -114,6 +114,8 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
     assert report["by_horizon_seconds"]["3600"]["aggregate"]["always_long"]["trade_count"] > 0
     assert report["validation_dependence"]["repeated_mint_label_count"] >= 1
     assert report["validation_dependence"]["overlapping_interval_pair_count"] >= 1
+    assert "cross_mint_overlapping_interval_pair_count" in report["validation_dependence"]
+    assert "distinct_mints_repeated_across_validation_folds" in report["validation_dependence"]
     assert "7200" in report["by_horizon_seconds"]
     assert len(report["walk_forward"]["fold_metadata"]) == 2
     assert all(
