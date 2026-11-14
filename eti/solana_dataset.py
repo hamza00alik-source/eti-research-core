@@ -128,8 +128,14 @@ def prepare_solana_training_rows(dataset_export: dict[str, Any]) -> dict[str, An
     }
     diagnostics = validate_snapshot_rows(snapshots)
     invalid_snapshot_ids = {
-        issue.get("snapshot_id") for issue in diagnostics["row_issues"]
+        row.get("id") for row in snapshots
+        if isinstance(row, dict) and validate_snapshot_rows([row])["rows_with_issues"]
     }
+    # The aggregate diagnostic intentionally caps its displayed issue list;
+    # per-row checks above ensure that cap never weakens preparation filtering.
+    invalid_snapshot_ids.update(
+        issue.get("snapshot_id") for issue in diagnostics["row_issues"]
+    )
     eligible: list[dict[str, Any]] = []
     excluded: dict[str, int] = {}
 
@@ -165,7 +171,12 @@ def prepare_solana_training_rows(dataset_export: dict[str, Any]) -> dict[str, An
         if baseline.get("capability") != "solana.market.scan" or target.get("capability") != "solana.market.scan":
             reject("unsupported_snapshot_capability")
             continue
-        if baseline.get("schema_version") != 1 or target.get("schema_version") != 1:
+        if (
+            isinstance(baseline.get("schema_version"), bool)
+            or isinstance(target.get("schema_version"), bool)
+            or baseline.get("schema_version") != 1
+            or target.get("schema_version") != 1
+        ):
             reject("unsupported_snapshot_schema")
             continue
         if (baseline.get("mint"), baseline.get("pool_address")) != (label.get("mint"), label.get("pool_address")):
