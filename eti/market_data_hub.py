@@ -283,3 +283,21 @@ class MarketDataHub:
                     "error_type": type(exc).__name__, "message": str(exc)[:500],
                 })
         raise RuntimeError(f"No candidate data source succeeded: {failures}")
+
+
+def build_public_market_hub(
+    crypto_venues: tuple[str, ...] = ("binance", "mexc", "coinbaseexchange", "kraken"),
+    *, include_yahoo: bool = True,
+) -> MarketDataHub:
+    """Build ETI's default public-data hub without credentials or execution access."""
+    adapters: list[MarketAdapter] = []
+    for venue in crypto_venues:
+        normalized = venue.strip().lower()
+        market_types = (
+            ("spot",) if normalized in {"coinbaseexchange", "kraken"}
+            else ("spot", "swap", "future")
+        )
+        adapters.append(CcxtMarketAdapter(normalized, market_types))
+    if include_yahoo:
+        adapters.append(YahooFinanceMarketAdapter())
+    return MarketDataHub(adapters)
