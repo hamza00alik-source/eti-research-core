@@ -2476,7 +2476,7 @@ class MemoryStore:
             groups: dict[tuple[str, str], list[datetime]] = {}
             feature_counts = {
                 "price_usd": 0, "liquidity_usd": 0, "volume_h24_usd": 0,
-                "buys_h1": 0, "sells_h1": 0,
+                "txns_h1_buys": 0, "txns_h1_sells": 0,
             }
             first_at: datetime | None = None
             last_at: datetime | None = None
@@ -2530,11 +2530,9 @@ class MemoryStore:
                 except (TypeError, ValueError):
                     continue
                 if isinstance(label, dict):
-                    mint = label.get("mint")
-                    if isinstance(mint, str) and mint:
-                        # Keep a per-horizon set outside the public report.
-                        pass
-                    if isinstance(label.get("sampled_price_return_pct"), (int, float)):
+                    if isinstance(label.get("sampled_price_return_pct"), (int, float))
+                            and not isinstance(label.get("sampled_price_return_pct"), bool)
+                            and math.isfinite(label["sampled_price_return_pct"]):
                         stats["price_returns_available"] += 1
             # Count distinct mints with SQL, avoiding a potentially large in-memory set.
             distinct_by_horizon = conn.execute(
