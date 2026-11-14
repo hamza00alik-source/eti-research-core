@@ -643,6 +643,7 @@ def evaluate_solana_time_series_regimes(
             classified_observations,
             key=lambda item: (item["mint"], item["pool_address"], item["horizon_seconds"], item["baseline_at"]),
         ),
+        "regime_transitions": evaluate_solana_regime_transitions(classified_observations),
         "unclassified_row_count": unclassified,
         "unclassified_reasons": reason_counts,
         "regimes": summarize_groups(groups),
