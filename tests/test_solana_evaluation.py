@@ -366,3 +366,44 @@ def test_walk_forward_transaction_receipts_are_integrity_checked_and_never_verif
     assert receipt["verified_swap_count"] == 0
     assert receipt["net_return_pct"] is None
     assert receipt["realized_pnl_available"] is False
+
+
+def test_pooled_compounding_and_dependence_are_explicitly_non_portfolio_diagnostics():
+    from eti.solana_evaluation import evaluate_prepared_solana_walk_forward
+
+    exported, prepared = [], []
+    for index in range(8):
+        day = 1 + index * 2
+        stamp = f"2026-01-{day:02d}T00:00:00Z"
+        label_id = f"interpretation-label-{index}"
+        exported.append({
+            "id": label_id,
+            "mint": f"interpretation-mint-{index}",
+            "pool_address": f"interpretation-pool-{index}",
+            "horizon_seconds": 3600,
+            "label": {"baseline_at": stamp, "target_at": f"2026-01-{day:02d}T01:00:00Z"},
+        })
+        prepared.append({
+            "label_id": label_id,
+            "mint": f"interpretation-mint-{index}",
+            "pool_address": f"interpretation-pool-{index}",
+            "baseline_at": stamp,
+            "horizon_seconds": 3600,
+            "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
+            "target_sampled_price_return_pct": 2.0,
+        })
+
+    report = evaluate_prepared_solana_walk_forward(
+        exported,
+        {"status": "PREPARATION_ONLY", "training_authorized": False, "rows": prepared},
+        n_splits=2, min_train_groups=3, embargo_seconds=3600,
+    )
+    summary = report["aggregate"]["always_long"]
+    assert summary["compounding_interpretation"] == "POOLED_SAMPLED_OBSERVATION_DIAGNOSTIC_NOT_PORTFOLIO_PNL"
+    assert "not a portfolio equity curve" in report["aggregate_metric_interpretation"]
+    dependence = report["validation_dependence"]
+    assert dependence["fold_validation_label_count"] >= dependence["prepared_validation_interval_count"]
+    assert dependence["prepared_validation_interval_count"] == dependence["validation_label_count"]
+    assert dependence["unprepared_validation_label_count"] == 0
+    assert dependence["dependence_scope"] == "PREPARED_VALIDATION_ROWS_WITH_VALID_INTERVALS_ONLY"
+    assert report["training_authorized"] is False
