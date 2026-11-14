@@ -23,6 +23,9 @@ def test_scan_pair_passes_only_when_all_required_market_fields_are_present():
     result = scan_pair("Mint111", _pair(), now_ms=1_800_000_000_000)
     assert result["verdict"] == "PASS"
     assert result["evidence"]["liquidity_usd"] == 50000
+    assert result["evidence"]["pair_address"] == "Pool111"
+    assert result["evidence"]["price_usd"] is None
+    assert result["evidence"]["volume_h24_usd"] is None
     assert result["source"] == "dexscreener"
 
 
