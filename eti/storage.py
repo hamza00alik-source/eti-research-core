@@ -2181,7 +2181,10 @@ class MemoryStore:
                 (owner_id, workspace_id, event_key),
             ).fetchone()
             if existing is not None:
-                return self._solana_event_dict(existing, duplicate=True)
+                return self._solana_event_dict(
+                    existing, duplicate=True,
+                    payload_conflict=existing["payload_sha256"] != digest,
+                )
             event_id = str(uuid4())
             conn.execute(
                 "INSERT INTO solana_research_events(id,owner_id,workspace_id,event_key,source,event_type,"
@@ -2204,14 +2207,16 @@ class MemoryStore:
         return self._solana_event_dict(row, duplicate=False)
 
     @staticmethod
-    def _solana_event_dict(row: sqlite3.Row, duplicate: bool = False) -> dict[str, Any]:
+    def _solana_event_dict(
+        row: sqlite3.Row, duplicate: bool = False, payload_conflict: bool = False
+    ) -> dict[str, Any]:
         return {
             "id": row["id"], "event_key": row["event_key"], "source": row["source"],
             "event_type": row["event_type"], "mint": row["mint"],
             "source_timestamp": row["source_timestamp"],
             "payload": json.loads(row["payload_json"]),
             "payload_sha256": row["payload_sha256"], "received_at": row["received_at"],
-            "duplicate": duplicate,
+            "duplicate": duplicate, "payload_conflict": payload_conflict,
         }
 
     def list_solana_research_events(
