@@ -326,13 +326,14 @@ def evaluate_solana_time_series_regimes(
         "lookback_observations", "minimum_observations",
         "trend_abs_return_pct", "volatility_high_pct", "volatility_low_pct",
         "max_gap_seconds", "minimum_history_span_seconds",
+        "minimum_rows_per_regime_horizon",
     }
     if not isinstance(config, dict) or set(config) != required:
         raise ValueError("time-series regime config must contain exactly: " + ", ".join(sorted(required)))
     lookback = config["lookback_observations"]
     minimum = config["minimum_observations"]
     for key in ("lookback_observations", "minimum_observations",
-                "max_gap_seconds", "minimum_history_span_seconds"):
+                "max_gap_seconds", "minimum_history_span_seconds", "minimum_rows_per_regime_horizon"):
         value = config[key]
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ValueError(key + " must be a positive integer")
@@ -370,6 +371,7 @@ def evaluate_solana_time_series_regimes(
 
     groups: dict[str, list[float]] = {}
     horizon_groups: dict[str, dict[str, list[float]]] = {}
+    horizon_cluster_groups: dict[str, dict[str, dict[str, list[float]]]] = {}
     classified = 0
     unclassified = 0
     reason_counts: dict[str, int] = {}
@@ -458,6 +460,7 @@ def evaluate_solana_time_series_regimes(
         horizon = row.get("horizon_seconds")
         horizon_key = str(horizon) if isinstance(horizon, int) and not isinstance(horizon, bool) and horizon > 0 else "UNKNOWN"
         horizon_groups.setdefault(horizon_key, {}).setdefault(regime, []).append(value)
+        horizon_cluster_groups.setdefault(horizon_key, {}).setdefault(regime, {}).setdefault(mint, []).append(value)
         sampling["classified_history_span_seconds"].append(span)
         sampling["classified_median_gap_seconds"].append(sorted(gaps)[len(gaps) // 2] if len(gaps) % 2 else (sorted(gaps)[len(gaps)//2-1] + sorted(gaps)[len(gaps)//2]) / 2)
         sampling["classified_max_gap_seconds"].append(max(gaps))
@@ -474,7 +477,27 @@ def evaluate_solana_time_series_regimes(
         "unclassified_reasons": reason_counts,
         "regimes": summarize_groups(groups),
         "regimes_by_horizon_seconds": {
-            horizon: summarize_groups(regimes)
+            horizon: {
+                regime: {
+                    "row_count": len(values),
+                    "distinct_mint_count": len(horizon_cluster_groups[horizon][regime]),
+                    "minimum_rows_required": config["minimum_rows_per_regime_horizon"],
+                    "status": (
+                        "DESCRIPTIVE_SAMPLE_THRESHOLD_MET"
+                        if len(values) >= config["minimum_rows_per_regime_horizon"]
+                        else "INSUFFICIENT_REGIME_HORIZON_ROWS"
+                    ),
+                    "summary": (
+                        _summarize(values)
+                        if len(values) >= config["minimum_rows_per_regime_horizon"]
+                        else None
+                    ),
+                    "mint_cluster_bootstrap": _cluster_bootstrap_mean_interval(
+                        horizon_cluster_groups[horizon][regime]
+                    ),
+                }
+                for regime, values in sorted(regimes.items())
+            }
             for horizon, regimes in sorted(horizon_groups.items())
         },
         "sampling_quality": {
@@ -496,6 +519,8 @@ def evaluate_solana_time_series_regimes(
             "maximum_gap_enforced": True,
             "minimum_history_span_enforced": True,
             "ohlcv_candles_required": False,
+            "minimum_rows_per_regime_horizon_enforced": True,
+            "uncertainty_method": "mint_cluster_bootstrap_percentile_when_at_least_20_distinct_mints",
         },
         "limitations": [
             "These are sampled-price path proxies, not exchange-candle trend or realized volatility.",
