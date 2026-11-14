@@ -448,3 +448,10 @@ The public-RPC verifier reports `FINALIZED_MINT_BALANCE_DEBIT_OBSERVED` and `tra
 The evaluator's compounded sampled return and sequential drawdown are ordering-dependent diagnostics over pooled validation observations. They are **not** a portfolio equity curve, a sequence of executable trades, or realized P&L: labels can overlap, repeat the same mint, and represent different horizons. The report marks each summary with `compounding_interpretation=POOLED_SAMPLED_OBSERVATION_DIAGNOSTIC_NOT_PORTFOLIO_PNL` and includes an aggregate interpretation warning. Do not use these values to infer deployable strategy returns or capital growth.
 
 Validation-dependence counts are scoped to prepared validation rows whose baseline/target intervals parse as timezone-aware and have positive duration. The report separately exposes the total fold validation-label count and unprepared validation-label count so the interval-based dependence denominator is not mistaken for all validation labels. Overlap and repeated-mint counts are descriptive only; they do not establish statistical significance or independence.
+
+
+### Mint-cluster uncertainty diagnostics
+
+The fixed benchmark report includes an exploratory percentile bootstrap for the row-weighted mean sampled return. It resamples complete mint clusters (not individual labels), uses a deterministic seed and 1,000 replicates, and withholds the interval unless at least 20 distinct mint clusters are present. Rows without a usable mint are conservatively grouped into one shared missing-identity cluster rather than treated as independent observations.
+
+These intervals are descriptive sensitivity diagnostics, not significance tests or evidence of predictive performance. Mint clustering addresses within-mint dependence only; it does not account for common market shocks across different mints, regime drift, selection effects, provider sampling bias, overlapping cross-mint exposures, or executable trading constraints. No interval authorizes model training or live trading.
