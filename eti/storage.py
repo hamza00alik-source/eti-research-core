@@ -2788,24 +2788,29 @@ class MemoryStore:
             if not self._owns_workspace(conn, owner_id, workspace_id):
                 raise LookupError("workspace not found")
             rows = conn.execute(query, params).fetchall()
-            snapshot_ids = [row["id"] for row in rows]
-            labels: list[dict[str, Any]] = []
-            if snapshot_ids:
-                placeholders = ",".join("?" for _ in snapshot_ids)
-                label_rows = conn.execute(
-                    "SELECT id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
-                    "horizon_seconds,label_json,created_at FROM solana_research_labels "
-                    "WHERE owner_id=? AND workspace_id=? AND baseline_snapshot_id IN (" + placeholders + ") "
-                    "ORDER BY created_at ASC,id ASC",
-                    [owner_id, workspace_id, *snapshot_ids],
-                ).fetchall()
-                labels = [{
-                    "id": row["id"], "mint": row["mint"], "pool_address": row["pool_address"],
-                    "baseline_snapshot_id": row["baseline_snapshot_id"],
-                    "target_snapshot_id": row["target_snapshot_id"],
-                    "horizon_seconds": row["horizon_seconds"],
-                    "label": json.loads(row["label_json"]), "created_at": row["created_at"],
-                } for row in label_rows]
+            label_query = (
+                "SELECT l.id,l.mint,l.pool_address,l.baseline_snapshot_id,l.target_snapshot_id,"
+                "l.horizon_seconds,l.label_json,l.created_at FROM solana_research_labels l "
+                "JOIN (SELECT id FROM solana_research_snapshots WHERE owner_id=? AND workspace_id=?"
+            )
+            label_params: list[Any] = [owner_id, workspace_id]
+            if mint is not None:
+                label_query += " AND mint=?"
+                label_params.append(mint)
+            label_query += (
+                " ORDER BY fetched_at ASC,id ASC LIMIT ?) selected "
+                "ON selected.id=l.baseline_snapshot_id "
+                "WHERE l.owner_id=? AND l.workspace_id=? ORDER BY l.created_at ASC,l.id ASC"
+            )
+            label_params.extend([limit, owner_id, workspace_id])
+            label_rows = conn.execute(label_query, label_params).fetchall()
+            labels = [{
+                "id": row["id"], "mint": row["mint"], "pool_address": row["pool_address"],
+                "baseline_snapshot_id": row["baseline_snapshot_id"],
+                "target_snapshot_id": row["target_snapshot_id"],
+                "horizon_seconds": row["horizon_seconds"],
+                "label": json.loads(row["label_json"]), "created_at": row["created_at"],
+            } for row in label_rows]
         snapshots = [{
             "id": row["id"], "task_id": row["task_id"], "capability": row["capability"],
             "mint": row["mint"], "pool_address": row["pool_address"],
