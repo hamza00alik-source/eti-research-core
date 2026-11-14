@@ -226,3 +226,8 @@ Training candidate reports also include the raw OHLCV quality diagnostics. Crypt
 
 
 Market snapshots now include a `data_quality` report with observed candle count, first/latest candle timestamps, elapsed-calendar coverage ratio, gap count, largest gap in candle intervals, latest-candle age and a freshness label. The diagnostic never fills missing candles or fabricates prices. It explicitly notes that elapsed-calendar gaps can reflect exchange sessions, weekends, holidays or maintenance; those calendars are not yet modeled, so the report is evidence for review rather than an automatic market rejection rule.
+
+
+## Derivatives history quality
+
+Funding and open-interest histories are checked for malformed millisecond epochs, non-finite values, negative open interest, duplicate timestamps and out-of-order observations before feature alignment. ETI reports the observed interval distribution rather than assuming a universal funding settlement cadence. Open-interest amount and quote-value units remain labelled and are not silently normalized or compared. These diagnostics do not enable derivatives approval or live execution.

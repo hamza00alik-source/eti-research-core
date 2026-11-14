@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 import pandas as pd
 from .data import drop_incomplete_candles, fetch_ohlcv, validate_ohlcv
+from .derivatives_quality import assess_observation_history
 
 @dataclass(frozen=True)
 class Instrument:
@@ -129,8 +130,8 @@ class CcxtPublicProvider:
             try:
                 rows = exchange.fetch_funding_rate_history(symbol, since=since, limit=limit)
                 result["funding_history"] = [
-                    {"timestamp": int(row["timestamp"]), "funding_rate": float(row["fundingRate"])}
-                    for row in rows if row.get("timestamp") is not None and row.get("fundingRate") is not None
+                    {"timestamp": row.get("timestamp"), "funding_rate": row.get("fundingRate")}
+                    for row in rows
                 ]
             except Exception as exc:
                 result["availability"]["funding_history_error"] = type(exc).__name__
@@ -149,22 +150,33 @@ class CcxtPublicProvider:
             try:
                 rows = exchange.fetch_open_interest_history(symbol, timeframe=timeframe, since=since, limit=limit)
                 result["open_interest_history"] = [
-                    {"timestamp": int(row["timestamp"]),
-                     "open_interest": float(row.get("openInterestAmount") or row.get("openInterestValue"))}
+                    {
+                        "timestamp": row.get("timestamp"),
+                        "open_interest": (
+                            row.get("openInterestAmount")
+                            if row.get("openInterestAmount") is not None
+                            else row.get("openInterestValue")
+                        ),
+                        "open_interest_unit": (
+                            "contracts" if row.get("openInterestAmount") is not None
+                            else "quote_value" if row.get("openInterestValue") is not None
+                            else "unknown"
+                        ),
+                    }
                     for row in rows
-                    if row.get("timestamp") is not None
-                    and (row.get("openInterestAmount") is not None or row.get("openInterestValue") is not None)
                 ]
             except Exception as exc:
                 result["availability"]["open_interest_history_error"] = type(exc).__name__
         if result["availability"]["current_open_interest"]:
             try:
                 row = exchange.fetch_open_interest(symbol)
-                value = row.get("openInterestAmount") or row.get("openInterestValue")
+                amount = row.get("openInterestAmount")
+                quote_value = row.get("openInterestValue")
+                value = amount if amount is not None else quote_value
                 if value is not None:
                     result["current_open_interest"] = {
                         "value": float(value), "timestamp": row.get("timestamp"),
-                        "unit": "contracts_or_quote_value_as_reported_by_venue",
+                        "unit": "contracts" if amount is not None else "quote_value",
                     }
             except Exception as exc:
                 result["availability"]["current_open_interest_error"] = type(exc).__name__
@@ -180,6 +192,39 @@ class CcxtPublicProvider:
                 ]
             except Exception as exc:
                 result["availability"]["liquidation_history_error"] = type(exc).__name__
+        funding_clean, funding_quality = assess_observation_history(
+            result["funding_history"], value_key="funding_rate", allow_negative=True
+        )
+        oi_clean, oi_quality = assess_observation_history(
+            result["open_interest_history"], value_key="open_interest", allow_negative=False
+        )
+        result["funding_history"] = funding_clean
+        result["open_interest_history"] = oi_clean
+        funding_units = sorted({
+            str(item.get("open_interest_unit", "unknown"))
+            for item in oi_clean
+        })
+        result["data_quality"] = {
+            "funding": funding_quality,
+            "open_interest": oi_quality,
+            "open_interest_units_observed": funding_units,
+            "open_interest_units_consistent": len(funding_units) <= 1,
+            "contract_metadata": {
+                "base_present": bool(market.get("base")),
+                "quote_present": bool(market.get("quote")),
+                "settlement_currency_present": bool(market.get("settle")),
+                "linear_or_inverse_declared": market.get("linear") is True or market.get("inverse") is True,
+                "contract_size_present": market.get("contractSize") is not None,
+                "expiry_present_or_perpetual": market.get("expiry") is not None or market.get("swap") is True,
+            },
+        }
+        result["contract_metadata"] = {
+            "base": market.get("base"), "quote": market.get("quote"),
+            "settle": market.get("settle"), "linear": market.get("linear"),
+            "inverse": market.get("inverse"), "expiry": market.get("expiry"),
+            "contract_size": market.get("contractSize"),
+            "active": market.get("active"),
+        }
         result["history_coverage"] = {
             "funding_observations": len(result["funding_history"]),
             "open_interest_observations": len(result["open_interest_history"]),
@@ -203,6 +248,9 @@ def enrich_ohlcv_with_derivatives(
     timeframe_ms = int(pd.Timedelta(timeframe).total_seconds() * 1000)
     funding = context.get("funding_history") or []
     if funding:
+        funding, _ = assess_observation_history(
+            funding, value_key="funding_rate", allow_negative=True
+        )
         funding_frame = pd.DataFrame(funding)
         funding_frame["timestamp"] = pd.to_datetime(
             pd.to_numeric(funding_frame["timestamp"], errors="coerce"), unit="ms", utc=True
@@ -210,13 +258,15 @@ def enrich_ohlcv_with_derivatives(
         funding_frame["funding_rate"] = pd.to_numeric(
             funding_frame["funding_rate"], errors="coerce"
         )
-        funding_frame = funding_frame.dropna().sort_values("timestamp").drop_duplicates("timestamp")
         base = pd.merge_asof(
             base.sort_values("timestamp"), funding_frame[["timestamp", "funding_rate"]],
             on="timestamp", direction="backward", tolerance=pd.Timedelta(hours=12),
         )
     oi = context.get("open_interest_history") or []
     if oi:
+        oi, _ = assess_observation_history(
+            oi, value_key="open_interest", allow_negative=False
+        )
         oi_frame = pd.DataFrame(oi)
         oi_frame["timestamp"] = pd.to_datetime(
             pd.to_numeric(oi_frame["timestamp"], errors="coerce"), unit="ms", utc=True
@@ -224,7 +274,6 @@ def enrich_ohlcv_with_derivatives(
         oi_frame["open_interest"] = pd.to_numeric(
             oi_frame["open_interest"], errors="coerce"
         )
-        oi_frame = oi_frame.dropna().sort_values("timestamp").drop_duplicates("timestamp")
         base = pd.merge_asof(
             base.sort_values("timestamp"), oi_frame[["timestamp", "open_interest"]],
             on="timestamp", direction="backward",
