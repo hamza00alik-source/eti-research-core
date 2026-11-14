@@ -153,44 +153,6 @@ class AgentWorker:
             venue=venue, asset_class=asset_class, market_type=market_type, symbol=symbol,
         )
 
-    def _enqueue_solana_audit_followup(
-        self, task: dict[str, Any], result: dict[str, Any]
-    ) -> None:
-        """Queue a read-only token audit after a scan has not explicitly rejected the mint."""
-        task_input = task.get("input")
-        if (task.get("target_capability") != "solana.market.scan"
-                or task.get("requester") != "eti.solana.ingest"
-                or not isinstance(task_input, dict)
-                or task_input.get("scheduled_by") != "eti.solana.ingest"):
-            return
-        if result.get("verdict") == "REJECT":
-            return
-        mint = task_input.get("mint")
-        if not isinstance(mint, str):
-            raise ValueError("Solana scan task is missing its mint")
-        existing = self.store.list_agent_tasks(
-            task["owner_id"], task["workspace_id"], limit=500
-        )
-        if any(
-            item.get("input", {}).get("source_scan_task_id") == task["id"]
-            for item in existing
-        ):
-            return
-        payload = {
-            "mint": mint,
-            "source_scan_task_id": task["id"],
-            "source_event_id": task_input.get("source_event_id"),
-            "scheduled_by": "eti.solana.ingest",
-        }
-        queued = self.store.create_agent_task(
-            task["owner_id"], task["workspace_id"], "eti.solana.ingest",
-            "solana.token.audit", payload, max_attempts=2,
-        )
-        self._log_event(
-            "solana.token_audit_queued", scan_task_id=task["id"],
-            audit_task_id=queued["id"], mint=mint, scan_verdict=result.get("verdict"),
-        )
-
     def _register_model_candidate(self, result: dict[str, Any]) -> dict[str, Any]:
         """Register candidates and promote only after independent quality and artifact verification."""
         artifact = result.get("candidate_artifact") or {}
@@ -353,7 +315,6 @@ class AgentWorker:
             try:
                 self._enqueue_strategy_followup(task)
                 self._enqueue_discovered_model_training(task, result)
-                self._enqueue_solana_audit_followup(task, result)
             except Exception:
                 print("ETI_STRATEGY_FOLLOWUP_ENQUEUE_FAILED", flush=True)
         return updated
