@@ -1028,6 +1028,9 @@ def evaluate_prepared_solana_walk_forward(
     report["time_series_regime_diagnostics"] = evaluate_solana_time_series_regimes(
         prepared_rows, validation_rows_for_regimes, time_series_regime_config
     )
+    report["fold_time_series_regime_stability"] = evaluate_solana_fold_time_series_regime_stability(
+        prepared_rows, benchmark_folds, time_series_regime_config,
+    )
     by_horizon: dict[str, Any] = {}
     for horizon, entries in sorted(horizon_folds.items()):
         grouped_folds: dict[int, list[dict[str, Any]]] = {}
