@@ -158,6 +158,8 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
             "current_funding": derivative_context.get("current_funding"),
             "current_open_interest": derivative_context.get("current_open_interest"),
             "history_coverage": derivative_context.get("history_coverage"),
+            "data_quality": derivative_context.get("data_quality"),
+            "contract_metadata": derivative_context.get("contract_metadata"),
             "liquidation_observations": len(derivative_context.get("liquidation_history") or []),
             "availability": derivative_context.get("availability"),
         } if derivative_context else None),
@@ -364,6 +366,8 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         "data_quality": data_quality,
         "data_quality_review": data_quality_review,
         "derivative_feature_coverage": derivative_feature_coverage,
+        "derivatives_data_quality": derivative_context.get("data_quality") if derivative_context else None,
+        "derivatives_contract_metadata": derivative_context.get("contract_metadata") if derivative_context else None,
         "derivatives_context_availability": derivative_context.get("availability") if derivative_context else None,
         "evaluation": {
             "fold_count": evaluation.get("fold_count", 0),
