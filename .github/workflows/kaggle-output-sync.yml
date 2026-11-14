@@ -46,7 +46,7 @@ jobs:
 
       - name: Download latest Kaggle notebook output
         env:
-          KERNEL: ${{ inputs.kernel }}
+          KERNEL: ${{ inputs.kernel || 'hamza00alik/eti-first-training-kaggle' }}
         run: |
           mkdir -p downloaded
           kaggle kernels output "$KERNEL" -p downloaded
