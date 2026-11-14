@@ -112,6 +112,15 @@ class AgentTaskPayload(BaseModel):
     deadline_at: str | None = Field(default=None, max_length=40)
     max_attempts: int = Field(default=3, ge=1, le=10)
 
+class SolanaResearchEventPayload(BaseModel):
+    event_key: str = Field(min_length=1, max_length=200)
+    source: str = Field(default="pumpportal", min_length=1, max_length=40)
+    event_type: str = Field(min_length=1, max_length=20)
+    mint: str = Field(min_length=32, max_length=64)
+    source_timestamp: str | None = Field(default=None, max_length=80)
+    payload: dict[str, Any]
+
+
 
 class AgentTaskUpdatePayload(BaseModel):
     status: str = Field(min_length=1, max_length=20)
@@ -517,6 +526,41 @@ def delete_memory(workspace_id: str, namespace: str, key: str,
 @app.get("/v1/agents/capabilities")
 def list_agent_capabilities(account: dict[str, str] = Depends(current_account)):
     return {"items": default_capabilities().capabilities()}
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/events")
+def list_solana_research_events(
+    workspace_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    mint: str | None = Query(default=None, min_length=32, max_length=64),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        items = _memory_store().list_solana_research_events(
+            account["id"], workspace_id, limit=limit, mint=mint
+        )
+        return {"items": items}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/events", status_code=201)
+def record_solana_research_event(
+    workspace_id: str,
+    payload: SolanaResearchEventPayload,
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return _memory_store().record_solana_research_event(
+            account["id"], workspace_id, payload.event_key, payload.source,
+            payload.event_type, payload.mint, payload.payload, payload.source_timestamp,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/v1/agents/status")
