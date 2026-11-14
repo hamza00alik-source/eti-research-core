@@ -531,3 +531,10 @@ When the explicit time-series regime configuration is supplied, the walk-forward
 A fold/horizon/regime stratum is eligible for descriptive sign-stability aggregation only when it meets the configured minimum rows per regime/horizon and contains at least 3 distinct mints. Ineligible strata remain visible with counts but do not contribute to the fold sign-consistency calculation. The report includes per-fold fixed always-long and fixed-buy-pressure sampled-mark summaries and the positive/negative fold-mean counts.
 
 This is not a significance test, evidence of independent replication, proof of predictive edge, or a strategy-selection rule. Repeated mints, overlapping labels, common market shocks, and irregular snapshot sampling can still create dependence. No thresholds are fitted from validation outcomes. Training and execution remain unauthorized.
+
+
+## Cross-mint and cross-fold validation dependence
+
+The walk-forward `validation_dependence` report now separates same-mint overlapping baseline-to-target intervals from overlapping intervals across different mints. It also reports how many distinct mints recur in more than one validation fold. Cross-mint overlap is relevant because different tokens can still share market-wide shocks and time windows; mint identity alone does not make observations independent.
+
+These are descriptive pair counts over prepared validation rows with valid timezone-aware positive-duration intervals. They do not estimate an effective independent sample size, correct standard errors, remove overlapping labels, or establish independence. They must not be interpreted as a risk-adjusted performance measure or as authorization to train or execute.
