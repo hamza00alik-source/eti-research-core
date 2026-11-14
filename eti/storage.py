@@ -2690,12 +2690,18 @@ class MemoryStore:
 
     @staticmethod
     def _solana_cost_evidence_dict(row: sqlite3.Row, *, duplicate: bool) -> dict[str, Any]:
+        raw = row["evidence_json"]
+        digest_valid = hashlib.sha256(raw.encode("utf-8")).hexdigest() == row["evidence_sha256"]
+        try:
+            evidence = json.loads(raw)
+        except (TypeError, ValueError):
+            evidence = None
+            digest_valid = False
         return {
             "id": row["id"], "label_id": row["label_id"], "mint": row["mint"],
-            "pool_address": row["pool_address"],
-            "evidence": json.loads(row["evidence_json"]),
-            "evidence_sha256": row["evidence_sha256"], "created_at": row["created_at"],
-            "duplicate": duplicate,
+            "pool_address": row["pool_address"], "evidence": evidence,
+            "evidence_sha256": row["evidence_sha256"], "integrity_valid": digest_valid,
+            "created_at": row["created_at"], "duplicate": duplicate,
         }
 
     def list_solana_execution_cost_evidence(
