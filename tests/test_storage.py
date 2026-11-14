@@ -500,3 +500,63 @@ def test_solana_event_ledger_rejects_invalid_event_data(tmp_path):
             "owner", "not-your-workspace", "event-3", "pumpportal",
             "new_token", "A" * 40, {},
         )
+
+
+def _insert_solana_label_for_cost_test(store, owner_id, workspace_id, label_id, mint, pool):
+    with store._connection() as conn:
+        conn.execute(
+            "INSERT INTO solana_research_labels "
+            "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
+            "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (label_id, owner_id, workspace_id, mint, pool, "baseline", "target",
+             3600, json.dumps({"baseline_at": "2026-01-01T00:00:00Z"}), "2026-01-01T00:00:00Z"),
+        )
+
+
+def test_solana_cost_evidence_is_append_only_idempotent_and_workspace_scoped(tmp_path):
+    store = MemoryStore(tmp_path / "eti.sqlite3")
+    workspace = store.create_workspace("owner-a", "solana")
+    other_workspace = store.create_workspace("owner-a", "other")
+    mint, pool, label_id = "A" * 32, "pool-address", "label-1"
+    _insert_solana_label_for_cost_test(store, "owner-a", workspace["id"], label_id, mint, pool)
+    evidence = {"label_id": label_id, "mint": mint, "pool_address": pool,
+                "cost_components": {"spread": {"cost_bps": 12}}}
+    first = store.record_solana_execution_cost_evidence(
+        "owner-a", workspace["id"], label_id, mint, pool, evidence
+    )
+    duplicate = store.record_solana_execution_cost_evidence(
+        "owner-a", workspace["id"], label_id, mint, pool, evidence
+    )
+    assert duplicate["id"] == first["id"]
+    assert duplicate["duplicate"] is True
+    assert len(store.list_solana_execution_cost_evidence("owner-a", workspace["id"])) == 1
+    changed = {**evidence, "cost_components": {"spread": {"cost_bps": 13}}}
+    second = store.record_solana_execution_cost_evidence(
+        "owner-a", workspace["id"], label_id, mint, pool, changed
+    )
+    assert second["id"] != first["id"]
+    assert len(store.list_solana_execution_cost_evidence("owner-a", workspace["id"])) == 2
+    assert store.list_solana_execution_cost_evidence("owner-a", other_workspace["id"]) == []
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.list_solana_execution_cost_evidence("owner-b", workspace["id"])
+
+
+def test_solana_cost_evidence_rejects_wrong_label_identity_and_foreign_label(tmp_path):
+    store = MemoryStore(tmp_path / "eti.sqlite3")
+    workspace = store.create_workspace("owner-a", "solana")
+    mint, pool, label_id = "B" * 32, "pool-address", "label-2"
+    _insert_solana_label_for_cost_test(store, "owner-a", workspace["id"], label_id, mint, pool)
+    good = {"label_id": label_id, "mint": mint, "pool_address": pool}
+    with pytest.raises(ValueError, match="mint"):
+        store.record_solana_execution_cost_evidence(
+            "owner-a", workspace["id"], label_id, "C" * 32, pool, good
+        )
+    with pytest.raises(LookupError, match="label not found"):
+        store.record_solana_execution_cost_evidence(
+            "owner-b", workspace["id"], label_id, mint, pool, good
+        )
+    with pytest.raises(ValueError, match="label_id"):
+        store.record_solana_execution_cost_evidence(
+            "owner-a", workspace["id"], label_id, mint, pool,
+            {**good, "label_id": "different-label"},
+        )
