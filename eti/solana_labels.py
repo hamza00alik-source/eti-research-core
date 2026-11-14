@@ -101,6 +101,10 @@ def build_forward_labels(
                     "actual_elapsed_seconds": round((target_time - base_time).total_seconds(), 3),
                     "sampled_price_return_pct": _pct_change(base_price, target_price),
                     "liquidity_change_pct": _pct_change(base_liquidity, target_liquidity),
+                    "liquidity_deterioration_pct": (
+                        min(_pct_change(base_liquidity, target_liquidity), 0.0)
+                        if _pct_change(base_liquidity, target_liquidity) is not None else None
+                    ),
                     "reported_h24_volume_change_pct": _pct_change(base_volume, target_volume),
                     "exitability_status": "UNKNOWN",
                     "realized_slippage_bps": None,
@@ -113,3 +117,66 @@ def build_forward_labels(
                     ],
                 })
     return labels
+
+
+def chronological_group_split(
+    labels: Iterable[dict[str, Any]],
+    *,
+    train_fraction: float = 0.70,
+    embargo_seconds: int = 86400,
+) -> dict[str, Any]:
+    """Split complete mint/pool groups in time order and purge crossing labels.
+
+    A group is never divided between folds. Training outcomes must end before
+    the validation boundary; validation groups must begin after the embargo.
+    Groups that straddle either boundary are excluded rather than leaked.
+    """
+    if isinstance(train_fraction, bool) or not isinstance(train_fraction, (int, float)) or not 0.5 <= train_fraction < 0.9:
+        raise ValueError("train_fraction must be between 0.5 and 0.9")
+    if isinstance(embargo_seconds, bool) or not isinstance(embargo_seconds, int) or embargo_seconds < 0:
+        raise ValueError("embargo_seconds must be a non-negative integer")
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for label in labels:
+        if not isinstance(label, dict):
+            continue
+        mint, pool = label.get("mint"), label.get("pool_address")
+        start, end = _timestamp(label.get("baseline_at")), _timestamp(label.get("target_at"))
+        if not isinstance(mint, str) or not isinstance(pool, str) or not pool or start is None or end is None or end <= start:
+            continue
+        grouped.setdefault((mint, pool), []).append(label)
+    groups = sorted(
+        grouped.items(),
+        key=lambda pair: min(_timestamp(item["baseline_at"]) for item in pair[1]),
+    )
+    if len(groups) < 3:
+        raise ValueError("at least three distinct mint/pool groups are required for a purged chronological split")
+    boundary_index = max(1, min(len(groups) - 1, int(len(groups) * train_fraction)))
+    boundary_time = min(
+        _timestamp(item["baseline_at"]) for item in groups[boundary_index][1]
+    )
+    validation_start = boundary_time.timestamp() + embargo_seconds
+    train: list[dict[str, Any]] = []
+    validation: list[dict[str, Any]] = []
+    purged_groups = 0
+    for _key, group_labels in groups:
+        group_start = min(_timestamp(item["baseline_at"]) for item in group_labels)
+        group_end = max(_timestamp(item["target_at"]) for item in group_labels)
+        if group_end < boundary_time:
+            train.extend(group_labels)
+        elif group_start.timestamp() >= validation_start:
+            validation.extend(group_labels)
+        else:
+            purged_groups += 1
+    if not train or not validation:
+        raise ValueError("purging and embargo left an empty train or validation fold")
+    return {
+        "train": train,
+        "validation": validation,
+        "boundary_at": boundary_time.isoformat().replace("+00:00", "Z"),
+        "validation_start_at": datetime.fromtimestamp(validation_start, timezone.utc).isoformat().replace("+00:00", "Z"),
+        "embargo_seconds": embargo_seconds,
+        "purged_group_count": purged_groups,
+        "train_group_count": len({(x["mint"], x["pool_address"]) for x in train}),
+        "validation_group_count": len({(x["mint"], x["pool_address"]) for x in validation}),
+        "method": "chronological_grouped_purged_embargo_v1",
+    }
