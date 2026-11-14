@@ -530,6 +530,10 @@ The time-series regime diagnostic emits classified validation-row metadata (mint
 
 These counts remain descriptive, not independent samples: forward labels can overlap and different mints share market-wide shocks. Transition frequencies are not live-ready transition probabilities, do not establish predictive value or executable performance, and do not authorize model fitting, training or execution. Classification continues to use only same-mint/pool history at or before each validation baseline timestamp.
 
+## Multi-configuration regime robustness orchestration
+
+`evaluate_solana_regime_robustness()` runs at least two explicitly named, predeclared time-series classification configurations against the same history and validation rows. It returns each full classification report, pairwise/all-configuration assignment sensitivity, and gap-censored persistence diagnostics for each configuration. This is an orchestration layer only: it does not select the best configuration, tune thresholds, fit a model or authorize training. Configuration choice must be made independently of validation outcomes to avoid validation leakage.
+
 ## Gap-censored regime persistence
 
 `evaluate_solana_regime_persistence()` summarizes observed regime episodes within each mint, pool and horizon. The caller must provide a positive `maximum_gap_seconds` assumption. An episode closes on a regime change, a gap larger than that threshold, a conflicting timestamp or the end of the sample. Episodes ending at gaps, conflicts or sample end are marked right-censored. The report includes episode counts, distinct mint coverage and minimum, median and maximum observed spans.
