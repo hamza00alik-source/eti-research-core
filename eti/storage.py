@@ -132,6 +132,22 @@ class MemoryStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_solana_events_owner_time
                     ON solana_research_events(owner_id, workspace_id, received_at);
+                CREATE TABLE IF NOT EXISTS solana_research_snapshots (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    task_id TEXT NOT NULL,
+                    capability TEXT NOT NULL CHECK(capability IN ('solana.market.scan','solana.token.audit')),
+                    mint TEXT NOT NULL,
+                    pool_address TEXT,
+                    schema_version INTEGER NOT NULL DEFAULT 1,
+                    payload_json TEXT NOT NULL,
+                    payload_sha256 TEXT NOT NULL,
+                    fetched_at TEXT NOT NULL,
+                    UNIQUE(owner_id, workspace_id, task_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_solana_snapshots_owner_mint_time
+                    ON solana_research_snapshots(owner_id, workspace_id, mint, fetched_at);
                 CREATE TABLE IF NOT EXISTS agent_tasks (
                     id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
@@ -1029,9 +1045,40 @@ class MemoryStore:
                 (str(uuid4()), row["owner_id"], row["workspace_id"],
                  _encode_json({"task_id": task_id}), now),
             )
+            # Every completed Solana research task creates one immutable,
+            # point-in-time snapshot in the same transaction as task completion.
+            task_input = json.loads(row["input_json"])
+            if (row["target_capability"] in {"solana.market.scan", "solana.token.audit"}
+                    and isinstance(task_input, dict) and isinstance(result, dict)):
+                mint = task_input.get("mint") or result.get("mint")
+                if isinstance(mint, str) and len(mint) >= 32:
+                    snapshot_id = str(uuid4())
+                    snapshot_json = _encode_json(result)
+                    snapshot_digest = hashlib.sha256(snapshot_json.encode("utf-8")).hexdigest()
+                    pool_address = result.get("pool_address")
+                    evidence = result.get("evidence")
+                    if isinstance(evidence, dict):
+                        pool_address = pool_address or evidence.get("pair_address")
+                    conn.execute(
+                        "INSERT OR IGNORE INTO solana_research_snapshots("
+                        "id,owner_id,workspace_id,task_id,capability,mint,pool_address,"
+                        "schema_version,payload_json,payload_sha256,fetched_at) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        (snapshot_id, row["owner_id"], row["workspace_id"], task_id,
+                         row["target_capability"], mint,
+                         pool_address if isinstance(pool_address, str) else None,
+                         1, snapshot_json, snapshot_digest, now),
+                    )
+                    conn.execute(
+                        "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                        "VALUES(?,?,?,'solana.snapshot.persisted',?,?)",
+                        (str(uuid4()), row["owner_id"], row["workspace_id"],
+                         _encode_json({"task_id": task_id, "snapshot_id": snapshot_id,
+                                       "capability": row["target_capability"], "mint": mint,
+                                       "payload_sha256": snapshot_digest}), now),
+                    )
             # Persist the audit follow-up in the same transaction as scan
             # completion, eliminating a crash window between completion and enqueue.
-            task_input = json.loads(row["input_json"])
             if (row["target_capability"] == "solana.market.scan"
                     and row["requester"] == "eti.solana.ingest"
                     and isinstance(task_input, dict)
@@ -2274,6 +2321,37 @@ class MemoryStore:
             "payload_sha256": row["payload_sha256"], "received_at": row["received_at"],
             "duplicate": duplicate, "payload_conflict": payload_conflict,
         }
+
+    def list_solana_research_snapshots(
+        self, owner_id: str, workspace_id: str, limit: int = 100,
+        mint: str | None = None,
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be an integer from 1 to 500")
+        query = ("SELECT * FROM solana_research_snapshots "
+                 "WHERE owner_id=? AND workspace_id=?")
+        params: list[Any] = [owner_id, workspace_id]
+        if mint is not None:
+            mint = _required_text(mint, "mint", 64)
+            query += " AND mint=?"
+            params.append(mint)
+        query += " ORDER BY fetched_at DESC, id DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+        return [{
+            "id": row["id"], "task_id": row["task_id"],
+            "capability": row["capability"], "mint": row["mint"],
+            "pool_address": row["pool_address"],
+            "schema_version": row["schema_version"],
+            "payload": json.loads(row["payload_json"]),
+            "payload_sha256": row["payload_sha256"],
+            "fetched_at": row["fetched_at"],
+        } for row in rows]
 
     def list_solana_research_events(
         self, owner_id: str, workspace_id: str, limit: int = 100,
