@@ -506,3 +506,96 @@ def test_regime_diagnostics_reject_invalid_or_unapproved_threshold_shapes():
             "turnover_liquidity_ratio_high": 2.0,
             "turnover_liquidity_ratio_low": 0.5,
         })
+
+
+
+def test_time_series_regimes_use_only_prior_same_mint_pool_prices():
+    from datetime import datetime, timedelta, timezone
+    from eti.solana_evaluation import evaluate_solana_time_series_regimes
+
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    history = []
+    for index in range(12):
+        history.append({
+            "mint": "mint-a",
+            "pool_address": "pool-a",
+            "baseline_at": (start + timedelta(hours=index)).isoformat(),
+            "features": {"price_usd": 100.0 * (1.01 ** index)},
+        })
+    validation = [{
+        "mint": "mint-a",
+        "pool_address": "pool-a",
+        "baseline_at": (start + timedelta(hours=11)).isoformat(),
+        "target_sampled_price_return_pct": 2.5,
+    }]
+    config = {
+        "lookback_observations": 10,
+        "minimum_observations": 10,
+        "trend_abs_return_pct": 3.0,
+        "volatility_high_pct": 2.0,
+        "volatility_low_pct": 0.1,
+    }
+    report = evaluate_solana_time_series_regimes(history, validation, config)
+    assert report["status"] == "TIME_SERIES_PROXY_REGIME_DIAGNOSTICS_ONLY"
+    assert report["classified_row_count"] == 1
+    assert "UPWARD_TREND_PROXY__LOW_SAMPLED_VOLATILITY" in report["regimes"]
+
+    # A future price observation and another pool must not affect this label.
+    polluted_history = history + [{
+        "mint": "mint-a",
+        "pool_address": "pool-a",
+        "baseline_at": (start + timedelta(hours=99)).isoformat(),
+        "features": {"price_usd": 1_000_000.0},
+    }, {
+        "mint": "mint-a",
+        "pool_address": "other-pool",
+        "baseline_at": (start + timedelta(hours=12)).isoformat(),
+        "features": {"price_usd": 1_000_000.0},
+    }]
+    future_safe = evaluate_solana_time_series_regimes(polluted_history, validation, config)
+    assert future_safe["regimes"] == report["regimes"]
+
+
+def test_time_series_regimes_withhold_sparse_and_conflicting_history():
+    from datetime import datetime, timedelta, timezone
+    from eti.solana_evaluation import evaluate_solana_time_series_regimes
+
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    sparse = [{
+        "mint": "mint-a", "pool_address": "pool-a",
+        "baseline_at": (start + timedelta(hours=i)).isoformat(),
+        "features": {"price_usd": 100.0 + i},
+    } for i in range(4)]
+    validation = [{
+        "mint": "mint-a", "pool_address": "pool-a",
+        "baseline_at": (start + timedelta(hours=3)).isoformat(),
+        "target_sampled_price_return_pct": 1.0,
+    }]
+    config = {
+        "lookback_observations": 10, "minimum_observations": 5,
+        "trend_abs_return_pct": 2.0, "volatility_high_pct": 2.0,
+        "volatility_low_pct": 0.2,
+    }
+    report = evaluate_solana_time_series_regimes(sparse, validation, config)
+    assert report["classified_row_count"] == 0
+    assert report["unclassified_reasons"]["insufficient_prior_baseline_observations"] == 1
+
+    conflicting = sparse + [{
+        **sparse[-1], "features": {"price_usd": 999.0},
+    }]
+    report = evaluate_solana_time_series_regimes(conflicting, validation, config)
+    assert report["classified_row_count"] == 0
+    assert report["unclassified_reasons"]["conflicting_prices_at_same_timestamp"] == 1
+
+
+def test_time_series_regime_config_is_strict_and_training_stays_locked():
+    from eti.solana_evaluation import evaluate_solana_time_series_regimes
+
+    with pytest.raises(ValueError):
+        evaluate_solana_time_series_regimes([], [], {"lookback_observations": 5})
+    with pytest.raises(ValueError):
+        evaluate_solana_time_series_regimes([], [], {
+            "lookback_observations": 3, "minimum_observations": 5,
+            "trend_abs_return_pct": 1.0, "volatility_high_pct": 2.0,
+            "volatility_low_pct": 0.5,
+        })
