@@ -6,7 +6,8 @@ from typing import Callable
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, balanced_accuracy_score
+from sklearn.metrics import (accuracy_score, balanced_accuracy_score,
+                             confusion_matrix, precision_recall_fscore_support)
 
 @dataclass(frozen=True)
 class Fold:
@@ -68,6 +69,7 @@ def run_walk_forward(
     folds = walk_forward_folds(len(clean), min_train, validation_size, test_size,
                                step_size, purge_bars)
     x, y = clean[feature_columns], clean[label_column]
+    class_labels = sorted(pd.unique(y).tolist())
     results = []
     for number, fold in enumerate(folds):
         train_x, train_y = x.iloc[fold.train_start:fold.train_end], y.iloc[fold.train_start:fold.train_end]
@@ -146,9 +148,25 @@ def run_nested_walk_forward(dataset: pd.DataFrame, feature_columns: list[str],
             candidate_test_pred = np.asarray(callback(refit_x, refit_y, test_x))
             if len(candidate_test_pred) != len(test_y):
                 raise ValueError(f"Candidate {name} returned an invalid test prediction count")
+            precision, recall, f1, support = precision_recall_fscore_support(
+                test_y, candidate_test_pred, labels=class_labels, zero_division=0
+            )
             test_candidate_metrics[name] = {
                 "balanced_accuracy": float(balanced_accuracy_score(test_y, candidate_test_pred)),
                 "accuracy": float(accuracy_score(test_y, candidate_test_pred)),
+                "per_class": {
+                    str(label): {
+                        "precision": float(precision[j]),
+                        "recall": float(recall[j]),
+                        "f1": float(f1[j]),
+                        "support": int(support[j]),
+                    }
+                    for j, label in enumerate(class_labels)
+                },
+                "confusion_matrix_labels": [str(label) for label in class_labels],
+                "confusion_matrix": confusion_matrix(
+                    test_y, candidate_test_pred, labels=class_labels
+                ).astype(int).tolist(),
             }
             if name == selected:
                 selected_test_pred = candidate_test_pred
@@ -164,10 +182,29 @@ def run_nested_walk_forward(dataset: pd.DataFrame, feature_columns: list[str],
                         "test_class_counts": {str(int(label)): int((test_y == label).sum()) for label in sorted(y.unique())},
                         "boundaries": asdict(fold)})
     scores = [r["test_balanced_accuracy"] for r in results]
+    candidate_summary = {}
+    for name in candidates:
+        candidate_scores = [
+            r["test_candidate_metrics"][name]["balanced_accuracy"] for r in results
+        ]
+        candidate_accuracies = [
+            r["test_candidate_metrics"][name]["accuracy"] for r in results
+        ]
+        candidate_summary[name] = {
+            "mean_outer_test_balanced_accuracy": float(np.mean(candidate_scores)),
+            "std_outer_test_balanced_accuracy": float(np.std(candidate_scores)),
+            "worst_outer_test_balanced_accuracy": float(np.min(candidate_scores)),
+            "mean_outer_test_accuracy": float(np.mean(candidate_accuracies)),
+            "selected_on_validation_count": int(sum(
+                r["selected_candidate"] == name for r in results
+            )),
+            "fold_count": len(results),
+        }
     return {"fold_count": len(results), "folds": results,
             "mean_test_balanced_accuracy": float(np.mean(scores)),
             "test_balanced_accuracy_ci": bootstrap_fold_confidence_interval(scores),
-            "warning": "Nested research evaluation; each outer test fold is excluded from candidate selection. Not evidence of future profitability."}
+            "candidate_summary": candidate_summary,
+            "warning": "Nested research evaluation; each outer test fold is excluded from candidate selection. Candidate outer-test metrics are diagnostics only and must not be used to retune on the same test folds."}
 
 
 def run_multi_market_walk_forward(datasets: dict[str, pd.DataFrame],
