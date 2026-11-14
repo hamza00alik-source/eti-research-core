@@ -170,11 +170,13 @@ class CcxtPublicProvider:
         if result["availability"]["current_open_interest"]:
             try:
                 row = exchange.fetch_open_interest(symbol)
-                value = row.get("openInterestAmount") or row.get("openInterestValue")
+                amount = row.get("openInterestAmount")
+                quote_value = row.get("openInterestValue")
+                value = amount if amount is not None else quote_value
                 if value is not None:
                     result["current_open_interest"] = {
                         "value": float(value), "timestamp": row.get("timestamp"),
-                        "unit": "contracts_or_quote_value_as_reported_by_venue",
+                        "unit": "contracts" if amount is not None else "quote_value",
                     }
             except Exception as exc:
                 result["availability"]["current_open_interest_error"] = type(exc).__name__
