@@ -231,3 +231,8 @@ Market snapshots now include a `data_quality` report with observed candle count,
 ## Derivatives history quality
 
 Funding and open-interest histories are checked for malformed millisecond epochs, non-finite values, negative open interest, duplicate timestamps and out-of-order observations before feature alignment. ETI reports the observed interval distribution rather than assuming a universal funding settlement cadence. Open-interest amount and quote-value units remain labelled and are not silently normalized or compared. These diagnostics do not enable derivatives approval or live execution.
+
+
+## Mobile model export
+
+ETI's optional mobile export path converts a trusted fitted candidate to ONNX, checks the graph, runs CPU inference parity against the source scikit-learn estimator, and writes a metadata file containing the exact ordered feature schema, class mapping and temperature-calibration value. Install `requirements-mobile.txt` only in the training/export environment. The Android app includes ONNX Runtime, but a model is not bundled until a candidate has been trained, reviewed and explicitly exported. Local feature generation and device-level inference validation remain required before offline use.
