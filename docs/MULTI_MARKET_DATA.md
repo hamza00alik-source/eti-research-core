@@ -65,3 +65,18 @@ A quality score must be explainable. Missing data must never be fabricated or pr
 ## Scope of this implementation
 
 The MarketDataHub provides read-only adapter orchestration, instrument discovery, validated history retrieval and explicit source failover. It does not implement orders, scrape arbitrary websites, bypass paywalls, or guarantee every public endpoint is reachable from every cloud region.
+
+
+## Running a bounded data-readiness scan
+
+The scanner can discover a small, venue-diverse sample and check that each candidate has enough validated history. It does not fit models or place orders:
+
+```bash
+python -m eti.pipeline --scan-universe \
+  --asset-classes crypto,forex,equity,commodity,index \
+  --market-types spot --timeframe 1h --limit 2000 \
+  --min-market-rows 662 --max-per-asset-class 5 --max-per-venue 2 \
+  --output artifacts/market-universe.json
+```
+
+The report records discovered counts, sources checked, provider errors, selected instruments, data readiness, provenance and timestamp-gap diagnostics. The initial default scan uses spot markets to keep the first research comparison simpler; derivatives can be included explicitly, but require separate contract, funding, expiry, margin and cost assumptions before model evaluation.
