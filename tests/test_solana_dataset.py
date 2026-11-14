@@ -116,3 +116,31 @@ def test_bounded_export_marks_label_target_outside_snapshot_window(tmp_path):
     assert [row["id"] for row in exported["snapshots"]] == ["baseline"]
     assert exported["labels"][0]["baseline_snapshot_in_export"] is True
     assert exported["labels"][0]["target_snapshot_in_export"] is False
+
+def test_dataset_export_reports_malformed_stored_json_without_crashing(tmp_path):
+    store = MemoryStore(tmp_path / "malformed-export.sqlite3")
+    workspace = store.create_workspace("owner-1", "malformed")
+    with store._connection() as conn:
+        conn.execute(
+            "INSERT INTO solana_research_snapshots "
+            "(id,owner_id,workspace_id,task_id,capability,mint,pool_address,schema_version,"
+            "payload_json,payload_sha256,fetched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            ("bad-snapshot", "owner-1", workspace["id"], "task-bad", "solana.market.scan",
+             "A" * 40, "PoolA", 1, "{not-json", "invalid-digest",
+             "2026-01-01T00:00:00Z"),
+        )
+        conn.execute(
+            "INSERT INTO solana_research_labels "
+            "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
+            "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("bad-label", "owner-1", workspace["id"], "A" * 40, "PoolA",
+             "bad-snapshot", "missing-target", 300, "{not-json",
+             "2026-01-02T00:00:00Z"),
+        )
+
+    exported = store.export_solana_research_dataset("owner-1", workspace["id"])
+    assert exported["snapshots"][0]["payload"] is None
+    assert exported["validation"]["issue_counts"]["malformed_payload"] == 1
+    assert exported["validation"]["malformed_label_count"] == 1
+    assert exported["labels"][0]["label"] is None
+    assert exported["labels"][0]["label_parse_error"] is True
