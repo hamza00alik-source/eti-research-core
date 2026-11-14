@@ -25,6 +25,7 @@ def _summarize(returns: list[float]) -> dict[str, Any]:
             "trade_count": 0, "mean_return_pct": None, "median_return_pct": None,
             "win_rate": None, "cumulative_compounded_return_pct": None,
             "max_drawdown_pct": None,
+            "compounding_interpretation": "NOT_APPLICABLE_NO_VALID_OBSERVATIONS",
         }
     ordered = sorted(returns)
     equity = peak = 1.0
@@ -44,6 +45,9 @@ def _summarize(returns: list[float]) -> dict[str, Any]:
         "win_rate": sum(x > 0 for x in returns) / len(returns),
         "cumulative_compounded_return_pct": compounded,
         "max_drawdown_pct": max_drawdown,
+        "compounding_interpretation": (
+            "POOLED_SAMPLED_OBSERVATION_DIAGNOSTIC_NOT_PORTFOLIO_PNL"
+        ),
     }
 
 
@@ -105,6 +109,12 @@ def evaluate_solana_research_folds(
         "model_fitting_performed": False,
         "training_authorized": False,
         "outcome_basis": "gross_sampled_price_return_pct",
+        "aggregate_metric_interpretation": (
+            "Pooled compounded returns and sequential drawdown are ordering-dependent "
+            "sampled-observation diagnostics, not a portfolio equity curve, executable "
+            "trade sequence, or realized P&L. Validation observations may overlap, "
+            "repeat mints, and span different horizons."
+        ),
         "buy_pressure_rule": {
             "definition": "txns_h1_buys / (txns_h1_buys + txns_h1_sells) >= threshold",
             "threshold": float(buy_pressure_threshold),
@@ -122,6 +132,7 @@ def evaluate_solana_research_folds(
             "No fees, spread, price impact, priority fees, latency, failed exits or capital constraints are modeled.",
             "The fixed buy-pressure comparator is descriptive and is not a validated trading strategy.",
             "Aggregate metrics pool validation observations across folds and are not an independent final holdout.",
+            "Compounded return and sequential drawdown are pooled sampled-observation diagnostics, not portfolio performance or realized P&L.",
             "No threshold selection, model fitting, calibration or training approval occurs.",
         ],
     }
@@ -423,13 +434,19 @@ def evaluate_prepared_solana_walk_forward(
             "rows": validation_cost_evidence,
             "note": "Only prepared validation labels are checked. These are cost-adjusted sampled-mark scenarios, not executable fills, net returns, or realized P&L.",
         }
+    fold_validation_label_count = sum(item["validation_label_count"] for item in fold_metadata)
+    prepared_validation_interval_count = len(validation_intervals)
     report["validation_dependence"] = {
-        "validation_label_count": len(validation_intervals),
+        "fold_validation_label_count": fold_validation_label_count,
+        "unprepared_validation_label_count": sum(item["unprepared_validation_count"] for item in fold_metadata),
+        "prepared_validation_interval_count": prepared_validation_interval_count,
+        "validation_label_count": prepared_validation_interval_count,
         "distinct_validation_mint_count": len(intervals_by_mint),
         "repeated_mint_label_count": len(validation_intervals) - len(intervals_by_mint),
+        "dependence_scope": "PREPARED_VALIDATION_ROWS_WITH_VALID_INTERVALS_ONLY",
         "overlapping_interval_pair_count": overlapping_pairs,
         "overlap_comparison_count": overlap_comparisons,
-        "note": "Overlapping labels and repeated mints are dependent observations; aggregate metrics must not be interpreted as independent trades or independent samples.",
+        "note": "Dependence counts cover prepared validation rows with parseable, timezone-aware, positive-duration intervals; fold_validation_label_count also includes unprepared labels. Overlapping labels and repeated mints are dependent observations, not independent trades or samples.",
     }
     report["walk_forward"] = {
         "method": "chronological_expanding_mint_grouped_purged_embargo_v1",
