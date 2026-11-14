@@ -138,15 +138,30 @@ def run_nested_walk_forward(dataset: pd.DataFrame, feature_columns: list[str],
         refit_end = test_start - purge_bars
         refit_x, refit_y = x.iloc[:refit_end], y.iloc[:refit_end]
         test_x, test_y = x.iloc[test_start:fold.test_end], y.iloc[test_start:fold.test_end]
-        test_pred = np.asarray(candidates[selected](refit_x, refit_y, test_x))
-        if len(test_pred) != len(test_y):
-            raise ValueError(f"Selected candidate {selected} returned an invalid test prediction count")
+        # Score every frozen candidate on the outer test window for diagnostics only.
+        # These scores are never used to change the validation-selected candidate.
+        test_candidate_metrics = {}
+        selected_test_pred = None
+        for name, callback in candidates.items():
+            candidate_test_pred = np.asarray(callback(refit_x, refit_y, test_x))
+            if len(candidate_test_pred) != len(test_y):
+                raise ValueError(f"Candidate {name} returned an invalid test prediction count")
+            test_candidate_metrics[name] = {
+                "balanced_accuracy": float(balanced_accuracy_score(test_y, candidate_test_pred)),
+                "accuracy": float(accuracy_score(test_y, candidate_test_pred)),
+            }
+            if name == selected:
+                selected_test_pred = candidate_test_pred
+        if selected_test_pred is None:
+            raise RuntimeError("Validation-selected candidate was not evaluated on the test window")
         results.append({"fold": i, "selected_candidate": selected,
                         "validation_scores": candidate_scores,
-                        "test_balanced_accuracy": float(balanced_accuracy_score(test_y, test_pred)),
-                        "test_accuracy": float(accuracy_score(test_y, test_pred)),
-                        "test_predictions": test_pred.astype(int).tolist(),
+                        "test_candidate_metrics": test_candidate_metrics,
+                        "test_balanced_accuracy": test_candidate_metrics[selected]["balanced_accuracy"],
+                        "test_accuracy": test_candidate_metrics[selected]["accuracy"],
+                        "test_predictions": selected_test_pred.astype(int).tolist(),
                         "test_actual": test_y.astype(int).tolist(),
+                        "test_class_counts": {str(int(label)): int((test_y == label).sum()) for label in sorted(y.unique())},
                         "boundaries": asdict(fold)})
     scores = [r["test_balanced_accuracy"] for r in results]
     return {"fold_count": len(results), "folds": results,
