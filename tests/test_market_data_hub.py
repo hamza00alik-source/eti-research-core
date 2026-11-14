@@ -124,3 +124,28 @@ def test_ccxt_discovery_keeps_spot_when_one_derivative_market_type_fails(monkeyp
     assert result["instruments"][0].market_type == "spot"
     assert result["source_errors"][0]["venue"] == "binance"
     assert "futures endpoint unavailable" in result["source_errors"][0]["message"]
+
+
+def test_yahoo_discovery_is_scoped_and_keeps_partial_asset_class_results(monkeypatch):
+    import eti.market_data_hub as hub_module
+
+    calls = []
+    class Provider:
+        def __init__(self, asset_class):
+            self.asset_class = asset_class
+        def discover_markets(self, limit=500, market_type="spot"):
+            calls.append((self.asset_class, market_type))
+            if self.asset_class == "equity":
+                raise RuntimeError("equity reference endpoint unavailable")
+            return [{"symbol": "EURUSD=X"}]
+
+    monkeypatch.setattr(hub_module, "YahooFinanceProvider", Provider)
+    adapter = hub_module.YahooFinanceMarketAdapter()
+    result = hub_module.MarketDataHub([adapter]).discover(
+        asset_class="forex", market_type="spot"
+    )
+    assert calls == [("forex", "spot"), ("equity", "spot"), ("index", "spot")]
+    assert result["count"] == 1
+    assert result["instruments"][0].asset_class == "forex"
+    assert len(result["source_errors"]) == 1
+    assert "equity reference endpoint unavailable" in result["source_errors"][0]["message"]
