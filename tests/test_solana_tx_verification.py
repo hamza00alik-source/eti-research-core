@@ -165,3 +165,11 @@ def test_transaction_response_must_include_requested_signature():
     result = _verify(FakeRpc(_status(), tx))
     assert result["status"] == "TRANSACTION_DETAILS_INVALID"
     assert result["verified"] is False
+
+def test_wallet_must_be_referenced_by_transaction():
+    tx = _transaction()
+    tx["transaction"]["message"]["accountKeys"] = [{"pubkey": POOL}]
+    result = _verify(FakeRpc(_status(), tx))
+    assert result["status"] == "WALLET_NOT_REFERENCED"
+    assert result["verified"] is False
+\n
