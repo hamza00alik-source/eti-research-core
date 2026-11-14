@@ -45,14 +45,26 @@ def scan_market_universe(
     candidates: list[dict[str, Any]] = []
 
     for asset in assets:
-        result = data_hub.discover(asset_class=asset)
+        results = [
+            data_hub.discover(asset_class=asset, market_type=market_type)
+            for market_type in types
+        ]
+        discovered = [
+            instrument for result in results for instrument in result["instruments"]
+        ]
+        source_errors = [
+            error for result in results for error in result["source_errors"]
+        ]
+        sources_checked = sorted({
+            venue for result in results for venue in result["sources_checked"]
+        })
         discovery[asset] = {
-            "discovered_count": result["count"],
-            "sources_checked": result["sources_checked"],
-            "source_errors": result["source_errors"],
+            "discovered_count": len({item.key: item for item in discovered}),
+            "sources_checked": sources_checked,
+            "source_errors": source_errors,
         }
         by_venue: dict[str, list[InstrumentSpec]] = {}
-        for instrument in result["instruments"]:
+        for instrument in discovered:
             if instrument.market_type in types and instrument.active:
                 by_venue.setdefault(instrument.venue, []).append(instrument)
         for venue_items in by_venue.values():
