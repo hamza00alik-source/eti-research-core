@@ -274,3 +274,86 @@ def test_dataset_export_does_not_resolve_label_target_from_another_owner(tmp_pat
     assert label["target_snapshot_in_export"] is False
     assert exported["validation"]["label_reference_issue_count"] == 1
     assert all(row["id"] != "foreign-target" for row in exported["snapshots"])
+
+
+def test_training_preparation_uses_only_valid_baseline_features():
+    from eti.solana_dataset import prepare_solana_training_rows
+
+    baseline = {
+        "id": "base", "capability": "solana.market.scan", "mint": "A" * 40,
+        "pool_address": "PoolA", "schema_version": 1,
+        "fetched_at": "2026-01-01T00:00:00Z",
+        "payload": {"evidence": {
+            "price_usd": 1.0, "liquidity_usd": 100.0, "volume_h24_usd": 20.0,
+            "txns_h1_buys": 3, "txns_h1_sells": 2,
+        }},
+    }
+    target = {
+        "id": "target", "capability": "solana.market.scan", "mint": "A" * 40,
+        "pool_address": "PoolA", "schema_version": 1,
+        "fetched_at": "2026-01-01T00:06:00Z",
+        "payload": {"evidence": {
+            "price_usd": 2.0, "liquidity_usd": 90.0, "volume_h24_usd": 30.0,
+            "txns_h1_buys": 5, "txns_h1_sells": 1,
+        }},
+    }
+    exported = {
+        "schema": "eti.solana.research_dataset.v1",
+        "snapshots": [baseline, target],
+        "labels": [{
+            "id": "label-1", "mint": "A" * 40, "pool_address": "PoolA",
+            "baseline_snapshot_id": "base", "target_snapshot_id": "target",
+            "baseline_snapshot_in_export": True, "target_snapshot_in_export": True,
+            "horizon_seconds": 300, "label_parse_error": False,
+            "reference_issues": [],
+            "label": {"sampled_price_return_pct": 100.0},
+        }],
+    }
+
+    prepared = prepare_solana_training_rows(exported)
+    assert prepared["status"] == "PREPARATION_ONLY"
+    assert prepared["training_authorized"] is False
+    assert prepared["eligible_row_count"] == 1
+    row = prepared["rows"][0]
+    assert row["features"]["price_usd"] == 1.0
+    assert row["target_sampled_price_return_pct"] == 100.0
+    assert "target_price_usd" not in row["features"]
+    assert row["features"] == baseline["payload"]["evidence"]
+
+
+def test_training_preparation_excludes_bad_labels_and_truncated_targets():
+    from eti.solana_dataset import prepare_solana_training_rows
+
+    baseline = {
+        "id": "base", "capability": "solana.market.scan", "mint": "A" * 40,
+        "pool_address": "PoolA", "schema_version": 1,
+        "fetched_at": "2026-01-01T00:00:00Z",
+        "payload": {"evidence": {
+            "price_usd": 1.0, "liquidity_usd": 100.0, "volume_h24_usd": 20.0,
+            "txns_h1_buys": 3, "txns_h1_sells": 2,
+        }},
+    }
+    common = {
+        "mint": "A" * 40, "pool_address": "PoolA",
+        "baseline_snapshot_id": "base", "horizon_seconds": 300,
+        "baseline_snapshot_in_export": True, "label_parse_error": False,
+        "label": {"sampled_price_return_pct": 5.0},
+    }
+    exported = {
+        "schema": "eti.solana.research_dataset.v1",
+        "snapshots": [baseline],
+        "labels": [
+            {**common, "id": "missing-target", "target_snapshot_id": "not-exported",
+             "target_snapshot_in_export": False, "reference_issues": []},
+            {**common, "id": "corrupt-reference", "target_snapshot_id": "not-exported",
+             "target_snapshot_in_export": True,
+             "reference_issues": ["target_snapshot_missing_or_outside_workspace"]},
+        ],
+    }
+    prepared = prepare_solana_training_rows(exported)
+    assert prepared["eligible_row_count"] == 0
+    assert prepared["excluded_label_count"] == 2
+    assert prepared["exclusion_counts"] == {
+        "referenced_snapshot_not_in_export": 1,
+        "label_reference_issues": 1,
+    }
