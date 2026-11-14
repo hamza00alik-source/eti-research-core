@@ -81,3 +81,38 @@ def test_dataset_validator_does_not_apply_market_features_to_audit_snapshots():
     }])
     assert report["issue_counts"]["missing_evidence"] == 0
     assert report["issue_counts"]["missing_feature_values"] == 0
+
+
+def test_bounded_export_marks_label_target_outside_snapshot_window(tmp_path):
+    import hashlib
+
+    store = MemoryStore(tmp_path / "bounded-label-export.sqlite3")
+    workspace = store.create_workspace("owner-1", "bounded")
+    payload = '{"evidence":{"price_usd":1,"liquidity_usd":2,"volume_h24_usd":3,"txns_h1_buys":4,"txns_h1_sells":5}}'
+    digest = hashlib.sha256(payload.encode()).hexdigest()
+    with store._connection() as conn:
+        for snapshot_id, task_id, stamp in (
+            ("baseline", "task-1", "2026-01-01T00:00:00Z"),
+            ("target", "task-2", "2026-01-02T00:00:00Z"),
+        ):
+            conn.execute(
+                "INSERT INTO solana_research_snapshots "
+                "(id,owner_id,workspace_id,task_id,capability,mint,pool_address,schema_version,"
+                "payload_json,payload_sha256,fetched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (snapshot_id, "owner-1", workspace["id"], task_id, "solana.market.scan",
+                 "A" * 40, "PoolA", 1, payload, digest, stamp),
+            )
+        conn.execute(
+            "INSERT INTO solana_research_labels "
+            "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
+            "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("label-1", "owner-1", workspace["id"], "A" * 40, "PoolA",
+             "baseline", "target", 300, '{"sampled_price_return_pct":10}',
+             "2026-01-02T00:00:00Z"),
+        )
+
+    exported = store.export_solana_research_dataset("owner-1", workspace["id"], limit=1)
+    assert exported["truncated_at_limit"] is True
+    assert [row["id"] for row in exported["snapshots"]] == ["baseline"]
+    assert exported["labels"][0]["baseline_snapshot_in_export"] is True
+    assert exported["labels"][0]["target_snapshot_in_export"] is False
