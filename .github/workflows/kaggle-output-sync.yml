@@ -53,6 +53,23 @@ jobs:
           echo "Downloaded files:"
           find downloaded -type f -printf '%p (%s bytes)\n' | sort
 
+      - name: Inspect Kaggle execution log and preserve diagnostics
+        if: always()
+        run: |
+          mkdir -p downloaded/diagnostics
+          {
+            echo "## Downloaded JSON and model files"
+            find downloaded -type f \( -name '*.json' -o -name '*.joblib' -o -name '*.zip' \) -printf '%p (%s bytes)\n' | sort || true
+            echo
+            echo "## Kaggle notebook execution log (last 300 lines)"
+            log_file="$(find downloaded -type f -name 'eti-first-training-kaggle.log' -print -quit)"
+            if [ -n "$log_file" ]; then
+              tail -n 300 "$log_file"
+            else
+              echo "No eti-first-training-kaggle.log was downloaded."
+            fi
+          } | tee downloaded/diagnostics/execution-diagnostics.txt
+
       - name: Validate and summarize ETI research report
         run: |
           python - <<'PY'
@@ -176,11 +193,11 @@ jobs:
           PY
 
       - name: Publish research report and compact summary
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: eti-kaggle-training-output
           path: |
             downloaded/
-            training-summary.json
           if-no-files-found: error
           retention-days: 30
