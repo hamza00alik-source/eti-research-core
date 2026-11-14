@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       kernel:
-        description: "Kaggle notebook slug"
-        required: true
-        default: "hamza00alik/eti-first-training-kaggle"
+        description: "Optional Kaggle notebook slug; leave blank to discover the ETI notebook"
+        required: false
+        default: ""
 
 permissions:
   contents: read
