@@ -6,6 +6,7 @@ The fixed buy-pressure rule is a transparent comparator, not a fitted strategy.
 from __future__ import annotations
 
 import math
+import random
 from datetime import datetime
 from typing import Any, Iterable
 
@@ -51,6 +52,64 @@ def _summarize(returns: list[float]) -> dict[str, Any]:
     }
 
 
+def _cluster_bootstrap_mean_interval(
+    cluster_returns: dict[str, list[float]],
+    *,
+    replicates: int = 1000,
+    confidence_level: float = 0.95,
+    seed: int = 1729,
+) -> dict[str, Any]:
+    """Exploratory percentile interval resampling whole mint clusters.
+
+    The estimand is the row-weighted mean among selected observations. Sampling
+    whole mints preserves within-mint dependence, but does not correct selection,
+    regime drift, overlapping cross-mint market shocks, or provider bias.
+    """
+    clusters = [values for _, values in sorted(cluster_returns.items()) if values]
+    cluster_count = len(clusters)
+    result: dict[str, Any] = {
+        "method": "MINT_CLUSTER_BOOTSTRAP_PERCENTILE",
+        "confidence_level": confidence_level,
+        "replicates": replicates,
+        "seed": seed,
+        "cluster_count": cluster_count,
+        "mean_return_pct_interval": None,
+        "status": "INSUFFICIENT_MINT_CLUSTERS",
+        "minimum_clusters_for_interval": 20,
+        "interpretation": (
+            "Exploratory cluster-resampling interval for the row-weighted mean; "
+            "not a significance test, predictive guarantee, portfolio return, "
+            "or correction for shared market shocks."
+        ),
+    }
+    if cluster_count < 20:
+        return result
+    rng = random.Random(seed)
+    estimates: list[float] = []
+    for _ in range(replicates):
+        sampled = [clusters[rng.randrange(cluster_count)] for _ in range(cluster_count)]
+        values = [value for cluster in sampled for value in cluster]
+        if values:
+            estimates.append(sum(values) / len(values))
+    if not estimates:
+        result["status"] = "NO_BOOTSTRAP_ESTIMATES"
+        return result
+    estimates.sort()
+    tail = (1.0 - confidence_level) / 2.0
+
+    def percentile(q: float) -> float:
+        position = (len(estimates) - 1) * q
+        lower = math.floor(position)
+        upper = math.ceil(position)
+        if lower == upper:
+            return estimates[lower]
+        return estimates[lower] + (estimates[upper] - estimates[lower]) * (position - lower)
+
+    result["mean_return_pct_interval"] = [percentile(tail), percentile(1.0 - tail)]
+    result["status"] = "EXPLORATORY_INTERVAL_AVAILABLE"
+    return result
+
+
 def evaluate_solana_research_folds(
     folds: Iterable[dict[str, Any]],
     *,
@@ -62,6 +121,9 @@ def evaluate_solana_research_folds(
     fold_reports: list[dict[str, Any]] = []
     all_returns: dict[str, list[float]] = {
         "no_trade": [], "always_long": [], "buy_pressure": [],
+    }
+    cluster_returns: dict[str, dict[str, list[float]]] = {
+        "always_long": {}, "buy_pressure": {},
     }
     excluded_rows = 0
     for fold_number, fold in enumerate(folds, start=1):
@@ -95,6 +157,14 @@ def evaluate_solana_research_folds(
                 pressure.append(outcome)
         all_returns["always_long"].extend(always)
         all_returns["buy_pressure"].extend(pressure)
+        for outcome, row in valid:
+            mint = row.get("mint")
+            cluster_id = mint if isinstance(mint, str) and mint.strip() else "__missing_mint_cluster__"
+            cluster_returns["always_long"].setdefault(cluster_id, []).append(outcome)
+            features = row["features"]
+            total = features["txns_h1_buys"] + features["txns_h1_sells"]
+            if math.isfinite(total) and total > 0 and features["txns_h1_buys"] / total >= buy_pressure_threshold:
+                cluster_returns["buy_pressure"].setdefault(cluster_id, []).append(outcome)
         fold_reports.append({
             "fold": fold.get("fold", fold_number),
             "validation_rows": len(valid),
@@ -126,6 +196,20 @@ def evaluate_solana_research_folds(
             "always_long": _summarize(all_returns["always_long"]),
             "fixed_buy_pressure": _summarize(all_returns["buy_pressure"]),
         },
+        "cluster_uncertainty": {
+            "always_long": _cluster_bootstrap_mean_interval(cluster_returns["always_long"]),
+            "fixed_buy_pressure": _cluster_bootstrap_mean_interval(cluster_returns["buy_pressure"]),
+            "no_trade": {
+                "status": "NOT_APPLICABLE_NO_TRADE_OBSERVATIONS",
+                "mean_return_pct_interval": None,
+                "cluster_count": 0,
+            },
+            "note": (
+                "Intervals are withheld below 20 distinct mint clusters. Even when "
+                "available, this exploratory bootstrap does not account for common "
+                "market shocks across mints or establish strategy significance."
+            ),
+        },
         "excluded_validation_rows": excluded_rows,
         "limitations": [
             "Returns are sampled mark outcomes, not executable fills or net P&L.",
@@ -134,6 +218,7 @@ def evaluate_solana_research_folds(
             "Aggregate metrics pool validation observations across folds and are not an independent final holdout.",
             "Compounded return and sequential drawdown are pooled sampled-observation diagnostics, not portfolio performance or realized P&L.",
             "No threshold selection, model fitting, calibration or training approval occurs.",
+            "Mint-cluster bootstrap intervals are exploratory; intervals are withheld below 20 clusters and do not account for shared market shocks across mints.",
         ],
     }
 
