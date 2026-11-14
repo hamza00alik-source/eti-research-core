@@ -913,15 +913,15 @@ def test_regime_sampling_sensitivity_matches_only_identical_point_in_time_rows()
     other = dict(row, mint="mint-b")
     report = evaluate_solana_regime_sampling_sensitivity({
         "tight": {"classified_observations": [row, other]},
-        "wide": {"classified_observations": [row, changed]},
+        "wide": {"classified_observations": [changed]},
     })
     comparison = report["pairwise_comparisons"]["tight vs wide"]
     assert comparison["matched_observation_count"] == 1
-    assert comparison["matching_regime_count"] == 1
-    assert comparison["different_regime_count"] == 0
+    assert comparison["matching_regime_count"] == 0
+    assert comparison["different_regime_count"] == 1
     assert comparison["left_only_observation_count"] == 1
-    assert comparison["right_only_observation_count"] == 1
-    assert report["all_configuration_unanimous_regime_count"] == 1
+    assert comparison["right_only_observation_count"] == 0
+    assert report["all_configuration_unanimous_regime_count"] == 0
     assert report["training_authorized"] is False
 
     with pytest.raises(ValueError):
