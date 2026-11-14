@@ -326,3 +326,10 @@ failed exits and capital constraints are not modeled. Fold aggregates are
 descriptive and are not an independent final holdout. The helper performs no
 model fitting, threshold search, calibration, training approval or execution;
 `training_authorized` remains false.
+
+
+The benchmark helper expects each fold's `validation` list to contain prepared
+rows, not raw persisted label records. Build the walk-forward folds from the
+chronological label metadata, then join each validation label to its prepared
+row by `label_id`; never move rows between folds or randomly repartition them.
+Prepared rows retain `baseline_at` for deterministic chronological ordering.
