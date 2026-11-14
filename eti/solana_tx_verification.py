@@ -43,12 +43,18 @@ def _valid_signature(value: Any) -> bool:
 
 def verify_finalized_transaction_for_mint(
     rpc: Any, signature: str, mint: str,
+    expected_pool_address: str | None = None,
+    wallet_address: str | None = None,
 ) -> dict[str, Any]:
-    """Verify finalized, successful transaction inclusion and mint association."""
+    """Verify a finalized successful mint exit, pool reference, and wallet debit."""
     if not _valid_signature(signature):
         raise ValueError("signature must be a valid 64-byte base58 transaction signature")
     if not _valid_pubkey(mint):
         raise ValueError("mint must be a valid 32-byte base58 public key")
+    if expected_pool_address is None or not _valid_pubkey(expected_pool_address):
+        raise ValueError("expected_pool_address must be a valid 32-byte base58 public key")
+    if wallet_address is None or not _valid_pubkey(wallet_address):
+        raise ValueError("wallet_address must be a valid 32-byte base58 public key")
 
     status_result = rpc.call(
         "getSignatureStatuses",
@@ -124,22 +130,68 @@ def verify_finalized_transaction_for_mint(
             "reason": "Finalized transaction metadata reports an execution error",
         }
 
-    balances = []
-    for field in ("preTokenBalances", "postTokenBalances"):
-        values = meta.get(field)
-        if isinstance(values, list):
-            balances.extend(
-                item for item in values
-                if isinstance(item, dict) and item.get("mint") == mint
-            )
-    if not balances:
+    message = tx.get("message")
+    account_keys = message.get("accountKeys") if isinstance(message, dict) else None
+    key_values = []
+    if isinstance(account_keys, list):
+        for key in account_keys:
+            if isinstance(key, str):
+                key_values.append(key)
+            elif isinstance(key, dict) and isinstance(key.get("pubkey"), str):
+                key_values.append(key["pubkey"])
+    if expected_pool_address not in key_values:
         return {
-            "status": "MINT_NOT_PRESENT",
+            "status": "EXPECTED_POOL_NOT_REFERENCED",
             "verified": False,
             "signature": signature,
             "mint": mint,
+            "expected_pool_address": expected_pool_address,
             "slot": transaction.get("slot"),
-            "reason": "Transaction token balances do not reference the requested mint",
+            "reason": "Expected pool address is not present in transaction account keys",
+        }
+
+    def wallet_amount(field):
+        entries = meta.get(field)
+        if not isinstance(entries, list):
+            return None
+        total = 0
+        found = False
+        for item in entries:
+            if not isinstance(item, dict) or item.get("mint") != mint:
+                continue
+            if item.get("owner") != wallet_address:
+                continue
+            amount = item.get("uiTokenAmount")
+            raw = amount.get("amount") if isinstance(amount, dict) else None
+            if not isinstance(raw, str) or not raw.isdigit():
+                return None
+            total += int(raw)
+            found = True
+        return total if found else 0
+
+    pre_amount = wallet_amount("preTokenBalances")
+    post_amount = wallet_amount("postTokenBalances")
+    if pre_amount is None or post_amount is None:
+        return {
+            "status": "WALLET_BALANCE_EVIDENCE_UNAVAILABLE",
+            "verified": False,
+            "signature": signature,
+            "mint": mint,
+            "wallet_address": wallet_address,
+            "slot": transaction.get("slot"),
+            "reason": "RPC did not provide parseable owner-attributed token balances for both sides",
+        }
+    if post_amount >= pre_amount:
+        return {
+            "status": "WALLET_TOKEN_BALANCE_NOT_DEBITED",
+            "verified": False,
+            "signature": signature,
+            "mint": mint,
+            "wallet_address": wallet_address,
+            "pre_token_amount": str(pre_amount),
+            "post_token_amount": str(post_amount),
+            "slot": transaction.get("slot"),
+            "reason": "Wallet's aggregate balance for the mint did not decrease",
         }
 
     status_slot = status.get("slot")
@@ -162,11 +214,16 @@ def verify_finalized_transaction_for_mint(
         "slot": transaction_slot,
         "block_time": transaction.get("blockTime"),
         "commitment": "finalized",
-        "mint_balance_entries": len(balances),
+        "expected_pool_address": expected_pool_address,
+        "wallet_address": wallet_address,
+        "pre_token_amount_raw": str(pre_amount),
+        "post_token_amount_raw": str(post_amount),
+        "wallet_token_debit_raw": str(pre_amount - post_amount),
+        "direction": "wallet_mint_balance_decreased",
         "limitations": [
-            "Confirms finalized successful transaction inclusion and mint presence only.",
-            "Does not prove this transaction was an entry or exit for the strategy.",
-            "Does not establish wallet ownership, swap direction, fill price, fees, or realized P&L.",
+            "Confirms finalized successful transaction inclusion, expected pool account-key reference, and owner-attributed wallet mint-balance decrease.",
+            "Pool account-key presence alone does not prove a specific pool instruction caused the balance change.",
+            "Does not establish fill price, complete transaction costs, or realized P&L.",
             "RPC provider responses are trusted as the queried public node's view and are not independently cross-validated.",
         ],
     }
