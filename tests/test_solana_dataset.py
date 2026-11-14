@@ -7,7 +7,7 @@ from eti.storage import MemoryStore
 def test_dataset_validator_flags_missing_negative_zero_and_duplicate_values():
     rows = [
         {
-            "id": "one", "mint": "A" * 40, "pool_address": "PoolA",
+            "id": "one", "capability": "solana.market.scan", "mint": "A" * 40, "pool_address": "PoolA",
             "fetched_at": "2026-01-01T00:00:00Z",
             "payload": {"evidence": {
                 "price_usd": 0, "liquidity_usd": -1, "volume_h24_usd": 2,
@@ -15,7 +15,7 @@ def test_dataset_validator_flags_missing_negative_zero_and_duplicate_values():
             }},
         },
         {
-            "id": "two", "mint": "A" * 40, "pool_address": "PoolA",
+            "id": "two", "capability": "solana.market.scan", "mint": "A" * 40, "pool_address": "PoolA",
             "fetched_at": "2026-01-01T00:00:00Z",
             "payload": {"evidence": {}},
         },
