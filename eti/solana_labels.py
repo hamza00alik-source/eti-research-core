@@ -185,3 +185,77 @@ def chronological_group_split(
         "validation_group_count": len({(x["mint"], x["pool_address"]) for x in validation}),
         "method": "chronological_grouped_purged_embargo_v1",
     }
+
+
+def chronological_walk_forward_splits(
+    labels: Iterable[dict[str, Any]],
+    *,
+    n_splits: int = 3,
+    min_train_groups: int = 3,
+    embargo_seconds: int = 86400,
+) -> list[dict[str, Any]]:
+    """Create expanding-window, grouped, purged walk-forward validation folds."""
+    if isinstance(n_splits, bool) or not isinstance(n_splits, int) or not 1 <= n_splits <= 10:
+        raise ValueError("n_splits must be an integer from 1 to 10")
+    if isinstance(min_train_groups, bool) or not isinstance(min_train_groups, int) or min_train_groups < 2:
+        raise ValueError("min_train_groups must be an integer of at least 2")
+    if isinstance(embargo_seconds, bool) or not isinstance(embargo_seconds, int) or embargo_seconds < 0:
+        raise ValueError("embargo_seconds must be a non-negative integer")
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for label in labels:
+        if not isinstance(label, dict):
+            continue
+        mint, pool = label.get("mint"), label.get("pool_address")
+        start, end = _timestamp(label.get("baseline_at")), _timestamp(label.get("target_at"))
+        if not isinstance(mint, str) or not isinstance(pool, str) or not pool or start is None or end is None or end <= start:
+            continue
+        grouped.setdefault((mint, pool), []).append(label)
+    groups = sorted(
+        grouped.items(),
+        key=lambda pair: min(_timestamp(item["baseline_at"]) for item in pair[1]),
+    )
+    if len(groups) <= min_train_groups:
+        raise ValueError("not enough distinct mint/pool groups for walk-forward validation")
+    validation_group_size = max(1, (len(groups) - min_train_groups) // n_splits)
+    folds: list[dict[str, Any]] = []
+    for fold_index in range(n_splits):
+        start_index = min_train_groups + fold_index * validation_group_size
+        if start_index >= len(groups):
+            break
+        end_index = min(len(groups), start_index + validation_group_size)
+        boundary = min(_timestamp(item["baseline_at"]) for item in groups[start_index][1])
+        validation_start = boundary.timestamp() + embargo_seconds
+        train: list[dict[str, Any]] = []
+        validation: list[dict[str, Any]] = []
+        purged = 0
+        for _, group_labels in groups[:start_index]:
+            group_end = max(_timestamp(item["target_at"]) for item in group_labels)
+            if group_end < boundary:
+                train.extend(group_labels)
+            else:
+                purged += 1
+        for _, group_labels in groups[start_index:end_index]:
+            group_start = min(_timestamp(item["baseline_at"]) for item in group_labels)
+            if group_start.timestamp() >= validation_start:
+                validation.extend(group_labels)
+            else:
+                purged += 1
+        if not train or not validation:
+            continue
+        folds.append({
+            "fold": fold_index + 1,
+            "train": train,
+            "validation": validation,
+            "boundary_at": boundary.isoformat().replace("+00:00", "Z"),
+            "validation_start_at": datetime.fromtimestamp(
+                validation_start, timezone.utc
+            ).isoformat().replace("+00:00", "Z"),
+            "embargo_seconds": embargo_seconds,
+            "purged_group_count": purged,
+            "train_group_count": len({(x["mint"], x["pool_address"]) for x in train}),
+            "validation_group_count": len({(x["mint"], x["pool_address"]) for x in validation}),
+            "method": "expanding_chronological_grouped_walk_forward_v1",
+        })
+    if not folds:
+        raise ValueError("purging and embargo left no usable walk-forward folds")
+    return folds
