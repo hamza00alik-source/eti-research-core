@@ -24,6 +24,8 @@ from .risk import RiskEngine, RiskRequest
 from .storage import MemoryStore
 from .solana_dataset import prepare_solana_training_rows
 from .solana_cost_evaluation import evaluate_stored_solana_walk_forward
+from .solana_research import ProviderError, SolanaRpcClient
+from .solana_tx_verification import verify_finalized_transaction_for_mint
 
 app = FastAPI(title=AppConfig().app_name, version=AppConfig().version, lifespan=runtime_lifespan)
 risk_engine = RiskEngine()
@@ -126,6 +128,11 @@ class SolanaWalkForwardEvaluationPayload(BaseModel):
     min_train_groups: int = Field(default=3, ge=2, le=1000)
     embargo_seconds: int = Field(default=86400, ge=0, le=604800)
     buy_pressure_threshold: float = Field(default=0.55, gt=0.5, le=1.0)
+
+
+class SolanaTransactionVerificationPayload(BaseModel):
+    signature: str = Field(min_length=80, max_length=100)
+    mint: str = Field(min_length=32, max_length=44)
 
 
 class SolanaResearchEventPayload(BaseModel):
@@ -681,6 +688,27 @@ def evaluate_solana_walk_forward_from_ledger(
         raise HTTPException(status_code=404, detail="workspace not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/transaction-verification")
+def verify_solana_research_transaction(
+    workspace_id: str,
+    payload: SolanaTransactionVerificationPayload,
+    account: dict[str, str] = Depends(current_account),
+):
+    """Verify finalized transaction inclusion against the configured public RPC."""
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        return verify_finalized_transaction_for_mint(
+            SolanaRpcClient(),
+            payload.signature,
+            payload.mint,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail="Solana RPC verification unavailable") from exc
 
 
 @app.post("/v1/workspaces/{workspace_id}/solana/cost-evidence", status_code=201)
