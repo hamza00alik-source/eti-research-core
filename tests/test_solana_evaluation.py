@@ -650,6 +650,11 @@ def test_time_series_regimes_normalize_volatility_and_separate_horizons():
     assert stratum["status"] == "INSUFFICIENT_REGIME_HORIZON_ROWS"
     assert stratum["summary"] is None
     assert stratum["mint_cluster_bootstrap"]["status"] == "INSUFFICIENT_MINT_CLUSTERS"
+    benchmark = stratum["fixed_benchmark_comparison"]
+    assert benchmark["model_fitting_performed"] is False
+    assert benchmark["buy_pressure_rule"]["fit_on_validation_data"] is False
+    assert benchmark["aggregate"]["always_long"]["trade_count"] == 5
+    assert benchmark["aggregate"]["fixed_buy_pressure"]["trade_count"] == 5
     assert report["sampling_quality"]["mean_max_gap_seconds"] == 7200
     assert report["method"]["volatility_unit"] == "percent_per_sqrt_hour"
 
@@ -698,6 +703,7 @@ def test_time_series_regime_horizon_summary_requires_predeclared_row_count():
         "mint": "mint-a", "pool_address": "pool-a",
         "baseline_at": (start + timedelta(hours=3)).isoformat(),
         "horizon_seconds": 60, "target_sampled_price_return_pct": float(i),
+        "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
     } for i in range(5)]
     config = {
         "lookback_observations": 3, "minimum_observations": 3,
