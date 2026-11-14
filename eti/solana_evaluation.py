@@ -697,6 +697,115 @@ def evaluate_solana_time_series_regimes(
         ],
     }
 
+
+def evaluate_solana_fold_time_series_regime_stability(
+    history_rows: list[dict[str, Any]],
+    folds: list[dict[str, Any]],
+    config: dict[str, Any] | None,
+    *,
+    minimum_mints_per_fold_regime: int = 3,
+) -> dict[str, Any]:
+    """Evaluate trend/volatility proxy stability independently in each fold.
+
+    Every fold is classified against its own validation timestamps using only
+    same-mint/pool history at or before each row's baseline timestamp.
+    """
+    if (isinstance(minimum_mints_per_fold_regime, bool)
+            or not isinstance(minimum_mints_per_fold_regime, int)
+            or minimum_mints_per_fold_regime < 1):
+        raise ValueError("minimum_mints_per_fold_regime must be a positive integer")
+    if config is None:
+        return {
+            "status": "NOT_CONFIGURED",
+            "folds": [],
+            "regimes_by_horizon_seconds": {},
+            "minimum_mints_per_fold_regime": minimum_mints_per_fold_regime,
+            "note": "No explicit time-series regime config supplied.",
+        }
+    fold_reports: list[dict[str, Any]] = []
+    aggregate: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    minimum_rows = config.get("minimum_rows_per_regime_horizon")
+    for fold_number, fold in enumerate(folds, start=1):
+        if not isinstance(fold, dict) or not isinstance(fold.get("validation"), list):
+            raise ValueError("each fold must contain a validation list")
+        report = evaluate_solana_time_series_regimes(
+            history_rows, fold["validation"], config
+        )
+        fold_strata: dict[str, Any] = {}
+        for horizon, regimes in report.get("regimes_by_horizon_seconds", {}).items():
+            for regime, stratum in regimes.items():
+                key = horizon + "::" + regime
+                aggregate.setdefault(key, {}).setdefault("folds", []).append({
+                    "fold": fold.get("fold", fold_number),
+                    "stratum": stratum,
+                })
+                distinct_mints = stratum.get("distinct_mint_count", 0)
+                row_count = stratum.get("row_count", 0)
+                eligible = (
+                    isinstance(row_count, int) and row_count >= minimum_rows
+                    and isinstance(distinct_mints, int)
+                    and distinct_mints >= minimum_mints_per_fold_regime
+                )
+                benchmark = stratum.get("fixed_benchmark_comparison", {}).get("aggregate", {})
+                fold_strata.setdefault(horizon, {})[regime] = {
+                    "row_count": row_count,
+                    "distinct_mint_count": distinct_mints,
+                    "status": "FOLD_SAMPLE_THRESHOLD_MET" if eligible
+                        else "INSUFFICIENT_FOLD_ROWS_OR_MINT_DIVERSITY",
+                    "stability_eligible": eligible,
+                    "baselines": benchmark,
+                }
+        fold_reports.append({
+            "fold": fold.get("fold", fold_number),
+            "classified_row_count": report.get("classified_row_count", 0),
+            "unclassified_row_count": report.get("unclassified_row_count", 0),
+            "regimes_by_horizon_seconds": fold_strata,
+        })
+
+    stability: dict[str, Any] = {}
+    for key, data in sorted(aggregate.items()):
+        horizon, regime = key.split("::", 1)
+        baseline_results: dict[str, Any] = {}
+        for baseline in ("always_long", "fixed_buy_pressure"):
+            means: list[float] = []
+            positive = negative = 0
+            for item in data["folds"]:
+                stratum = item["stratum"]
+                if stratum.get("row_count", 0) < minimum_rows:
+                    continue
+                if stratum.get("distinct_mint_count", 0) < minimum_mints_per_fold_regime:
+                    continue
+                summary = stratum.get("fixed_benchmark_comparison", {}).get("aggregate", {}).get(baseline, {})
+                mean = summary.get("mean_return_pct")
+                if not _finite(mean):
+                    continue
+                means.append(float(mean))
+                positive += mean > 0
+                negative += mean < 0
+            count = len(means)
+            baseline_results[baseline] = {
+                "eligible_fold_count": count,
+                "positive_mean_fold_count": positive,
+                "negative_mean_fold_count": negative,
+                "mean_return_sign_consistency": max(positive, negative) / count if count else None,
+                "fold_mean_returns_pct": means,
+                "status": "DESCRIPTIVE_FOLD_STABILITY_AVAILABLE" if count
+                    else "INSUFFICIENT_ELIGIBLE_FOLDS",
+            }
+        stability.setdefault(horizon, {})[regime] = baseline_results
+    return {
+        "status": "CHRONOLOGICAL_TIME_SERIES_REGIME_STABILITY_DIAGNOSTICS_ONLY",
+        "minimum_rows_per_fold_regime": minimum_rows,
+        "minimum_mints_per_fold_regime": minimum_mints_per_fold_regime,
+        "folds": fold_reports,
+        "regimes_by_horizon_seconds": stability,
+        "future_history_excluded_per_validation_row": True,
+        "model_fitting_performed": False,
+        "training_authorized": False,
+        "note": "Each fold is classified independently using same-mint/pool history at or before each baseline timestamp. Fold means are sampled-mark diagnostics; sign consistency is not significance or proof of edge, and overlapping labels may remain dependent.",
+    }
+
+
 def evaluate_prepared_solana_walk_forward(
     exported_labels: list[dict[str, Any]],
     prepared_dataset: dict[str, Any],
