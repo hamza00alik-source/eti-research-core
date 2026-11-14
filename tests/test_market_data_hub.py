@@ -101,3 +101,26 @@ def test_default_public_hub_registers_independent_crypto_and_reference_sources()
     assert sources["kraken"]["market_types"] == ["spot"]
     assert sources["yahoo"]["asset_classes"] == ["commodity", "equity", "forex", "index"]
     assert all(row["order_execution"] is False for row in sources.values())
+
+
+def test_ccxt_discovery_keeps_spot_when_one_derivative_market_type_fails(monkeypatch):
+    import eti.market_data_hub as hub_module
+
+    class Provider:
+        def __init__(self, venue, market_type):
+            self.market_type = market_type
+        def discover_markets(self, limit=1000):
+            if self.market_type == "future":
+                raise RuntimeError("futures endpoint unavailable")
+            return [{
+                "symbol": "BTC/USDT", "base": "BTC", "quote": "USDT",
+                "active": True, "contract_size": 1,
+            }]
+
+    monkeypatch.setattr(hub_module, "CcxtPublicProvider", Provider)
+    adapter = hub_module.CcxtMarketAdapter("binance", ("spot", "future"))
+    result = hub_module.MarketDataHub([adapter]).discover(asset_class="crypto")
+    assert result["count"] == 1
+    assert result["instruments"][0].market_type == "spot"
+    assert result["source_errors"][0]["venue"] == "binance"
+    assert "futures endpoint unavailable" in result["source_errors"][0]["message"]
