@@ -2530,9 +2530,11 @@ class MemoryStore:
                 except (TypeError, ValueError):
                     continue
                 if isinstance(label, dict):
-                    if isinstance(label.get("sampled_price_return_pct"), (int, float))
-                            and not isinstance(label.get("sampled_price_return_pct"), bool)
-                            and math.isfinite(label["sampled_price_return_pct"]):
+                    if (
+                        isinstance(label.get("sampled_price_return_pct"), (int, float))
+                        and not isinstance(label.get("sampled_price_return_pct"), bool)
+                        and math.isfinite(label["sampled_price_return_pct"])
+                    ):
                         stats["price_returns_available"] += 1
             # Count distinct mints with SQL, avoiding a potentially large in-memory set.
             distinct_by_horizon = conn.execute(
