@@ -24,7 +24,7 @@ def _timestamp(value: Any) -> datetime | None:
     return parsed
 
 
-def validate_snapshot_rows(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
+def _is_finite_number(value: int | float) -> bool:\n    try:\n        return math.isfinite(float(value))\n    except (OverflowError, TypeError, ValueError):\n        return False\n\n\ndef validate_snapshot_rows(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
     """Report data-quality issues without coercing, dropping, or repairing source values."""
     issue_counts = {
         "malformed_payload": 0, "missing_evidence": 0, "missing_feature_values": 0,
@@ -53,7 +53,7 @@ def validate_snapshot_rows(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
                 issue_counts["missing_feature_values"] += 1
                 problems.append("missing:" + field)
                 continue
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not _is_finite_number(value):
                 issue_counts["non_finite_feature_values"] += 1
                 problems.append("invalid_numeric:" + field)
                 continue
