@@ -454,3 +454,47 @@ def test_solana_refresh_schedule_can_be_reconfigured_and_listed_with_owner_scope
     assert listed[0]["enabled"] is True
     with pytest.raises(LookupError, match="workspace not found"):
         store.list_solana_research_refresh_jobs("owner-2", workspace["id"])
+
+
+def test_solana_dataset_report_counts_coverage_and_never_opens_training_gate(tmp_path):
+    store = MemoryStore(tmp_path / "solana-dataset-report.sqlite3")
+    workspace = _workspace(store)
+    observed = 1760000000000
+    task = store.create_agent_task(
+        "owner-1", workspace["id"], "test.solver", "solana.market.scan",
+        {"mint": "E" * 40}, max_attempts=1,
+    )
+    claimed = store.claim_next_agent_task(now=observed // 1000)
+    store.complete_claimed_agent_task(
+        claimed["id"], claimed["lease_token"],
+        {
+            "mint": "E" * 40, "verdict": "PASS", "observed_at_ms": observed,
+            "evidence": {
+                "pair_address": "Pool555", "price_usd": 0.25,
+                "liquidity_usd": 75000, "volume_h24_usd": 12000,
+                "txns_h1_buys": 12, "txns_h1_sells": 7,
+            },
+        },
+        now=(observed // 1000) + 1,
+    )
+    report = store.get_solana_research_dataset_report("owner-1", workspace["id"])
+    assert report["snapshots"]["market_scans"] == 1
+    assert report["snapshots"]["distinct_mints"] == 1
+    assert report["snapshots"]["distinct_mint_pool_pairs"] == 1
+    assert report["feature_coverage"]["price_usd"]["fraction"] == 1.0
+    assert report["feature_coverage"]["txns_h1_buys"]["count"] == 1
+    assert report["training_gate"]["ready"] is False
+    assert report["training_gate"]["status"] == "RESEARCH_DATA_COLLECTION"
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.get_solana_research_dataset_report("owner-2", workspace["id"])
+
+
+def test_solana_dataset_report_handles_empty_workspace(tmp_path):
+    store = MemoryStore(tmp_path / "solana-empty-report.sqlite3")
+    workspace = _workspace(store)
+    report = store.get_solana_research_dataset_report("owner-1", workspace["id"])
+    assert report["snapshots"]["total"] == 0
+    assert report["snapshots"]["observation_span_seconds"] == 0
+    assert report["feature_coverage"]["price_usd"]["fraction"] == 0.0
+    assert report["labels_by_horizon_seconds"] == {}
+    assert report["training_gate"]["ready"] is False
