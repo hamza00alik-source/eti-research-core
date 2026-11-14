@@ -173,3 +173,27 @@ def test_walk_forward_split_rejects_insufficient_groups():
             "baseline_at": "2026-01-01T00:00:00Z",
             "target_at": "2026-01-01T00:05:00Z",
         }])
+
+
+def test_all_pools_for_one_mint_stay_in_the_same_validation_fold():
+    from eti.solana_labels import chronological_group_split
+
+    rows = []
+    for day in range(5):
+        mint = f"Mint{day}"
+        pools = ["PoolA", "PoolB"] if day == 0 else [f"Pool{day}"]
+        for pool in pools:
+            rows.append({
+                "mint": mint, "pool_address": pool,
+                "baseline_at": f"2026-01-0{day + 1}T00:00:00Z",
+                "target_at": f"2026-01-0{day + 1}T00:05:00Z",
+            })
+    split = chronological_group_split(rows, train_fraction=0.5, embargo_seconds=0)
+    train_mints = {item["mint"] for item in split["train"]}
+    validation_mints = {item["mint"] for item in split["validation"]}
+    assert train_mints.isdisjoint(validation_mints)
+    mint_zero_folds = [
+        "train" if item["mint"] in train_mints else "validation"
+        for item in rows if item["mint"] == "Mint0"
+    ]
+    assert len(set(mint_zero_folds)) == 1
