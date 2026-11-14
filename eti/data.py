@@ -133,3 +133,51 @@ def fetch_ohlcv(
         raise RuntimeError(f"No OHLCV data returned for {exchange_id} {symbol} {timeframe}")
     frame = pd.DataFrame(rows, columns=OHLCV_COLUMNS)
     return drop_incomplete_candles(frame, timeframe_ms, exchange.milliseconds()).tail(limit).reset_index(drop=True)
+
+
+
+def assess_ohlcv_quality(
+    frame: pd.DataFrame, timeframe: str, now: pd.Timestamp | None = None
+) -> dict[str, Any]:
+    """Summarize candle continuity and freshness without assuming a 24/7 market calendar."""
+    timeframe_ms = {
+        "1m": 60_000, "5m": 300_000, "15m": 900_000,
+        "30m": 1_800_000, "1h": 3_600_000,
+        "4h": 14_400_000, "1d": 86_400_000,
+    }.get(timeframe)
+    if timeframe_ms is None:
+        raise ValueError("Unsupported timeframe for data-quality assessment")
+    clean = validate_ohlcv(frame)
+    timestamps = clean["timestamp"]
+    interval_ms = timeframe_ms
+    deltas = timestamps.diff().dropna().dt.total_seconds() * 1000
+    gap_deltas = deltas[deltas > interval_ms * 1.5]
+    expected_slots = (
+        int(round((timestamps.iloc[-1] - timestamps.iloc[0]).total_seconds() * 1000 / interval_ms)) + 1
+    )
+    observed_slots = len(clean)
+    coverage = min(1.0, observed_slots / expected_slots) if expected_slots > 0 else 0.0
+    current = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now)
+    if current.tzinfo is None:
+        current = current.tz_localize("UTC")
+    else:
+        current = current.tz_convert("UTC")
+    latest_close_time = timestamps.iloc[-1] + pd.Timedelta(milliseconds=interval_ms)
+    age_seconds = max(0.0, (current - latest_close_time).total_seconds())
+    freshness_limit_seconds = max(3 * interval_ms / 1000, 48 * 60 * 60)
+    return {
+        "status": "stale" if age_seconds > freshness_limit_seconds else "fresh",
+        "observed_candles": observed_slots,
+        "first_candle": timestamps.iloc[0].isoformat(),
+        "latest_completed_candle": timestamps.iloc[-1].isoformat(),
+        "candle_interval_ms": interval_ms,
+        "expected_slots_in_observed_span": expected_slots,
+        "calendar_coverage_ratio": round(coverage, 6),
+        "gap_count": int(len(gap_deltas)),
+        "largest_gap_intervals": (
+            round(float(gap_deltas.max() / interval_ms), 3) if len(gap_deltas) else 0.0
+        ),
+        "latest_candle_age_seconds": round(age_seconds, 1),
+        "freshness_threshold_seconds": freshness_limit_seconds,
+        "calendar_note": "Continuity and freshness use elapsed calendar time; exchange sessions, holidays and planned maintenance are not modeled.",
+    }
