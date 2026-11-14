@@ -21,7 +21,7 @@ object MarketFeatureBuilder {
     )
 
     fun buildLatest(candles: List<OhlcvCandle>, featureNames: List<String> = baseFeatureNames): FloatArray {
-        require(candles.size >= 31) { "At least 31 completed candles are required" }
+        require(candles.size >= 30) { "At least 30 completed candles are required" }
         require(featureNames.isNotEmpty() && featureNames.distinct().size == featureNames.size) {
             "Feature schema must be non-empty and contain unique names"
         }
