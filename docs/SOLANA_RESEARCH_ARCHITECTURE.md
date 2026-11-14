@@ -236,3 +236,13 @@ for when it sampled the public provider response. The current DexScreener
 adapter does not expose a reliable quote-observation timestamp, so this must
 not be represented as an exchange trade timestamp. If missing or invalid, the
 snapshot uses task completion time.
+
+
+For model evaluation, `chronological_walk_forward_splits` now provides expanding
+training windows and sequential validation windows. Each mint/pool remains in
+one group, labels crossing a fold boundary are purged, and validation begins
+only after the configured embargo. The helper refuses insufficient data or
+folds emptied by purging. The single chronological split helper remains
+available for simpler diagnostics. Preprocessing, feature selection,
+calibration and threshold selection must be fit within each training fold;
+the helper deliberately does not fit any of those transformations.
