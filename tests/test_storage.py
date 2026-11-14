@@ -728,6 +728,7 @@ def test_exact_solana_label_lookup_and_latest_receipt_attestation(tmp_path):
     assert len(latest) == 1
     assert latest[0]["signature"] == "signature-new"
     assert latest[0]["integrity_valid"] is True
-    assert store.list_latest_solana_transaction_attestations(
-        "owner-b", workspace["id"], [label_id]
-    ) == []
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.list_latest_solana_transaction_attestations(
+            "owner-b", workspace["id"], [label_id]
+        )
