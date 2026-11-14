@@ -140,7 +140,7 @@ def chronological_group_split(
         raise ValueError("train_fraction must be between 0.5 and 0.9")
     if isinstance(embargo_seconds, bool) or not isinstance(embargo_seconds, int) or embargo_seconds < 0:
         raise ValueError("embargo_seconds must be a non-negative integer")
-    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for label in labels:
         if not isinstance(label, dict):
             continue
@@ -148,7 +148,7 @@ def chronological_group_split(
         start, end = _timestamp(label.get("baseline_at")), _timestamp(label.get("target_at"))
         if not isinstance(mint, str) or not isinstance(pool, str) or not pool or start is None or end is None or end <= start:
             continue
-        grouped.setdefault((mint, pool), []).append(label)
+        grouped.setdefault(mint, []).append(label)
     groups = sorted(
         grouped.items(),
         key=lambda pair: min(_timestamp(item["baseline_at"]) for item in pair[1]),
@@ -181,8 +181,8 @@ def chronological_group_split(
         "validation_start_at": datetime.fromtimestamp(validation_start, timezone.utc).isoformat().replace("+00:00", "Z"),
         "embargo_seconds": embargo_seconds,
         "purged_group_count": purged_groups,
-        "train_group_count": len({(x["mint"], x["pool_address"]) for x in train}),
-        "validation_group_count": len({(x["mint"], x["pool_address"]) for x in validation}),
+        "train_group_count": len({x["mint"] for x in train}),
+        "validation_group_count": len({x["mint"] for x in validation}),
         "method": "chronological_grouped_purged_embargo_v1",
     }
 
