@@ -187,6 +187,8 @@ def verify_finalized_transaction_for_mint(
         for item in entries:
             if not isinstance(item, dict) or item.get("mint") != mint:
                 continue
+            if not isinstance(item.get("owner"), str) or not item.get("owner"):
+                return None
             if item.get("owner") != wallet_address:
                 continue
             amount = item.get("uiTokenAmount")
