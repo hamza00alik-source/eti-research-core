@@ -75,6 +75,26 @@ def _market_provider(payload: dict[str, Any]):
     return asset_class, market_type, "yahoo", YahooFinanceProvider(asset_class)
 
 
+def _ohlcv_fetch_diagnostics(provider: Any, frame: pd.DataFrame, timeframe: str, requested: int) -> dict[str, Any]:
+    """Describe provider response size without confusing request fulfillment with market coverage."""
+    count = len(frame)
+    timestamps = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce") if count else pd.Series(dtype="datetime64[ns, UTC]")
+    valid = timestamps.dropna()
+    return {
+        "provider": getattr(provider, "provider_name", type(provider).__name__),
+        "provider_class": type(provider).__name__,
+        "venue": getattr(provider, "venue", "yahoo" if isinstance(provider, YahooFinanceProvider) else None),
+        "timeframe": timeframe,
+        "requested_candles": requested,
+        "returned_candles": count,
+        "request_shortfall_candles": max(0, requested - count),
+        "request_fulfillment_ratio": round(min(count / requested, 1.0), 6) if requested else None,
+        "first_returned_candle": valid.iloc[0].isoformat() if len(valid) else None,
+        "latest_returned_candle": valid.iloc[-1].isoformat() if len(valid) else None,
+        "note": "Request fulfillment compares returned rows with the requested limit; it is not a measure of exchange-session coverage or missing-candle completeness.",
+    }
+
+
 def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     """Fetch completed public multi-asset OHLCV candles and summarize causal indicators."""
     asset_class, market_type, venue, provider = _market_provider(payload)
@@ -89,6 +109,7 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("limit must be an integer from 50 to 500")
 
     frame = provider.fetch_ohlcv(symbol, timeframe, limit)
+    provider_diagnostics = _ohlcv_fetch_diagnostics(provider, frame, timeframe, limit)
     data_quality = assess_ohlcv_quality(frame, timeframe)
     derivative_context = None
     if asset_class == "crypto" and market_type in {"swap", "future"}:
@@ -126,6 +147,7 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         "symbol": symbol,
         "timeframe": timeframe,
         "completed_candles": len(frame),
+        "provider_diagnostics": provider_diagnostics,
         "data_quality": data_quality,
         "latest_completed_candle": frame.iloc[-1]["timestamp"].isoformat(),
         "last_close": round(float(frame.iloc[-1]["close"]), 10),
@@ -168,6 +190,7 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{name} has an invalid value")
     fee_bps, slippage_bps = payload.get("fee_bps", 6.0), payload.get("slippage_bps", 2.0)
     frame = provider.fetch_ohlcv(symbol, timeframe, limit)
+    provider_diagnostics = _ohlcv_fetch_diagnostics(provider, frame, timeframe, limit)
     if len(frame) < options["min_history"] + options["validation_size"] + options["test_size"] + 2 * options["purge_bars"]:
         raise ValueError("provider returned insufficient completed candles for walk-forward evaluation")
     timestamps = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
@@ -180,6 +203,7 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
         "kind": "strategy_walk_forward_report", "venue": venue, "asset_class": asset_class,
         "market_type": market_type, "symbol": symbol, "timeframe": timeframe,
         "requested_candles": limit, "available_candles": len(frame),
+        "provider_diagnostics": provider_diagnostics,
         "data_start": timestamps.iloc[0].isoformat(), "data_end": timestamps.iloc[-1].isoformat(),
         **report,
         "limitations": [
@@ -226,6 +250,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("horizon must be an integer from 2 to 24")
 
     frame = provider.fetch_ohlcv(symbol, timeframe, limit)
+    provider_diagnostics = _ohlcv_fetch_diagnostics(provider, frame, timeframe, limit)
     # Assess the raw OHLCV frame before derivative enrichment adds optional columns.
     data_quality = assess_ohlcv_quality(frame, timeframe)
     data_quality_review = _training_data_quality_review(data_quality, asset_class)
@@ -335,6 +360,7 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         "model_family": "HistGradientBoostingClassifier via ETI BaselineModel",
         "training_method": "from_scratch_purged_nested_walk_forward_v2_multimodal_market_features",
         "training_performed": True,
+        "provider_diagnostics": provider_diagnostics,
         "data_quality": data_quality,
         "data_quality_review": data_quality_review,
         "derivative_feature_coverage": derivative_feature_coverage,

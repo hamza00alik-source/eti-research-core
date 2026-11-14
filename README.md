@@ -219,6 +219,9 @@ If the calibration window has fewer than 30 rows, fewer than five examples of an
 
 
 ## OHLCV data-quality diagnostics
+Provider-backed market snapshots, strategy evaluations and training candidates also expose `provider_diagnostics`: provider adapter/class, venue where available, timeframe, requested versus returned candle counts, request shortfall, bounded request-fulfillment ratio, and first/latest returned timestamps. This is a provider response-size diagnostic only; it is explicitly not a measure of session-aware market coverage or missing-candle completeness.
+
+
 Training candidate reports also include the raw OHLCV quality diagnostics. Crypto freshness is a blocking review gate because these venues trade continuously; stale latest candles prevent the candidate evaluation from passing. For Yahoo/session-based instruments, freshness and elapsed-calendar gaps remain informational until provider-specific exchange calendars are implemented. Calendar coverage and gap counts never independently reject an equity, forex, commodity or index candidate, and ETI never fills missing candles.
 
 
