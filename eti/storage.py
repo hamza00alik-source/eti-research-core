@@ -1109,7 +1109,15 @@ class MemoryStore:
                          pool_address if isinstance(pool_address, str) else None,
                          1, snapshot_json, snapshot_digest, snapshot_fetched_at),
                     )
-                    if isinstance(pool_address, str) and pool_address:
+                    if (isinstance(pool_address, str) and pool_address
+                            and result.get("verdict") != "REJECT"):
+                        # A mint may migrate to a new dominant pool. Stop polling
+                        # obsolete pool schedules before activating the current one.
+                        conn.execute(
+                            "UPDATE solana_research_refresh_jobs SET enabled=0,updated_at=? "
+                            "WHERE owner_id=? AND workspace_id=? AND mint=? AND pool_address<>? AND enabled=1",
+                            (now, row["owner_id"], row["workspace_id"], mint, pool_address),
+                        )
                         refresh_now_dt = datetime.now(timezone.utc)
                         refresh_now = refresh_now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
                         refresh_due = (refresh_now_dt + timedelta(seconds=900)).isoformat(
