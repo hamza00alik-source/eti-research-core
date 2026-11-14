@@ -1115,6 +1115,28 @@ class MemoryStore:
                             "WHERE owner_id=? AND workspace_id=? AND mint=? AND enabled=1",
                             (now, row["owner_id"], row["workspace_id"], mint),
                         )
+                    elif (row["target_capability"] == "solana.market.scan"
+                            and row["requester"] == "eti.solana.ingest"
+                            and isinstance(task_input, dict)
+                            and task_input.get("scheduled_by") == "eti.solana.ingest"
+                            and result.get("verdict") in {"WAIT", "UNKNOWN"}
+                            and not pool_address):
+                        # Keep newly discovered mints on a low-frequency watch
+                        # until DexScreener indexes their first pool.
+                        pending_pool = "__pending__"
+                        refresh_now_dt = datetime.now(timezone.utc)
+                        refresh_now = refresh_now_dt.isoformat(timespec="microseconds").replace("+00:00", "Z")
+                        refresh_due = (refresh_now_dt + timedelta(seconds=900)).isoformat(
+                            timespec="microseconds"
+                        ).replace("+00:00", "Z")
+                        conn.execute(
+                            "INSERT INTO solana_research_refresh_jobs(id,owner_id,workspace_id,mint,"
+                            "pool_address,interval_seconds,next_due_at,created_at,updated_at) "
+                            "VALUES(?,?,?,?,?,900,?,?,?) ON CONFLICT(owner_id,workspace_id,mint,pool_address) "
+                            "DO UPDATE SET enabled=1,updated_at=excluded.updated_at",
+                            (str(uuid4()), row["owner_id"], row["workspace_id"], mint,
+                             pending_pool, refresh_due, refresh_now, refresh_now),
+                        )
                     elif isinstance(pool_address, str) and pool_address:
                         # A mint may migrate to a new dominant pool. Stop polling
                         # obsolete pool schedules before activating the current one.
