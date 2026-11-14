@@ -2806,10 +2806,13 @@ class MemoryStore:
             )
             label_params.extend([limit, owner_id, workspace_id])
             label_rows = conn.execute(label_query, label_params).fetchall()
+            exported_snapshot_ids = {row["id"] for row in rows}
             labels = [{
                 "id": row["id"], "mint": row["mint"], "pool_address": row["pool_address"],
                 "baseline_snapshot_id": row["baseline_snapshot_id"],
                 "target_snapshot_id": row["target_snapshot_id"],
+                "baseline_snapshot_in_export": row["baseline_snapshot_id"] in exported_snapshot_ids,
+                "target_snapshot_in_export": row["target_snapshot_id"] in exported_snapshot_ids,
                 "horizon_seconds": row["horizon_seconds"],
                 "label": json.loads(row["label_json"]), "created_at": row["created_at"],
             } for row in label_rows]
@@ -2832,7 +2835,8 @@ class MemoryStore:
             "validation": validation,
             "limitations": [
                 "Observations are provider-sampled snapshots, not OHLCV candles or executable quotes.",
-                "Labels reference future observations; use baseline snapshot features only for prediction inputs.",
+                "Labels reference future observations; target_snapshot_in_export is false when the bounded snapshot export omits the target row.",
+                "Use baseline snapshot features only for prediction inputs; target snapshot fields are outcomes and must never leak into features.",
                 "This export is research data and does not authorize model training or live execution.",
             ],
         }
