@@ -2432,15 +2432,31 @@ class MemoryStore:
             if not self._owns_workspace(conn, owner_id, workspace_id):
                 raise LookupError("workspace not found")
             rows = conn.execute(
-                "SELECT id,capability,mint,pool_address,payload_json,fetched_at "
+                "SELECT id,capability,mint,pool_address,schema_version,payload_json,fetched_at "
                 "FROM solana_research_snapshots WHERE owner_id=? AND workspace_id=? "
                 "ORDER BY fetched_at,id", (owner_id, workspace_id)
             ).fetchall()
-            snapshots = [{
-                "id": row["id"], "capability": row["capability"], "mint": row["mint"],
-                "pool_address": row["pool_address"], "payload": json.loads(row["payload_json"]),
-                "fetched_at": row["fetched_at"],
-            } for row in rows]
+            snapshots = []
+            skipped_invalid_snapshots = 0
+            for row in rows:
+                # Label generation must not crash on damaged stored JSON or use
+                # payloads whose schema has not been explicitly understood.
+                if isinstance(row["schema_version"], bool) or row["schema_version"] != 1:
+                    skipped_invalid_snapshots += 1
+                    continue
+                try:
+                    payload = json.loads(row["payload_json"])
+                except (TypeError, ValueError):
+                    skipped_invalid_snapshots += 1
+                    continue
+                if not isinstance(payload, dict):
+                    skipped_invalid_snapshots += 1
+                    continue
+                snapshots.append({
+                    "id": row["id"], "capability": row["capability"], "mint": row["mint"],
+                    "pool_address": row["pool_address"], "payload": payload,
+                    "fetched_at": row["fetched_at"],
+                })
             labels = build_forward_labels(snapshots, now=now)
             inserted = 0
             created_at = _utc_now()
@@ -2454,7 +2470,10 @@ class MemoryStore:
                      label["horizon_seconds"], _encode_json(label), created_at),
                 )
                 inserted += cursor.rowcount
-        return {"generated": inserted, "available": len(labels)}
+        return {
+            "generated": inserted, "available": len(labels),
+            "skipped_invalid_snapshots": skipped_invalid_snapshots,
+        }
 
     def get_solana_research_dataset_report(
         self, owner_id: str, workspace_id: str,
