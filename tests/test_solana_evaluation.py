@@ -407,3 +407,54 @@ def test_pooled_compounding_and_dependence_are_explicitly_non_portfolio_diagnost
     assert dependence["unprepared_validation_label_count"] == 0
     assert dependence["dependence_scope"] == "PREPARED_VALIDATION_ROWS_WITH_VALID_INTERVALS_ONLY"
     assert report["training_authorized"] is False
+
+
+def test_mint_cluster_bootstrap_withholds_small_cluster_counts_and_is_reproducible():
+    from eti.solana_evaluation import evaluate_solana_research_folds
+
+    small = evaluate_solana_research_folds([{
+        "validation": [
+            _row(1.0, 8, 2, f"2026-01-{index + 1:02d}T00:00:00Z")
+            for index in range(5)
+        ]
+    }])
+    assert small["cluster_uncertainty"]["always_long"]["status"] == "INSUFFICIENT_MINT_CLUSTERS"
+    assert small["cluster_uncertainty"]["always_long"]["mean_return_pct_interval"] is None
+
+    rows = []
+    for index in range(25):
+        rows.append({
+            "mint": f"cluster-mint-{index}",
+            "pool_address": f"cluster-pool-{index}",
+            "baseline_at": f"2026-02-{index + 1:02d}T00:00:00Z",
+            "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
+            "target_sampled_price_return_pct": float(index - 10),
+        })
+    report_a = evaluate_solana_research_folds([{"validation": rows}])
+    report_b = evaluate_solana_research_folds([{"validation": rows}])
+    interval = report_a["cluster_uncertainty"]["always_long"]
+    assert interval["status"] == "EXPLORATORY_INTERVAL_AVAILABLE"
+    assert interval["cluster_count"] == 25
+    assert interval["mean_return_pct_interval"] == report_b["cluster_uncertainty"]["always_long"]["mean_return_pct_interval"]
+    low, high = interval["mean_return_pct_interval"]
+    assert low <= report_a["aggregate"]["always_long"]["mean_return_pct"] <= high
+    assert report_a["training_authorized"] is False
+
+
+def test_missing_mint_rows_are_not_treated_as_independent_bootstrap_clusters():
+    from eti.solana_evaluation import evaluate_solana_research_folds
+
+    rows = [
+        {
+            "pool_address": f"pool-{index}",
+            "baseline_at": f"2026-03-{index + 1:02d}T00:00:00Z",
+            "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
+            "target_sampled_price_return_pct": 1.0,
+        }
+        for index in range(25)
+    ]
+    report = evaluate_solana_research_folds([{"validation": rows}])
+    interval = report["cluster_uncertainty"]["always_long"]
+    assert interval["cluster_count"] == 1
+    assert interval["status"] == "INSUFFICIENT_MINT_CLUSTERS"
+    assert interval["mean_return_pct_interval"] is None
