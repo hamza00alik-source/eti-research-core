@@ -632,6 +632,7 @@ def test_time_series_regimes_normalize_volatility_and_separate_horizons():
     validation = [
         {"mint": "mint-a", "pool_address": "pool-a",
          "baseline_at": stamp.isoformat(), "horizon_seconds": horizon,
+         "features": {"txns_h1_buys": 6, "txns_h1_sells": 4},
          "target_sampled_price_return_pct": float(horizon) / 1000}
         for horizon in (60, 300)
     ]
@@ -653,8 +654,8 @@ def test_time_series_regimes_normalize_volatility_and_separate_horizons():
     benchmark = stratum["fixed_benchmark_comparison"]
     assert benchmark["model_fitting_performed"] is False
     assert benchmark["buy_pressure_rule"]["fit_on_validation_data"] is False
-    assert benchmark["aggregate"]["always_long"]["trade_count"] == 5
-    assert benchmark["aggregate"]["fixed_buy_pressure"]["trade_count"] == 5
+    assert benchmark["aggregate"]["always_long"]["trade_count"] == 1
+    assert benchmark["aggregate"]["fixed_buy_pressure"]["trade_count"] == 1
     assert report["sampling_quality"]["mean_max_gap_seconds"] == 7200
     assert report["method"]["volatility_unit"] == "percent_per_sqrt_hour"
 
