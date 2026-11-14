@@ -207,3 +207,50 @@ def allocate_research_budget(
             "validated before economic evaluation. No training or order execution occurred."
         ),
     }
+
+
+def main() -> None:
+    import argparse
+    import json
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(
+        description="Create a research-only candidate allocation from a universe scan JSON"
+    )
+    parser.add_argument("scan_report", type=Path)
+    parser.add_argument("--output", type=Path, default=Path("artifacts/research-allocation.json"))
+    parser.add_argument("--max-model-fit-calls", type=int, default=32)
+    parser.add_argument("--fits-per-candidate", type=int, default=2)
+    parser.add_argument("--max-candidates", type=int, default=8)
+    parser.add_argument("--max-age-seconds", type=float, default=7200)
+    parser.add_argument("--estimated-run-cost-usd", type=float)
+    parser.add_argument("--daily-spend-to-date-usd", type=float)
+    parser.add_argument("--monthly-spend-to-date-usd", type=float)
+    parser.add_argument(
+        "--cost-models", type=Path,
+        help="JSON mapping 'venue:symbol' to 'validated'; omitted costs remain unknown",
+    )
+    args = parser.parse_args()
+    scan = json.loads(args.scan_report.read_text(encoding="utf-8"))
+    cost_models = (
+        json.loads(args.cost_models.read_text(encoding="utf-8"))
+        if args.cost_models else None
+    )
+    report = allocate_research_budget(
+        scan,
+        max_model_fit_calls=args.max_model_fit_calls,
+        fits_per_candidate=args.fits_per_candidate,
+        max_candidates=args.max_candidates,
+        max_age_seconds=args.max_age_seconds,
+        estimated_run_cost_usd=args.estimated_run_cost_usd,
+        daily_spend_to_date_usd=args.daily_spend_to_date_usd,
+        monthly_spend_to_date_usd=args.monthly_spend_to_date_usd,
+        cost_model_status=cost_models,
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(json.dumps(report, indent=2))
+
+
+if __name__ == "__main__":
+    main()
