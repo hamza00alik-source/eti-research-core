@@ -34,7 +34,8 @@ def _is_finite_number(value: int | float) -> bool:
 def validate_snapshot_rows(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
     """Report data-quality issues without coercing, dropping, or repairing source values."""
     issue_counts = {
-        "malformed_payload": 0, "missing_evidence": 0, "missing_feature_values": 0,
+        "malformed_payload": 0, "unsupported_schema_version": 0,
+        "missing_evidence": 0, "missing_feature_values": 0,
         "non_finite_feature_values": 0, "negative_feature_values": 0,
         "zero_price_or_liquidity": 0, "invalid_timestamp": 0,
         "duplicate_entity_timestamp": 0, "non_increasing_entity_time": 0,
@@ -44,6 +45,10 @@ def validate_snapshot_rows(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
     invalid_rows: list[dict[str, Any]] = []
     for row in snapshots:
         problems: list[str] = []
+        schema_version = row.get("schema_version")
+        if isinstance(schema_version, bool) or schema_version != 1:
+            issue_counts["unsupported_schema_version"] += 1
+            problems.append("unsupported_schema_version")
         payload = row.get("payload")
         if not isinstance(payload, dict):
             issue_counts["malformed_payload"] += 1
