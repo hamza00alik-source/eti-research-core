@@ -22,7 +22,7 @@ def test_rejects_bad_epochs_nonfinite_and_negative_open_interest():
 def test_reports_duplicates_and_out_of_order_without_leaking_bad_rows():
     rows = [
         {"timestamp": 1_700_000_000_000, "funding_rate": 0.001},
-        {"timestamp": 1_700_000_028_800_000, "funding_rate": -0.001},
+        {"timestamp": 1_700_028_800_000, "funding_rate": -0.001},
         {"timestamp": 1_700_000_000_000, "funding_rate": 0.002},
     ]
     clean, quality = assess_observation_history(
@@ -37,7 +37,7 @@ def test_reports_duplicates_and_out_of_order_without_leaking_bad_rows():
 def test_preserves_zero_open_interest_and_distinguishes_units():
     rows = [
         {"timestamp": 1_700_000_000_000, "open_interest": 0, "open_interest_unit": "contracts"},
-        {"timestamp": 1_700_000_003_600_000, "open_interest": 5, "open_interest_unit": "contracts"},
+        {"timestamp": 1_700_003_600_000, "open_interest": 5, "open_interest_unit": "contracts"},
     ]
     clean, quality = assess_observation_history(
         rows, value_key="open_interest", allow_negative=False
