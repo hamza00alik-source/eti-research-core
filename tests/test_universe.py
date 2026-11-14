@@ -85,3 +85,33 @@ def test_scan_rejects_invalid_universe_limits(kwargs):
     params.update(kwargs)
     with pytest.raises(ValueError):
         scan_market_universe(**params)
+
+
+def test_pipeline_cli_writes_scan_report_without_training(monkeypatch, tmp_path):
+    import json
+    import sys
+    import eti.pipeline as pipeline
+
+    output = tmp_path / "market-universe.json"
+    captured = {}
+    def fake_scan(**kwargs):
+        captured.update(kwargs)
+        return {
+            "schema_version": "eti.market_universe.v1",
+            "scan_only": True, "training_performed": False,
+            "execution_enabled": False, "summary": {"data_ready_count": 1},
+        }
+
+    monkeypatch.setattr(pipeline, "scan_market_universe", fake_scan)
+    monkeypatch.setattr(sys, "argv", [
+        "eti.pipeline", "--scan-universe", "--asset-classes", "crypto,equity",
+        "--market-types", "spot", "--limit", "1000",
+        "--min-market-rows", "500", "--output", str(output),
+    ])
+    pipeline.main()
+    report = json.loads(output.read_text())
+    assert report["scan_only"] is True
+    assert report["training_performed"] is False
+    assert captured["asset_classes"] == ["crypto", "equity"]
+    assert captured["market_types"] == ["spot"]
+    assert captured["min_rows"] == 500
