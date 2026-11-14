@@ -115,3 +115,22 @@ The branch now includes:
 The new-token and migration subscriptions are free according to PumpPortal's current Data API documentation. Token/account trade streams require an API key and are metered; the initial ETI ingestion process does not subscribe to those streams. Run the ingestor separately from the API and worker process so WebSocket outages do not take down authenticated application requests.
 
 The public PumpPortal docs describe the subscription methods but do not provide a complete stable JSON schema for every migration payload. ETI therefore only accepts the normalized `txType` values explicitly recognized by its adapter; unrecognized messages are dropped rather than guessed. Before relying on migration capture, validate actual live sample payloads and add schema fixtures.
+
+
+## Automated research task chain
+
+The first accepted PumpPortal event now creates its `solana.market.scan` task in the
+same SQLite transaction as the durable event row. Replayed event keys return the
+original event and do not enqueue another scan. The event record includes the
+created scan task ID for observability. This avoids a crash window between event
+persistence and task scheduling.
+
+The worker executes the allowlisted DexScreener market scan. An explicit
+`REJECT` verdict ends the chain. `PASS`, `WAIT`, or `UNKNOWN` outcomes enqueue
+a read-only `solana.token.audit` follow-up, carrying the source scan and event
+IDs. The audit remains conservative: missing critical evidence blocks a pass.
+No wallet, signing, swap, copy-trading, or live Solana execution capability is
+registered. Follow-up enqueueing checks for an existing task tied to the source
+scan to reduce replay duplicates; task completion and follow-up creation are
+not yet one atomic transaction, so a process crash in that narrow interval
+requires operational reconciliation.
