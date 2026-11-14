@@ -459,12 +459,14 @@ def test_solana_refresh_schedule_can_be_reconfigured_and_listed_with_owner_scope
 def test_solana_dataset_report_counts_coverage_and_never_opens_training_gate(tmp_path):
     store = MemoryStore(tmp_path / "solana-dataset-report.sqlite3")
     workspace = _workspace(store)
-    observed = 1760000000000
+    observed_seconds = int(datetime.now(timezone.utc).timestamp())
+    observed = observed_seconds * 1000
     task = store.create_agent_task(
         "owner-1", workspace["id"], "test.solver", "solana.market.scan",
         {"mint": "E" * 40}, max_attempts=1,
     )
-    claimed = store.claim_next_agent_task(now=observed // 1000)
+    claimed = store.claim_next_agent_task(now=observed_seconds)
+    assert claimed["id"] == task["id"]
     store.complete_claimed_agent_task(
         claimed["id"], claimed["lease_token"],
         {
@@ -475,7 +477,7 @@ def test_solana_dataset_report_counts_coverage_and_never_opens_training_gate(tmp
                 "txns_h1_buys": 12, "txns_h1_sells": 7,
             },
         },
-        now=(observed // 1000) + 1,
+        now=observed_seconds + 1,
     )
     report = store.get_solana_research_dataset_report("owner-1", workspace["id"])
     assert report["snapshots"]["market_scans"] == 1
