@@ -100,3 +100,18 @@ The Paper Sizer calculates a target notional only after risk/portfolio checks. R
 - No copy-trading execution.
 - No "safe token" certification.
 - No performance or six-figure claim without reproducible independently reviewed records.
+
+
+## Durable discovery ingestion (implemented in ETI branch)
+
+The branch now includes:
+- `eti/solana_ingest.py`: a separate process that subscribes to PumpPortal new-token and migration feeds, normalizes only recognized event types, and writes events to ETI storage.
+- `solana_research_events`: owner/workspace-scoped SQLite ledger with a unique event key, raw JSON payload, SHA-256 payload digest, source timestamp and received timestamp.
+- Authenticated endpoints:
+  - `POST /v1/workspaces/{workspace_id}/solana/events`
+  - `GET /v1/workspaces/{workspace_id}/solana/events`
+- Duplicate delivery returns the original event; reuse of an event key with a different payload is surfaced as `payload_conflict`, not silently overwritten.
+
+The new-token and migration subscriptions are free according to PumpPortal's current Data API documentation. Token/account trade streams require an API key and are metered; the initial ETI ingestion process does not subscribe to those streams. Run the ingestor separately from the API and worker process so WebSocket outages do not take down authenticated application requests.
+
+The public PumpPortal docs describe the subscription methods but do not provide a complete stable JSON schema for every migration payload. ETI therefore only accepts the normalized `txType` values explicitly recognized by its adapter; unrecognized messages are dropped rather than guessed. Before relying on migration capture, validate actual live sample payloads and add schema fixtures.
