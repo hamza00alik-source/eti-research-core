@@ -42,6 +42,14 @@ def test_nested_walk_forward_selects_on_validation_and_reports_outer_test():
     assert result["fold_count"] > 0
     assert all("selected_candidate" in fold for fold in result["folds"])
     assert "test" not in result["folds"][0]["validation_scores"]
+    assert set(result["folds"][0]["test_candidate_metrics"]) == {"majority", "zero"}
+    assert all(
+        "balanced_accuracy" in metrics and "accuracy" in metrics
+        for metrics in result["folds"][0]["test_candidate_metrics"].values()
+    )
+    assert result["folds"][0]["test_balanced_accuracy"] == result["folds"][0]["test_candidate_metrics"][
+        result["folds"][0]["selected_candidate"]
+    ]["balanced_accuracy"]
 
 
 def test_multi_market_walk_forward_and_bootstrap_summary():
