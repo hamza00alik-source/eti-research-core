@@ -133,6 +133,8 @@ class SolanaWalkForwardEvaluationPayload(BaseModel):
 class SolanaTransactionVerificationPayload(BaseModel):
     signature: str = Field(min_length=64, max_length=88)
     mint: str = Field(min_length=32, max_length=44)
+    expected_pool_address: str = Field(min_length=32, max_length=44)
+    wallet_address: str = Field(min_length=32, max_length=44)
 
 
 class SolanaResearchEventPayload(BaseModel):
@@ -704,6 +706,8 @@ def verify_solana_research_transaction(
             SolanaRpcClient(),
             payload.signature,
             payload.mint,
+            expected_pool_address=payload.expected_pool_address,
+            wallet_address=payload.wallet_address,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
