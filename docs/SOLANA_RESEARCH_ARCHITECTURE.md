@@ -205,3 +205,13 @@ Model training remains paused for this Solana label lane until sufficient
 time-stamped observations and independently reviewed labels accumulate.
 Nothing in this pipeline adds wallet access, transaction signing, swaps,
 copy-trading, or live execution.
+
+
+A reusable `chronological_group_split` helper is now included for downstream
+evaluation. It keeps each mint/pool group wholly within one fold, requires
+training label outcomes to end before the validation boundary, applies an
+explicit embargo (default 24 hours), and purges groups crossing either
+boundary. It fails closed if there are too few distinct pools or if purging
+leaves an empty fold. This is a validation primitive, not evidence that a model
+is ready to train; minimum sample size, class balance, launch-regime coverage,
+and independent test periods still need to be assessed before training.
