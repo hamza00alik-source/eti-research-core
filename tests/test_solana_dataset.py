@@ -144,3 +144,24 @@ def test_dataset_export_reports_malformed_stored_json_without_crashing(tmp_path)
     assert exported["validation"]["malformed_label_count"] == 1
     assert exported["labels"][0]["label"] is None
     assert exported["labels"][0]["label_parse_error"] is True
+
+
+def test_dataset_validator_flags_unknown_and_malformed_schema_versions():
+    rows = [
+        {
+            "id": "future-version", "schema_version": 2,
+            "capability": "solana.token.audit", "mint": "A" * 40,
+            "pool_address": "PoolA", "fetched_at": "2026-01-01T00:00:00Z",
+            "payload": {"passed": True},
+        },
+        {
+            "id": "missing-version", "schema_version": True,
+            "capability": "solana.token.audit", "mint": "B" * 40,
+            "pool_address": "PoolB", "fetched_at": "2026-01-01T00:00:00Z",
+            "payload": {"passed": True},
+        },
+    ]
+    report = validate_snapshot_rows(rows)
+    assert report["issue_counts"]["unsupported_schema_version"] == 2
+    assert report["rows_with_issues"] == 2
+    assert all("unsupported_schema_version" in row["issues"] for row in report["row_issues"])
