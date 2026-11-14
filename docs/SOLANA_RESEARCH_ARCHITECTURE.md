@@ -308,3 +308,21 @@ features only from the baseline snapshot; target observations contribute only
 the already-computed outcome. Its status is always `PREPARATION_ONLY` and
 `training_authorized` is always false. It does not fit or approve a model, and
 sampled returns are not executable returns or net P&L.
+
+
+## Fixed benchmark diagnostics (implemented; no fitting)
+
+`eti/solana_evaluation.py` provides a non-fitting comparator for chronological
+walk-forward folds. It evaluates validation rows only and reports a no-trade
+reference, an always-long sampled-return reference, and a fixed buy-pressure
+rule (1-hour buys divided by buys plus sells, using a declared threshold).
+The threshold is supplied before evaluation and is not selected or optimized
+against validation outcomes. Malformed rows are excluded and counted.
+
+Reports include trade counts, mean/median sampled return, win rate, compounded
+sampled return and a simple sequential drawdown diagnostic. These are gross
+sampled-mark comparisons only: fees, spread, impact, priority fees, latency,
+failed exits and capital constraints are not modeled. Fold aggregates are
+descriptive and are not an independent final holdout. The helper performs no
+model fitting, threshold search, calibration, training approval or execution;
+`training_authorized` remains false.
