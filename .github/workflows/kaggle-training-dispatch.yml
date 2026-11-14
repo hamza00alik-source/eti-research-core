@@ -34,23 +34,17 @@ jobs:
       - name: Install Kaggle CLI
         run: python -m pip install --upgrade kaggle
 
-      - name: Configure Kaggle credentials
+      - name: Configure Kaggle API token
         env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME || 'hamza00alik' }}
-          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY || secrets.HAMZA00ALIK }}
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
-          if [ -z "$KAGGLE_USERNAME" ] || [ -z "$KAGGLE_KEY" ]; then
-            echo "::error::Kaggle credentials unavailable. Configure the existing hamza00alik environment secret."
+          if [ -z "$KAGGLE_API_TOKEN" ]; then
+            echo "::error::Missing KAGGLE_API_TOKEN in the hamza00alik GitHub Actions environment. Generate a Kaggle API token and save it as that environment secret."
             exit 1
           fi
           mkdir -p "$HOME/.kaggle"
-          python - <<'PY'
-          import json, os
-          p = os.path.expanduser("~/.kaggle/kaggle.json")
-          with open(p, "w") as f:
-              json.dump({"username": os.environ["KAGGLE_USERNAME"], "key": os.environ["KAGGLE_KEY"]}, f)
-          os.chmod(p, 0o600)
-          PY
+          printf '%s' "$KAGGLE_API_TOKEN" > "$HOME/.kaggle/access_token"
+          chmod 600 "$HOME/.kaggle/access_token"
 
       - name: Prepare metadata for the existing Kaggle kernel
         env:
@@ -82,7 +76,7 @@ jobs:
               Path("notebooks/ETI_v0_1_Training.ipynb").read_bytes()
           )
           (out / "kernel-metadata.json").write_text(
-              json.dumps(metadata, indent=2) + "\n"
+              json.dumps(metadata, indent=2) + "\\n"
           )
           check = json.loads((out / "kernel-metadata.json").read_text())
           assert check["id"] == expected_id
