@@ -384,7 +384,8 @@ def discover_market_universe(payload: dict[str, Any]) -> dict[str, Any]:
 
 def market_coverage_report(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Describe implemented data and execution coverage without implying availability."""
-    payload = payload or {}
+    if payload is None:
+        payload = {}
     if not isinstance(payload, dict):
         raise ValueError("coverage input must be a JSON object")
     return {
