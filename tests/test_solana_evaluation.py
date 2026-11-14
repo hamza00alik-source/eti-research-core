@@ -458,3 +458,51 @@ def test_missing_mint_rows_are_not_treated_as_independent_bootstrap_clusters():
     assert interval["cluster_count"] == 1
     assert interval["status"] == "INSUFFICIENT_MINT_CLUSTERS"
     assert interval["mean_return_pct_interval"] is None
+
+
+
+def test_regime_diagnostics_require_predeclared_thresholds_and_label_only_snapshot_proxies():
+    from eti.solana_evaluation import evaluate_solana_regime_diagnostics
+
+    rows = [{
+        "features": {
+            "txns_h1_buys": 8, "txns_h1_sells": 2,
+            "volume_h24_usd": 5000, "liquidity_usd": 1000,
+        },
+        "target_sampled_price_return_pct": 4.0,
+    }, {
+        "features": {
+            "txns_h1_buys": 1, "txns_h1_sells": 9,
+            "volume_h24_usd": 100, "liquidity_usd": 1000,
+        },
+        "target_sampled_price_return_pct": -3.0,
+    }]
+    unconfigured = evaluate_solana_regime_diagnostics(rows)
+    assert unconfigured["status"] == "NOT_CONFIGURED"
+    assert unconfigured["classified_row_count"] == 0
+
+    report = evaluate_solana_regime_diagnostics(rows, {
+        "buy_pressure_high": 0.65,
+        "buy_pressure_low": 0.35,
+        "turnover_liquidity_ratio_high": 2.0,
+        "turnover_liquidity_ratio_low": 0.5,
+    })
+    assert report["status"] == "BASELINE_PROXY_REGIME_DIAGNOSTICS_ONLY"
+    assert report["classified_row_count"] == 2
+    assert "BUY_DOMINANT__HIGH_TURNOVER_PROXY" in report["regimes"]
+    assert "SELL_DOMINANT__LOW_TURNOVER_PROXY" in report["regimes"]
+    assert "not trend" in report["interpretation"]
+
+
+def test_regime_diagnostics_reject_invalid_or_unapproved_threshold_shapes():
+    from eti.solana_evaluation import evaluate_solana_regime_diagnostics
+
+    with pytest.raises(ValueError):
+        evaluate_solana_regime_diagnostics([], {"buy_pressure_high": 0.6})
+    with pytest.raises(ValueError):
+        evaluate_solana_regime_diagnostics([], {
+            "buy_pressure_high": 0.3,
+            "buy_pressure_low": 0.4,
+            "turnover_liquidity_ratio_high": 2.0,
+            "turnover_liquidity_ratio_low": 0.5,
+        })
