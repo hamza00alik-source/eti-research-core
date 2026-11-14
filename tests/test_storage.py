@@ -443,3 +443,46 @@ def test_autonomy_skips_dated_future_scan_without_exact_contract_symbol(tmp_path
     crypto_types = {task["input"]["market_type"] for task in tasks
                     if task["input"].get("asset_class") == "crypto"}
     assert crypto_types == {"spot", "swap"}
+
+
+def test_solana_event_ledger_is_durable_idempotent_and_owner_scoped(tmp_path):
+    path = tmp_path / "solana-events.sqlite3"
+    store = MemoryStore(path)
+    workspace = store.create_workspace("owner-a", "solana")
+    payload = {"signature": "sig-001", "mint": "A" * 40, "slot": 12345}
+    first = store.record_solana_research_event(
+        "owner-a", workspace["id"], "pumpportal:sig-001",
+        "pumpportal", "new_token", "A" * 40, payload, "2026-11-14T12:00:00Z",
+    )
+    duplicate = store.record_solana_research_event(
+        "owner-a", workspace["id"], "pumpportal:sig-001",
+        "pumpportal", "new_token", "A" * 40, payload, "2026-11-14T12:00:00Z",
+    )
+    assert first["id"] == duplicate["id"]
+    assert duplicate["duplicate"] is True
+    reopened = MemoryStore(path)
+    items = reopened.list_solana_research_events("owner-a", workspace["id"])
+    assert len(items) == 1
+    assert items[0]["payload"] == payload
+    assert items[0]["payload_sha256"] == first["payload_sha256"]
+    assert reopened.list_solana_research_events("owner-b", workspace["id"]) == []
+
+
+def test_solana_event_ledger_rejects_invalid_event_data(tmp_path):
+    store = MemoryStore(tmp_path / "solana-events.sqlite3")
+    workspace = store.create_workspace("owner", "solana")
+    with pytest.raises(ValueError, match="event_type"):
+        store.record_solana_research_event(
+            "owner", workspace["id"], "event-1", "pumpportal",
+            "unknown", "A" * 40, {},
+        )
+    with pytest.raises(ValueError, match="source"):
+        store.record_solana_research_event(
+            "owner", workspace["id"], "event-2", "private-api",
+            "new_token", "A" * 40, {},
+        )
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.record_solana_research_event(
+            "owner", "not-your-workspace", "event-3", "pumpportal",
+            "new_token", "A" * 40, {},
+        )
