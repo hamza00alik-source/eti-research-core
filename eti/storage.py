@@ -2321,7 +2321,7 @@ class MemoryStore:
 
     def schedule_solana_research_refresh(
         self, owner_id: str, workspace_id: str, mint: str, pool_address: str,
-        interval_seconds: int = 900,
+        interval_seconds: int = 300,
     ) -> dict[str, Any]:
         """Create or refresh an owner-scoped recurring scan for a known pool."""
         owner_id = _required_text(owner_id, "owner_id")
