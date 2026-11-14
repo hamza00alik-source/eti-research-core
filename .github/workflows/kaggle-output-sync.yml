@@ -13,6 +13,8 @@ permissions:
 
 jobs:
   retrieve-training-output:
+    # Also expose the existing Kaggle environment secret shown in repository settings.
+    environment: hamza00alik
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -21,11 +23,12 @@ jobs:
 
       - name: Configure Kaggle credentials
         env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          # Prefer repository secrets; fall back to the configured Kaggle environment.
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME || 'hamza00alik' }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY || secrets.HAMZA00ALIK }}
         run: |
           if [ -z "$KAGGLE_USERNAME" ] || [ -z "$KAGGLE_KEY" ]; then
-            echo "::error::Add KAGGLE_USERNAME and KAGGLE_KEY in repository Actions secrets."
+            echo "::error::Kaggle credentials unavailable. Add KAGGLE_KEY as an environment secret named HAMZA00ALIK in environment hamza00alik, or add KAGGLE_USERNAME and KAGGLE_KEY as repository secrets."
             exit 1
           fi
           mkdir -p "$HOME/.kaggle"
