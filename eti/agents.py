@@ -11,6 +11,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .data import assess_ohlcv_quality
+
 from .features import build_features
 from .providers import CcxtPublicProvider, YahooFinanceProvider, enrich_ohlcv_with_derivatives
 from .opportunities import rank_spot_opportunity
@@ -87,6 +89,7 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("limit must be an integer from 50 to 500")
 
     frame = provider.fetch_ohlcv(symbol, timeframe, limit)
+    data_quality = assess_ohlcv_quality(frame, timeframe)
     derivative_context = None
     if asset_class == "crypto" and market_type in {"swap", "future"}:
         derivative_context = provider.fetch_derivatives_context(symbol, timeframe, min(100, limit))
@@ -123,6 +126,7 @@ def market_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         "symbol": symbol,
         "timeframe": timeframe,
         "completed_candles": len(frame),
+        "data_quality": data_quality,
         "latest_completed_candle": frame.iloc[-1]["timestamp"].isoformat(),
         "last_close": round(float(frame.iloc[-1]["close"]), 10),
         "trend_context": trend,
