@@ -434,6 +434,10 @@ This is stronger receipt and wallet-balance evidence, but it is not complete swa
 
 Attestations are stored separately from user-submitted execution-cost evidence in an append-only owner/workspace/label-scoped table. Canonical report bytes are SHA-256 hashed; identical reports are idempotent, changed reports append new records, and reads recalculate the digest. The report records `transaction_receipt_verified=true` while retaining `verified=false`. This is a server-side record of what the configured RPC returned, not independent proof of source truth, decoded swap causality, a fill, an exit, measured transaction costs, or realized P&L. It is not automatically injected into cost-evidence evaluation and cannot authorize model training or live execution.
 
+### Receipt-attestation evaluation diagnostics
+
+The authenticated walk-forward evaluation service selects the newest stored receipt attestation for each exported label and reports receipt status only for prepared validation rows. It checks the stored-byte digest and the record/report label, mint, pool, wallet, and signature identities. If the newest record is invalid, it is reported as invalid rather than silently falling back to an older record. Receipt diagnostics are emitted in a separate `transaction_receipt_attestations` section and never modify execution-cost rows, satisfy `exit_evidence`, or change net-return/realized-P&L fields. A positive receipt observation still does not prove a swap instruction, fill, or exit and does not change the fail-closed training gate.
+
 ### Transaction receipt verification semantics
 
 The public-RPC verifier reports `FINALIZED_MINT_BALANCE_DEBIT_OBSERVED` and `transaction_receipt_verified=true` only for finalized successful transactions with the requested mint, expected pool and wallet referenced, and an owner-attributed net wallet token-balance decrease. The generic `verified` flag remains false: this evidence does not decode and prove the swap instruction, pool causality, fill price, or realized P&L. It must not be promoted to a verified exit or used to authorize training or execution.
