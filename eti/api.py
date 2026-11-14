@@ -718,7 +718,7 @@ def verify_solana_research_transaction(
         raise HTTPException(status_code=502, detail="Solana RPC verification unavailable") from exc
 
 
-@app.post("/v1/workspaces/{workspace_id}/solana/transaction-attestations", status_code=201)
+@app.post("/v1/workspaces/{workspace_id}/solana/transaction-attestations")
 def attest_solana_research_transaction(
     workspace_id: str,
     payload: SolanaTransactionAttestationPayload,
