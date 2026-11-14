@@ -27,7 +27,7 @@ class OnDeviceModelRunner(
     private val environment = OrtEnvironment.getEnvironment()
     private val session: OrtSession
     private val inputName: String
-    private val probabilityOutputIndex: Int
+    private val probabilityOutputName: String
     private val featureCount: Int
     private val classIds: List<Int>
     private val temperature: Double
@@ -39,7 +39,7 @@ class OnDeviceModelRunner(
         featureCount = featureNames.length()
         require(featureCount > 0) { "Model metadata has no feature names" }
         inputName = metadata.getString("input_name")
-        probabilityOutputIndex = metadata.optInt("probability_output_index", 1)
+        probabilityOutputName = metadata.getString("probability_output_name")
         val classes = metadata.getJSONArray("class_ids")
         classIds = (0 until classes.length()).map { classes.getInt(it) }
         require(classIds.isNotEmpty()) { "Model metadata has no class IDs" }
@@ -58,8 +58,8 @@ class OnDeviceModelRunner(
             options.close()
         }
         require(session.inputNames.contains(inputName)) { "ONNX input name does not match metadata" }
-        require(probabilityOutputIndex in session.outputNames.indices) {
-            "ONNX probability output index is invalid"
+        require(session.outputNames.contains(probabilityOutputName)) {
+            "ONNX probability output name does not match metadata"
         }
     }
 
@@ -76,9 +76,9 @@ class OnDeviceModelRunner(
             longArrayOf(1L, featureCount.toLong())
         )
         tensor.use {
-            session.run(mapOf(inputName to it)).use { result ->
+            session.run(mapOf(inputName to it), setOf(probabilityOutputName)).use { result ->
                 @Suppress("UNCHECKED_CAST")
-                val rows = result.get(probabilityOutputIndex).value as Array<FloatArray>
+                val rows = result.get(0).value as Array<FloatArray>
                 require(rows.isNotEmpty() && rows[0].size == classIds.size) {
                     "ONNX probability output does not match the class mapping"
                 }
