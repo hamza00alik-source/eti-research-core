@@ -2890,6 +2890,25 @@ class MemoryStore:
             rows = conn.execute(query, params).fetchall()
         return [self._solana_transaction_attestation_dict(row, duplicate=False) for row in rows]
 
+    def get_solana_research_label(
+        self, owner_id: str, workspace_id: str, label_id: str,
+    ) -> dict[str, Any]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        label_id = _required_text(label_id, "label_id", 128)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            row = conn.execute(
+                "SELECT id,mint,pool_address,label_json,created_at FROM solana_research_labels "
+                "WHERE owner_id=? AND workspace_id=? AND id=?",
+                (owner_id, workspace_id, label_id),
+            ).fetchone()
+        if row is None:
+            raise LookupError("label not found")
+        return {"id": row["id"], "mint": row["mint"], "pool_address": row["pool_address"],
+                "label": json.loads(row["label_json"]), "created_at": row["created_at"]}
+
     def list_solana_research_labels(
         self, owner_id: str, workspace_id: str, mint: str | None = None, limit: int = 500,
     ) -> list[dict[str, Any]]:
