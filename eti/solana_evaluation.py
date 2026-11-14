@@ -842,6 +842,7 @@ def evaluate_solana_regime_sampling_sensitivity(
         if not isinstance(observations, list):
             raise ValueError("each report must include classified_observations")
         current: dict[tuple[str, str, str, str], str] = {}
+        ambiguous_keys: set[tuple[str, str, str, str]] = set()
         for row in observations:
             if not isinstance(row, dict):
                 continue
@@ -851,9 +852,12 @@ def evaluate_solana_regime_sampling_sensitivity(
             if not all(isinstance(value, str) and value.strip() for value in key_values) or not isinstance(regime, str) or not regime.strip():
                 continue
             key = key_values
-            # Ambiguous duplicate identities are withheld rather than arbitrarily selected.
+            # Any conflicting duplicate identity is permanently withheld.
+            if key in ambiguous_keys:
+                continue
             if key in current and current[key] != regime:
                 current.pop(key, None)
+                ambiguous_keys.add(key)
                 continue
             current[key] = regime
         assignments[name] = current
