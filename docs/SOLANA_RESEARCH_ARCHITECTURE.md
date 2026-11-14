@@ -530,6 +530,12 @@ The time-series regime diagnostic emits classified validation-row metadata (mint
 
 These counts remain descriptive, not independent samples: forward labels can overlap and different mints share market-wide shocks. Transition frequencies are not live-ready transition probabilities, do not establish predictive value or executable performance, and do not authorize model fitting, training or execution. Classification continues to use only same-mint/pool history at or before each validation baseline timestamp.
 
+## Regime classification sensitivity to sampling configuration
+
+The evaluation module also exposes `evaluate_solana_regime_sampling_sensitivity()`. It compares classified observations from at least two separately generated time-series regime reports. Comparisons are keyed by the exact mint, pool, horizon and point-in-time baseline timestamp. The report gives pairwise exact-regime agreement, disagreement and observations eligible under only one configuration, plus unanimous agreement across all supplied configurations.
+
+This separates classification instability from coverage changes: observations omitted by one configuration are counted as unmatched rather than treated as disagreements. Conflicting duplicate identities within one report are withheld. The helper does not select a preferred configuration, optimize thresholds, or use outcomes to fit labels. Agreement across configurations is only a robustness diagnostic and cannot establish objective regime truth, predictive edge, or training authorization.
+
 ## Trend/volatility proxy stability across chronological folds
 
 When the explicit time-series regime configuration is supplied, the walk-forward report also includes `fold_time_series_regime_stability`. Each chronological validation fold is classified independently. For every validation row, trend and time-normalized volatility use only prior-or-same-time observations from that exact mint and pool; later history is excluded by the classifier's point-in-time cutoff. Regime results remain separated by forecast horizon.
