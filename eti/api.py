@@ -604,6 +604,19 @@ def schedule_solana_research_refresh(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.get("/v1/workspaces/{workspace_id}/solana/dataset-report")
+def solana_research_dataset_report(
+    workspace_id: str,
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return _memory_store().get_solana_research_dataset_report(
+            account["id"], workspace_id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+
+
 @app.get("/v1/workspaces/{workspace_id}/solana/labels")
 def list_solana_research_labels(
     workspace_id: str,
