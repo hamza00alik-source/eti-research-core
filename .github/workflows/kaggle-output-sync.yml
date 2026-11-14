@@ -121,7 +121,7 @@ jobs:
                       if isinstance(fold, dict) and fold.get("selected_candidate")
                   })
               },
-              "trading_performance_summary": trading.get("summary") if isinstance(trading, dict) else trading,
+              "trading_performance_summary": trading_summary,
               "cost_sensitivity": cost,
               "cost_assumptions": metrics.get("cost_assumptions"),
               "compute_budget": metrics.get("compute_budget"),
