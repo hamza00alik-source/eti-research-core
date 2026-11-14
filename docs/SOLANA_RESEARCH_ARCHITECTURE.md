@@ -333,3 +333,13 @@ rows, not raw persisted label records. Build the walk-forward folds from the
 chronological label metadata, then join each validation label to its prepared
 row by `label_id`; never move rows between folds or randomly repartition them.
 Prepared rows retain `baseline_at` for deterministic chronological ordering.
+
+
+The evaluation module now also exposes
+`evaluate_prepared_solana_walk_forward`. It derives expanding, mint-grouped,
+purged/embargoed folds from the exported label timestamps and joins prepared
+rows by their stable label IDs. Only joined validation rows are passed to the
+fixed benchmark; training rows are counted for diagnostics and never contribute
+to benchmark metrics. Missing prepared validation rows are counted rather than
+replaced or reassigned. The runner accepts only the fail-closed
+`PREPARATION_ONLY` artifact and preserves `training_authorized=false`.
