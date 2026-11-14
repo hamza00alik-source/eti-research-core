@@ -24,7 +24,14 @@ def _timestamp(value: Any) -> datetime | None:
     return parsed
 
 
-def _is_finite_number(value: int | float) -> bool:\n    try:\n        return math.isfinite(float(value))\n    except (OverflowError, TypeError, ValueError):\n        return False\n\n\ndef validate_snapshot_rows(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
+def _is_finite_number(value: int | float) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
+def validate_snapshot_rows(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
     """Report data-quality issues without coercing, dropping, or repairing source values."""
     issue_counts = {
         "malformed_payload": 0, "missing_evidence": 0, "missing_feature_values": 0,
