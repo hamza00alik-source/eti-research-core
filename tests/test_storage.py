@@ -689,3 +689,45 @@ def test_solana_transaction_attestation_requires_exact_label_identity(tmp_path):
             "owner-a", workspace["id"], label_id, mint, "different-pool",
             "wallet-exact", {**report, "expected_pool_address": "different-pool"},
         )
+
+
+def test_exact_solana_label_lookup_and_latest_receipt_attestation(tmp_path):
+    store = MemoryStore(tmp_path / "eti.sqlite3")
+    workspace = store.create_workspace("owner-a", "solana")
+    mint, pool, wallet, label_id = "H" * 32, "pool-latest", "wallet-latest", "label-latest"
+    _insert_solana_label_for_cost_test(store, "owner-a", workspace["id"], label_id, mint, pool)
+
+    label = store.get_solana_research_label("owner-a", workspace["id"], label_id)
+    assert label["id"] == label_id
+    assert label["mint"] == mint
+    assert label["pool_address"] == pool
+    with pytest.raises(LookupError, match="label not found"):
+        store.get_solana_research_label("owner-a", workspace["id"], "missing-label")
+
+    first_report = {
+        "status": "FINALIZED_MINT_BALANCE_DEBIT_OBSERVED",
+        "verified": False,
+        "transaction_receipt_verified": True,
+        "signature": "signature-old",
+        "mint": mint,
+        "expected_pool_address": pool,
+        "wallet_address": wallet,
+        "wallet_token_debit_raw": "10",
+    }
+    second_report = {**first_report, "signature": "signature-new", "wallet_token_debit_raw": "20"}
+    store.record_solana_transaction_attestation(
+        "owner-a", workspace["id"], label_id, mint, pool, wallet, first_report
+    )
+    store.record_solana_transaction_attestation(
+        "owner-a", workspace["id"], label_id, mint, pool, wallet, second_report
+    )
+
+    latest = store.list_latest_solana_transaction_attestations(
+        "owner-a", workspace["id"], [label_id]
+    )
+    assert len(latest) == 1
+    assert latest[0]["signature"] == "signature-new"
+    assert latest[0]["integrity_valid"] is True
+    assert store.list_latest_solana_transaction_attestations(
+        "owner-b", workspace["id"], [label_id]
+    ) == []
