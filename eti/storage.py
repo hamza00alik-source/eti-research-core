@@ -1055,6 +1055,15 @@ class MemoryStore:
                     snapshot_id = str(uuid4())
                     snapshot_json = _encode_json(result)
                     snapshot_digest = hashlib.sha256(snapshot_json.encode("utf-8")).hexdigest()
+                    snapshot_fetched_at = now
+                    observed_at_ms = result.get("observed_at_ms")
+                    if isinstance(observed_at_ms, (int, float)) and not isinstance(observed_at_ms, bool):
+                        try:
+                            snapshot_fetched_at = datetime.fromtimestamp(
+                                float(observed_at_ms) / 1000.0, timezone.utc
+                            ).isoformat(timespec="microseconds").replace("+00:00", "Z")
+                        except (OverflowError, OSError, ValueError):
+                            pass
                     pool_address = result.get("pool_address")
                     evidence = result.get("evidence")
                     if isinstance(evidence, dict):
@@ -1067,7 +1076,7 @@ class MemoryStore:
                         (snapshot_id, row["owner_id"], row["workspace_id"], task_id,
                          row["target_capability"], mint,
                          pool_address if isinstance(pool_address, str) else None,
-                         1, snapshot_json, snapshot_digest, now),
+                         1, snapshot_json, snapshot_digest, snapshot_fetched_at),
                     )
                     conn.execute(
                         "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
