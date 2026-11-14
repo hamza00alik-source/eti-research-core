@@ -248,7 +248,17 @@ class CsvOHLCVProvider:
         if self.timeframe_ms is not None:
             now_ms = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
             frame = drop_incomplete_candles(frame, self.timeframe_ms, now_ms)
-        return frame.tail(limit).reset_index(drop=True)
+        returned = frame.tail(limit).reset_index(drop=True)
+        returned.attrs["source_metadata"] = {
+            "provider": self.provider_name,
+            "source": "user_supplied_csv",
+            "requested_candles": limit,
+            "available_completed_candles_before_limit": len(frame),
+            "completed_candles_returned": len(returned),
+            "first_returned_candle": returned["timestamp"].iloc[0].isoformat(),
+            "last_returned_candle": returned["timestamp"].iloc[-1].isoformat(),
+        }
+        return returned
 
 class ProviderRegistry:
     """Explicit registry; unconfigured asset classes fail closed."""
@@ -349,4 +359,19 @@ class YahooFinanceProvider:
         }[timeframe]
         now_ms = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
         completed = drop_incomplete_candles(frame, timeframe_ms, now_ms)
-        return completed.tail(limit).reset_index(drop=True)
+        returned = completed.tail(limit).reset_index(drop=True)
+        returned.attrs["source_metadata"] = {
+            "provider": self.provider_name,
+            "source": "yahoo_finance_public_history",
+            "asset_class": self.asset_class,
+            "symbol": symbol.strip(),
+            "timeframe": timeframe,
+            "download_interval": download_interval,
+            "requested_candles": limit,
+            "available_completed_candles_before_limit": len(completed),
+            "completed_candles_returned": len(returned),
+            "history_window": "max",
+            "first_returned_candle": returned["timestamp"].iloc[0].isoformat(),
+            "last_returned_candle": returned["timestamp"].iloc[-1].isoformat(),
+        }
+        return returned
