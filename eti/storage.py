@@ -2762,3 +2762,71 @@ class MemoryStore:
                 raise LookupError("workspace not found")
             rows = conn.execute(query, params).fetchall()
         return [self._solana_event_dict(row) for row in rows]
+
+    def export_solana_research_dataset(
+        self, owner_id: str, workspace_id: str, limit: int = 5000,
+        mint: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a deterministic, bounded point-in-time export for this owner/workspace."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 5000:
+            raise ValueError("limit must be an integer from 1 to 5000")
+        query = (
+            "SELECT id,task_id,capability,mint,pool_address,schema_version,"
+            "payload_json,payload_sha256,fetched_at FROM solana_research_snapshots "
+            "WHERE owner_id=? AND workspace_id=?"
+        )
+        params: list[Any] = [owner_id, workspace_id]
+        if mint is not None:
+            mint = _required_text(mint, "mint", 64)
+            query += " AND mint=?"
+            params.append(mint)
+        query += " ORDER BY fetched_at ASC,id ASC LIMIT ?"
+        params.append(limit)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+            snapshot_ids = [row["id"] for row in rows]
+            labels: list[dict[str, Any]] = []
+            if snapshot_ids:
+                placeholders = ",".join("?" for _ in snapshot_ids)
+                label_rows = conn.execute(
+                    "SELECT id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
+                    "horizon_seconds,label_json,created_at FROM solana_research_labels "
+                    "WHERE owner_id=? AND workspace_id=? AND baseline_snapshot_id IN (" + placeholders + ") "
+                    "ORDER BY created_at ASC,id ASC",
+                    [owner_id, workspace_id, *snapshot_ids],
+                ).fetchall()
+                labels = [{
+                    "id": row["id"], "mint": row["mint"], "pool_address": row["pool_address"],
+                    "baseline_snapshot_id": row["baseline_snapshot_id"],
+                    "target_snapshot_id": row["target_snapshot_id"],
+                    "horizon_seconds": row["horizon_seconds"],
+                    "label": json.loads(row["label_json"]), "created_at": row["created_at"],
+                } for row in label_rows]
+        snapshots = [{
+            "id": row["id"], "task_id": row["task_id"], "capability": row["capability"],
+            "mint": row["mint"], "pool_address": row["pool_address"],
+            "schema_version": row["schema_version"], "payload": json.loads(row["payload_json"]),
+            "payload_sha256": row["payload_sha256"], "fetched_at": row["fetched_at"],
+        } for row in rows]
+        from .solana_dataset import validate_snapshot_rows
+        validation = validate_snapshot_rows(snapshots)
+        return {
+            "schema": "eti.solana.research_dataset.v1",
+            "scope": {"workspace_id": workspace_id},
+            "truncated_at_limit": len(snapshots) == limit,
+            "snapshot_count": len(snapshots),
+            "label_count": len(labels),
+            "snapshots": snapshots,
+            "labels": labels,
+            "validation": validation,
+            "limitations": [
+                "Observations are provider-sampled snapshots, not OHLCV candles or executable quotes.",
+                "Labels reference future observations; use baseline snapshot features only for prediction inputs.",
+                "This export is research data and does not authorize model training or live execution.",
+            ],
+        }
+
