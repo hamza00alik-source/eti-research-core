@@ -534,11 +534,13 @@ def test_time_series_regimes_use_only_prior_same_mint_pool_prices():
         "trend_abs_return_pct": 3.0,
         "volatility_high_pct": 2.0,
         "volatility_low_pct": 0.1,
+        "max_gap_seconds": 7200,
+        "minimum_history_span_seconds": 3600,
     }
     report = evaluate_solana_time_series_regimes(history, validation, config)
     assert report["status"] == "TIME_SERIES_PROXY_REGIME_DIAGNOSTICS_ONLY"
     assert report["classified_row_count"] == 1
-    assert "UPWARD_TREND_PROXY__LOW_SAMPLED_VOLATILITY" in report["regimes"]
+    assert "UPWARD_TREND_PROXY__LOW_TIME_NORMALIZED_VOLATILITY_PROXY" in report["regimes"]
 
     # A future price observation and another pool must not affect this label.
     polluted_history = history + [{
@@ -575,6 +577,8 @@ def test_time_series_regimes_withhold_sparse_and_conflicting_history():
         "lookback_observations": 10, "minimum_observations": 5,
         "trend_abs_return_pct": 2.0, "volatility_high_pct": 2.0,
         "volatility_low_pct": 0.2,
+        "max_gap_seconds": 7200,
+        "minimum_history_span_seconds": 3600,
     }
     report = evaluate_solana_time_series_regimes(sparse, validation, config)
     assert report["classified_row_count"] == 0
@@ -599,3 +603,67 @@ def test_time_series_regime_config_is_strict_and_training_stays_locked():
             "trend_abs_return_pct": 1.0, "volatility_high_pct": 2.0,
             "volatility_low_pct": 0.5,
         })
+
+
+def test_time_series_regimes_normalize_volatility_and_separate_horizons():
+    from datetime import datetime, timedelta, timezone
+    from eti.solana_evaluation import evaluate_solana_time_series_regimes
+
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    # Equal 1% log-return increments over unequal intervals should be
+    # normalized by elapsed time before volatility is calculated.
+    history = []
+    intervals = [3600, 7200, 3600, 7200, 3600]
+    stamp = start
+    price = 100.0
+    for index in range(6):
+        history.append({
+            "mint": "mint-a", "pool_address": "pool-a",
+            "baseline_at": stamp.isoformat(), "features": {"price_usd": price},
+        })
+        if index < len(intervals):
+            stamp += timedelta(seconds=intervals[index])
+            price *= math.exp(0.01 * math.sqrt(intervals[index] / 3600.0))
+    validation = [
+        {"mint": "mint-a", "pool_address": "pool-a",
+         "baseline_at": stamp.isoformat(), "horizon_seconds": horizon,
+         "target_sampled_price_return_pct": float(horizon) / 1000}
+        for horizon in (60, 300)
+    ]
+    config = {
+        "lookback_observations": 6, "minimum_observations": 6,
+        "trend_abs_return_pct": 1.0, "volatility_high_pct": 1.0,
+        "volatility_low_pct": 0.001, "max_gap_seconds": 7200,
+        "minimum_history_span_seconds": 3600,
+    }
+    report = evaluate_solana_time_series_regimes(history, validation, config)
+    assert report["classified_row_count"] == 2
+    assert set(report["regimes_by_horizon_seconds"]) == {"60", "300"}
+    assert report["sampling_quality"]["mean_max_gap_seconds"] == 7200
+    assert report["method"]["volatility_unit"] == "percent_per_sqrt_hour"
+
+
+def test_time_series_regimes_reject_excessive_sampling_gaps():
+    from datetime import datetime, timedelta, timezone
+    from eti.solana_evaluation import evaluate_solana_time_series_regimes
+
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    history = [{
+        "mint": "mint-a", "pool_address": "pool-a",
+        "baseline_at": (start + timedelta(hours=i * 5)).isoformat(),
+        "features": {"price_usd": 100.0 + i},
+    } for i in range(5)]
+    validation = [{
+        "mint": "mint-a", "pool_address": "pool-a",
+        "baseline_at": (start + timedelta(hours=20)).isoformat(),
+        "target_sampled_price_return_pct": 1.0,
+    }]
+    config = {
+        "lookback_observations": 5, "minimum_observations": 5,
+        "trend_abs_return_pct": 1.0, "volatility_high_pct": 2.0,
+        "volatility_low_pct": 0.2, "max_gap_seconds": 3600,
+        "minimum_history_span_seconds": 3600,
+    }
+    report = evaluate_solana_time_series_regimes(history, validation, config)
+    assert report["classified_row_count"] == 0
+    assert report["unclassified_reasons"]["sampling_gap_exceeds_configured_maximum"] == 1
