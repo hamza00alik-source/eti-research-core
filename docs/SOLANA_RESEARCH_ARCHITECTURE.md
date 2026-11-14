@@ -375,3 +375,16 @@ It always leaves `net_return_pct=null` and
 fills, and a separately observed exit does not prove the baseline/target
 marks were executable. This module does not simulate or execute transactions,
 approve training, or authorize trading.
+
+
+The prepared walk-forward evaluator can now accept a mapping of execution-cost
+evidence keyed by stable exported label ID. It applies the evidence validator
+only after a label has joined to a prepared **validation** row; training labels
+are never cost-evaluated or included in the report. Missing evidence is
+reported as incomplete rather than treated as zero cost. The report exposes
+per-validation-label missing/invalid components and, where every required
+component and successful-exit record is present, a mean/median
+cost-adjusted sampled-mark scenario. It always keeps `net_return_pct=null`
+and `realized_pnl_available=false`. This is diagnostic integration only;
+the evidence is supplied to the evaluator and is not yet a durable evidence
+ledger or independently verified provider integration.
