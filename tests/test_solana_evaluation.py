@@ -40,10 +40,11 @@ def test_benchmark_excludes_malformed_validation_rows_and_rejects_bad_threshold(
         "validation": [
             _row(2.0, 3, 1, "2026-01-01T00:00:00Z"),
             _row(float("nan"), 3, 1, "2026-01-02T00:00:00Z"),
+            _row(-100.1, 3, 1, "2026-01-03T00:00:00Z"),
             {"features": {}, "target_sampled_price_return_pct": 1.0},
         ],
     }])
-    assert report["excluded_validation_rows"] == 2
+    assert report["excluded_validation_rows"] == 3
     assert report["aggregate"]["always_long"]["trade_count"] == 1
     with pytest.raises(ValueError):
         evaluate_solana_research_folds([], buy_pressure_threshold=0.5)
