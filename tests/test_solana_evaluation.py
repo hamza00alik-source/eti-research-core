@@ -900,3 +900,29 @@ def test_regime_transitions_are_mint_pool_horizon_local_and_fail_closed():
 
     with pytest.raises(ValueError):
         evaluate_solana_regime_transitions([], minimum_transitions=0)
+
+
+
+def test_regime_sampling_sensitivity_matches_only_identical_point_in_time_rows():
+    from eti.solana_evaluation import evaluate_solana_regime_sampling_sensitivity
+
+    row = {"mint": "mint-a", "pool_address": "pool-a",
+           "horizon_seconds": "60", "baseline_at": "2026-01-01T00:00:00+00:00",
+           "regime": "UP"}
+    changed = dict(row, regime="DOWN")
+    other = dict(row, mint="mint-b")
+    report = evaluate_solana_regime_sampling_sensitivity({
+        "tight": {"classified_observations": [row, other]},
+        "wide": {"classified_observations": [row, changed]},
+    })
+    comparison = report["pairwise_comparisons"]["tight vs wide"]
+    assert comparison["matched_observation_count"] == 1
+    assert comparison["matching_regime_count"] == 1
+    assert comparison["different_regime_count"] == 0
+    assert comparison["left_only_observation_count"] == 1
+    assert comparison["right_only_observation_count"] == 1
+    assert report["all_configuration_unanimous_regime_count"] == 1
+    assert report["training_authorized"] is False
+
+    with pytest.raises(ValueError):
+        evaluate_solana_regime_sampling_sensitivity({"only": {"classified_observations": []}})
