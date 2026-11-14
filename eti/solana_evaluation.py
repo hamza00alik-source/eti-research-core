@@ -154,8 +154,8 @@ def evaluate_prepared_solana_walk_forward(
 
     rows_by_label_id: dict[Any, dict[str, Any]] = {}
     for row in prepared_rows:
-        if not isinstance(row, dict) or row.get("label_id") is None:
-            raise ValueError("every prepared row must have a label_id")
+        if not isinstance(row, dict) or not isinstance(row.get("label_id"), (str, int)) or isinstance(row.get("label_id"), bool):
+            raise ValueError("every prepared row must have a string or integer label_id")
         label_id = row["label_id"]
         if label_id in rows_by_label_id:
             raise ValueError("prepared dataset contains duplicate label_id values")
@@ -164,8 +164,8 @@ def evaluate_prepared_solana_walk_forward(
     split_labels: list[dict[str, Any]] = []
     label_ids: set[Any] = set()
     for exported in exported_labels:
-        if not isinstance(exported, dict) or exported.get("id") is None:
-            raise ValueError("every exported label must have an id")
+        if not isinstance(exported, dict) or not isinstance(exported.get("id"), (str, int)) or isinstance(exported.get("id"), bool):
+            raise ValueError("every exported label must have a string or integer id")
         label_id = exported["id"]
         if label_id in label_ids:
             raise ValueError("export contains duplicate label id values")
