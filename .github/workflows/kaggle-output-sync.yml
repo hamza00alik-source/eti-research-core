@@ -1,6 +1,11 @@
 name: Retrieve ETI Kaggle Training Output
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/kaggle-output-sync.yml"
   schedule:
     - cron: "17 * * * *"
   workflow_dispatch:
