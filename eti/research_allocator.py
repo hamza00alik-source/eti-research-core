@@ -143,7 +143,7 @@ def allocate_research_budget(
             continue
         score, reasons = _candidate_score(source, max_age_seconds=max_age)
         instrument = source["instrument"]
-        key = f"{instrument.get('venue', '')}:{instrument.get('symbol', '')}"
+        key = f"{instrument.get('venue', '')}:{instrument.get('market_type', '')}:{instrument.get('symbol', '')}"
         transaction_cost_status = cost_status.get(key, "unknown")
         if transaction_cost_status != "validated":
             reasons.append("transaction_cost_model_not_validated")
