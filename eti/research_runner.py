@@ -192,6 +192,13 @@ def run_approved_multi_market_research(
         elif funding != 0 or funding_schedule:
             raise ValueError(f"{key} does not support funding; funding assumptions must be zero and schedule empty")
         snapshot = data_hub.fetch(instrument, timeframe, limit, min_rows=min_rows)
+        if instrument.supports_funding:
+            coverage = validated_model.get("funding_schedule_coverage") or {}
+            candle_times = pd.to_datetime(snapshot.frame["timestamp"], utc=True)
+            coverage_start = pd.Timestamp(coverage["start"])
+            coverage_end = pd.Timestamp(coverage["end"])
+            if coverage_start > candle_times.min() or coverage_end < candle_times.max():
+                raise ValueError(f"{key} funding schedule does not cover the complete OHLCV research window")
         from .features import build_features, feature_columns_for_frame, make_labels
         frame = snapshot.frame
         feature_frame = build_features(frame)
