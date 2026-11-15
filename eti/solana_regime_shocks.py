@@ -230,3 +230,104 @@ def evaluate_solana_shock_recurrence(
         "realized_pnl_available": False,
         "note": "Event periods are a configurable grouping of observed qualifying buckets, not statistically independent shocks. Repeated mint appearances indicate concentration, not independent replication or predictive value.",
     }
+
+
+
+def evaluate_solana_shock_period_stability(
+    shock_report: dict[str, Any],
+    *,
+    period_seconds: int = 604800,
+    minimum_buckets_per_period: int = 5,
+    minimum_observed_mints_per_period: int = 3,
+) -> dict[str, Any]:
+    """Compare descriptive shock rates and mint concentration across fixed UTC periods."""
+    for name, value in (
+        ("period_seconds", period_seconds),
+        ("minimum_buckets_per_period", minimum_buckets_per_period),
+        ("minimum_observed_mints_per_period", minimum_observed_mints_per_period),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+    if not isinstance(shock_report, dict) or not isinstance(shock_report.get("buckets"), list):
+        raise ValueError("shock_report must contain buckets")
+
+    grouped: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    for row in shock_report["buckets"]:
+        if not isinstance(row, dict):
+            continue
+        horizon = row.get("horizon_seconds")
+        if not isinstance(horizon, str) or not horizon.strip():
+            continue
+        try:
+            stamp = _aware_timestamp(row.get("bucket_start"))
+        except ValueError:
+            continue
+        period_start = int(stamp.timestamp()) // period_seconds * period_seconds
+        grouped[(horizon, period_start)].append(row)
+
+    by_horizon: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for (horizon, period_start), rows in sorted(grouped.items()):
+        observed_mints: set[str] = set()
+        transition_mints: set[str] = set()
+        observed_bucket_count = len(rows)
+        shock_bucket_count = 0
+        transition_count = 0
+        for row in rows:
+            observed = row.get("observed_mint_count")
+            if isinstance(observed, int) and not isinstance(observed, bool) and observed >= 0:
+                # Only aggregate reported counts; identities are unavailable for all observed mints.
+                pass
+            if row.get("meets_shock_threshold") is True:
+                shock_bucket_count += 1
+                mints = row.get("transition_mints", [])
+                if isinstance(mints, list):
+                    transition_mints.update(
+                        mint.strip() for mint in mints
+                        if isinstance(mint, str) and mint.strip()
+                    )
+            count = row.get("transition_count")
+            if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+                transition_count += count
+        # Shock buckets alone do not expose all observed mint identities. Use the
+        # per-bucket observed counts for a conservative minimum coverage proxy.
+        observed_mint_count_sum = sum(
+            row.get("observed_mint_count", 0)
+            for row in rows
+            if isinstance(row.get("observed_mint_count"), int)
+            and not isinstance(row.get("observed_mint_count"), bool)
+            and row.get("observed_mint_count", 0) >= 0
+        )
+        distinct_observed_mints = max(
+            observed_mints.__len__(), len(transition_mints)
+        )
+        eligible = (
+            observed_bucket_count >= minimum_buckets_per_period
+            and distinct_observed_mints >= minimum_observed_mints_per_period
+        )
+        by_horizon[horizon].append({
+            "period_start": datetime.fromtimestamp(period_start, tz=timezone.utc).isoformat(),
+            "period_end_exclusive": datetime.fromtimestamp(period_start + period_seconds, tz=timezone.utc).isoformat(),
+            "observed_bucket_count": observed_bucket_count,
+            "shock_bucket_count": shock_bucket_count,
+            "shock_bucket_rate": shock_bucket_count / observed_bucket_count if observed_bucket_count else None,
+            "transition_count": transition_count,
+            "distinct_transition_mint_count": len(transition_mints),
+            "reported_observed_mint_bucket_count_sum": observed_mint_count_sum,
+            "minimum_coverage_proxy_mint_count": distinct_observed_mints,
+            "eligible_for_descriptive_comparison": eligible,
+            "insufficient_coverage": not eligible,
+        })
+
+    return {
+        "status": "DESCRIPTIVE_CHRONOLOGICAL_SHOCK_PERIOD_STABILITY",
+        "period_seconds": period_seconds,
+        "minimum_buckets_per_period": minimum_buckets_per_period,
+        "minimum_observed_mints_per_period": minimum_observed_mints_per_period,
+        "by_horizon_seconds": dict(by_horizon),
+        "predictive_value_established": False,
+        "causality_established": False,
+        "independent_periods_established": False,
+        "training_authorized": False,
+        "realized_pnl_available": False,
+        "note": "Fixed UTC periods are descriptive partitions, not independent samples. The shock input contains observed mint counts but not identities for all observed mints, so coverage eligibility uses only the distinct transition-mint count as a lower bound; it cannot establish full mint-population coverage or absence of concentration.",
+    }
