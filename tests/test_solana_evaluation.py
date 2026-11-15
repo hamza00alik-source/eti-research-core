@@ -444,6 +444,9 @@ def test_mint_cluster_bootstrap_withholds_small_cluster_counts_and_is_reproducib
     interval = report_a["cluster_uncertainty"]["always_long"]
     assert interval["status"] == "EXPLORATORY_INTERVAL_AVAILABLE"
     assert interval["cluster_count"] == 25
+    assert interval["independent_observations_proven"] is False
+    assert interval["inferential_use_authorized"] is False
+    assert interval["coverage_claimed"] is False
     assert interval["mean_return_pct_interval"] == report_b["cluster_uncertainty"]["always_long"]["mean_return_pct_interval"]
     low, high = interval["mean_return_pct_interval"]
     assert low <= report_a["aggregate"]["always_long"]["mean_return_pct"] <= high
