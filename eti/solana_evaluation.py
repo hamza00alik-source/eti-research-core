@@ -1579,8 +1579,19 @@ def evaluate_prepared_solana_walk_forward(
         "cross_mint_overlap_comparison_count": cross_mint_overlap_comparisons,
         "distinct_mints_repeated_across_validation_folds": repeated_mint_across_fold_count,
         "validation_fold_count_with_prepared_intervals": len(fold_mints),
-        "note": "Dependence counts cover prepared validation rows with parseable, timezone-aware, positive-duration intervals; fold_validation_label_count also includes unprepared labels. Same-mint and cross-mint interval overlap are separate descriptive dependence channels. Repeated mints across folds are not independent replications.",
+        "independent_observations_proven": False,
+        "confidence_intervals_authorized": False,
+        "note": "Dependence counts cover prepared validation rows with parseable, timezone-aware, positive-duration intervals; fold_validation_label_count also includes unprepared labels. Same-mint and cross-mint interval overlap are separate descriptive dependence channels. Repeated mints across folds are not independent replications. No independent-observation claim or inferential confidence interval is authorized.",
     }
+    # Mint-cluster resampling does not account for shared market shocks across
+    # distinct mints. When observed validation intervals overlap cross-mint,
+    # withhold the otherwise exploratory interval rather than imply coverage.
+    if cross_mint_overlapping_pairs:
+        for uncertainty in report.get("cluster_uncertainty", {}).values():
+            if isinstance(uncertainty, dict) and "mean_return_pct_interval" in uncertainty:
+                uncertainty["mean_return_pct_interval"] = None
+                uncertainty["status"] = "WITHHELD_CROSS_MINT_INTERVAL_OVERLAP"
+                uncertainty["withheld_reason"] = "Cross-mint validation intervals overlap; mint-only bootstrap does not model common market shocks."
     report["walk_forward"] = {
         "method": "chronological_expanding_mint_grouped_purged_embargo_v1",
         "fold_metadata": fold_metadata,
