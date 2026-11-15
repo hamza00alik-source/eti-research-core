@@ -2664,6 +2664,10 @@ class MemoryStore:
         workspace_id = _required_text(workspace_id, "workspace_id")
         provider = _required_text(provider, "provider", 80).lower()
         endpoint_id = _required_text(endpoint_id, "endpoint_id", 120)
+        if not all(ch.isalnum() or ch in "._:/-" for ch in endpoint_id):
+            raise ValueError("endpoint_id must be a safe identifier, not a URL or credential")
+        if not all(ch.isalnum() or ch in "._-" for ch in provider):
+            raise ValueError("provider must be a safe identifier")
         observed_at = _required_text(observed_at, "observed_at", 40)
         try:
             parsed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
