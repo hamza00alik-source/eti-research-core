@@ -47,7 +47,11 @@ def _candidate_score(candidate: dict[str, Any], *, max_age_seconds: float) -> tu
         requested = _finite_nonnegative("provenance.requested_rows", provenance.get("requested_rows"))
         age = _finite_nonnegative("quality.last_candle_age_seconds", quality.get("last_candle_age_seconds"))
         missing = _finite_nonnegative("quality.missing_interval_estimate", quality.get("missing_interval_estimate"))
-        max_gap = _finite_nonnegative("quality.max_gap_seconds", quality.get("max_gap_seconds"))
+        asset_class = str(candidate.get("instrument", {}).get("asset_class", "")).lower()
+        max_gap = (
+            _finite_nonnegative("quality.max_gap_seconds", quality.get("max_gap_seconds"))
+            if asset_class == "crypto" else 0.0
+        )
         interval_value = candidate.get("timeframe_seconds")
         if interval_value is None:
             interval_value = _timeframe_seconds(provenance.get("timeframe"))
@@ -61,7 +65,6 @@ def _candidate_score(candidate: dict[str, Any], *, max_age_seconds: float) -> tu
         return 0.0, ["ohlcv_quality_not_validated"]
     if age > max_age_seconds:
         reasons.append("stale_last_candle")
-    asset_class = str(candidate.get("instrument", {}).get("asset_class", "")).lower()
     history_score = min(rows / requested, 1.0) * 40.0
     freshness_score = max(0.0, 30.0 * (1.0 - age / max_age_seconds)) if max_age_seconds else 0.0
     if asset_class == "crypto":
