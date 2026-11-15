@@ -233,6 +233,7 @@ def test_label_generation_skips_malformed_and_unsupported_snapshot_rows(tmp_path
     )
     assert result == {
         "generated": 0, "available": 0, "skipped_invalid_snapshots": 2,
+        "unchanged": 0, "conflicts": 0,
     }
 
 
@@ -637,3 +638,47 @@ def test_dataset_report_includes_full_workspace_forward_label_coverage(tmp_path)
     assert horizon["mature_without_future_target_count"] == 1
     assert horizon["label_record_count"] == 1
     assert coverage["training_authorized"] is False
+
+
+
+def test_label_generation_is_idempotent_and_surfaces_late_target_conflicts(tmp_path):
+    import hashlib
+
+    store = MemoryStore(tmp_path / "label-idempotency.sqlite3")
+    workspace = store.create_workspace("owner", "idempotency")
+    payloads = {
+        "one": '{"evidence":{"price_usd":1,"liquidity_usd":100,"volume_h24_usd":10}}',
+        "two": '{"evidence":{"price_usd":2,"liquidity_usd":100,"volume_h24_usd":10}}',
+        "three": '{"evidence":{"price_usd":3,"liquidity_usd":100,"volume_h24_usd":10}}',
+    }
+    def add_snapshot(snapshot_id, stamp):
+        payload = payloads[snapshot_id]
+        with store._connection() as conn:
+            conn.execute(
+                "INSERT INTO solana_research_snapshots "
+                "(id,owner_id,workspace_id,task_id,capability,mint,pool_address,schema_version,"
+                "payload_json,payload_sha256,fetched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (snapshot_id, "owner", workspace["id"], "task-" + snapshot_id,
+                 "solana.market.scan", "A" * 40, "PoolA", 1, payload,
+                 hashlib.sha256(payload.encode()).hexdigest(), stamp),
+            )
+
+    add_snapshot("one", "2026-01-01T00:00:00Z")
+    add_snapshot("three", "2026-01-01T00:10:00Z")
+    now = datetime(2026, 1, 1, 0, 20, tzinfo=timezone.utc)
+    first = store.generate_solana_research_labels("owner", workspace["id"], now=now)
+    second = store.generate_solana_research_labels("owner", workspace["id"], now=now)
+    assert first["generated"] == 1
+    assert second["generated"] == 0
+    assert second["unchanged"] == 1
+    assert second["conflicts"] == 0
+
+    # A late-arriving observation earlier than the selected target changes the
+    # computed label. The stored row is not silently overwritten.
+    add_snapshot("two", "2026-01-01T00:06:00Z")
+    third = store.generate_solana_research_labels("owner", workspace["id"], now=now)
+    assert third["generated"] == 0
+    assert third["conflicts"] == 1
+    exported = store.export_solana_research_dataset("owner", workspace["id"])
+    assert len(exported["labels"]) == 1
+    assert exported["labels"][0]["target_snapshot_id"] == "three"
