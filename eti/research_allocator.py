@@ -88,7 +88,7 @@ def _candidate_score(candidate: dict[str, Any], *, max_age_seconds: float) -> tu
             continuity_score = 0.0
             reasons.append("session_calendar_not_applied")
     score = history_score + freshness_score + continuity_score
-    if reasons:
+    if any(reason != "session_calendar_not_applied" for reason in reasons):
         score = 0.0
     return round(score, 4), reasons
 
