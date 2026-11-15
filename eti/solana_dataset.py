@@ -298,10 +298,16 @@ def evaluate_solana_discovery_cohort_coverage(
         task_statuses = sorted({
             str(task.get("status", "UNKNOWN")).lower() for task in linked_tasks
         })
+        linked_task_ids = {
+            task.get("id") for task in linked_tasks if isinstance(task.get("id"), str)
+        }
         later_snapshots = []
         for snapshot in snapshots_by_mint.get(mint, []):
             stamp = parse_time(snapshot.get("fetched_at"))
-            if received is not None and stamp is not None and stamp >= received:
+            if (
+                received is not None and stamp is not None and stamp >= received
+                and snapshot.get("task_id") in linked_task_ids
+            ):
                 later_snapshots.append(snapshot)
         scan_snapshots = [
             row for row in later_snapshots
@@ -364,7 +370,7 @@ def evaluate_solana_discovery_cohort_coverage(
         "survivorship_bias_ruled_out": False,
         "training_authorized": False,
         "note": (
-            "Only explicit event-to-task linkage and later persisted snapshots are counted. "
+            "Only snapshots whose task IDs are explicitly linked to the discovery event are counted. "
             "A missing snapshot does not establish token failure, disappearance, inactivity, "
             "rug pull or delisting. Task failure is reported only from an explicit terminal "
             "task status. This diagnostic cannot rule out survivorship bias or provider gaps."
