@@ -525,11 +525,12 @@ minimum row count is reached. Within each stratum, the same fixed no-trade,
 always-long, and buy-pressure comparators are evaluated; the buy-pressure
 threshold is explicitly configured before validation and is not fitted on
 validation outcomes. Each stratum also reports a deterministic mint-cluster
-bootstrap percentile interval; the interval is withheld unless at least 20
-distinct mint clusters are present. The bootstrap resamples whole
-mint clusters and estimates the row-weighted mean, but does not correct for
-cross-mint market shocks, selection, drift, or provider bias. Neither the row
-threshold nor the bootstrap interval is a significance test or evidence of
+bootstrap percentile range; the range is withheld unless at least 20
+distinct mint clusters are present. This is explicitly not a confidence
+interval and makes no statistical coverage claim. The bootstrap resamples
+whole mint clusters and estimates the row-weighted mean, but does not correct
+for cross-mint market shocks, selection, drift, or provider bias. Neither the
+row threshold nor the percentile range is a significance test or evidence of
 predictive edge. Thresholds must be predeclared in the stated volatility unit
 before examining validation outcomes. This diagnostic does not fit thresholds,
 select strategies, authorize training, or enable live execution.
