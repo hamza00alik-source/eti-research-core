@@ -16,6 +16,7 @@ from .adapters import AdapterCapabilities, AdapterRegistry, MarketAdapter
 from .data import validate_ohlcv
 from .instruments import InstrumentCatalog, InstrumentSpec
 from .providers import CcxtPublicProvider, YahooFinanceProvider
+from .session_calendar import SessionCalendarRegistry, session_quality
 
 
 @dataclass(frozen=True)
@@ -185,9 +186,13 @@ class YahooFinanceMarketAdapter:
 class MarketDataHub:
     """Discover instruments and fetch validated data with explicit source failover."""
 
-    def __init__(self, adapters: Iterable[MarketAdapter] = ()):
+    def __init__(
+        self, adapters: Iterable[MarketAdapter] = (),
+        *, calendar_registry: SessionCalendarRegistry | None = None,
+    ):
         self.registry = AdapterRegistry()
         self.catalog = InstrumentCatalog()
+        self.calendar_registry = calendar_registry or SessionCalendarRegistry()
         self._adapters: dict[str, MarketAdapter] = {}
         for adapter in adapters:
             self.register(adapter)
@@ -257,8 +262,9 @@ class MarketDataHub:
             "source_errors": errors,
         }
 
-    @staticmethod
-    def _quality(frame: pd.DataFrame, timeframe: str) -> dict[str, Any]:
+    def _quality(
+        self, frame: pd.DataFrame, timeframe: str, instrument: InstrumentSpec
+    ) -> dict[str, Any]:
         try:
             interval = pd.Timedelta(timeframe)
         except (TypeError, ValueError) as exc:
@@ -273,7 +279,7 @@ class MarketDataHub:
         now = datetime.now(timezone.utc)
         last = timestamps.iloc[-1].to_pydatetime()
         age = max(0.0, (now - last).total_seconds())
-        return {
+        quality = {
             "rows": int(len(frame)),
             "start": timestamps.iloc[0].isoformat(),
             "end": timestamps.iloc[-1].isoformat(),
@@ -283,6 +289,20 @@ class MarketDataHub:
             "timestamp_order": "ascending",
             "ohlcv_validated": True,
         }
+        if instrument.asset_class != "crypto":
+            calendar = self.calendar_registry.get(
+                instrument.venue, instrument.asset_class, instrument.market_type
+            )
+            if calendar is not None:
+                session = session_quality(
+                    [stamp.to_pydatetime() for stamp in timestamps], timeframe, calendar
+                )
+                quality.update(session)
+                quality["missing_interval_estimate"] = session["missing_interval_estimate"]
+                quality["max_gap_seconds"] = None
+            else:
+                quality["session_calendar_applied"] = False
+        return quality
 
     def fetch(
         self, instrument: InstrumentSpec, timeframe: str, limit: int,
@@ -304,7 +324,7 @@ class MarketDataHub:
             raise ValueError(
                 f"{instrument.venue} returned {len(clean)} valid candles; {min_rows} required"
             )
-        quality = self._quality(clean, timeframe)
+        quality = self._quality(clean, timeframe, instrument)
         provenance = {
             "venue": instrument.venue, "symbol": instrument.symbol,
             "asset_class": instrument.asset_class, "market_type": instrument.market_type,
@@ -342,6 +362,7 @@ class MarketDataHub:
 def build_public_market_hub(
     crypto_venues: tuple[str, ...] = ("binance", "mexc", "coinbaseexchange", "kraken"),
     *, include_yahoo: bool = True,
+    calendar_registry: SessionCalendarRegistry | None = None,
 ) -> MarketDataHub:
     """Build ETI's default public-data hub without credentials or execution access."""
     adapters: list[MarketAdapter] = []
@@ -354,4 +375,4 @@ def build_public_market_hub(
         adapters.append(CcxtMarketAdapter(normalized, market_types))
     if include_yahoo:
         adapters.append(YahooFinanceMarketAdapter())
-    return MarketDataHub(adapters)
+    return MarketDataHub(adapters, calendar_registry=calendar_registry)

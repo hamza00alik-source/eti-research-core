@@ -47,7 +47,11 @@ def _candidate_score(candidate: dict[str, Any], *, max_age_seconds: float) -> tu
         requested = _finite_nonnegative("provenance.requested_rows", provenance.get("requested_rows"))
         age = _finite_nonnegative("quality.last_candle_age_seconds", quality.get("last_candle_age_seconds"))
         missing = _finite_nonnegative("quality.missing_interval_estimate", quality.get("missing_interval_estimate"))
-        max_gap = _finite_nonnegative("quality.max_gap_seconds", quality.get("max_gap_seconds"))
+        asset_class = str(candidate.get("instrument", {}).get("asset_class", "")).lower()
+        max_gap = (
+            _finite_nonnegative("quality.max_gap_seconds", quality.get("max_gap_seconds"))
+            if asset_class == "crypto" else 0.0
+        )
         interval_value = candidate.get("timeframe_seconds")
         if interval_value is None:
             interval_value = _timeframe_seconds(provenance.get("timeframe"))
@@ -61,7 +65,6 @@ def _candidate_score(candidate: dict[str, Any], *, max_age_seconds: float) -> tu
         return 0.0, ["ohlcv_quality_not_validated"]
     if age > max_age_seconds:
         reasons.append("stale_last_candle")
-    asset_class = str(candidate.get("instrument", {}).get("asset_class", "")).lower()
     history_score = min(rows / requested, 1.0) * 40.0
     freshness_score = max(0.0, 30.0 * (1.0 - age / max_age_seconds)) if max_age_seconds else 0.0
     if asset_class == "crypto":
@@ -70,12 +73,23 @@ def _candidate_score(candidate: dict[str, Any], *, max_age_seconds: float) -> tu
         missing_fraction = min(missing / max(rows - 1.0, 1.0), 1.0)
         continuity_score = 30.0 * (1.0 - missing_fraction)
     else:
-        # Session closures differ by venue and instrument. Without a verified
-        # exchange calendar, raw gaps cannot safely be called missing candles.
-        # Withhold continuity credit and block economic eligibility pending
-        # calendar-aware validation rather than misclassifying weekends as gaps.
-        continuity_score = 0.0
-        reasons.append("session_calendar_not_applied")
+        # Session closures differ by venue and instrument. Only an exact-key,
+        # explicitly registered calendar can distinguish closed hours from gaps.
+        if quality.get("session_calendar_applied") is True:
+            expected = _finite_nonnegative(
+                "quality.expected_session_bars", quality.get("expected_session_bars")
+            )
+            session_missing = _finite_nonnegative(
+                "quality.missing_interval_estimate", quality.get("missing_interval_estimate")
+            )
+            if expected <= 0 or session_missing > expected:
+                reasons.append("invalid_session_coverage")
+                continuity_score = 0.0
+            else:
+                continuity_score = 30.0 * (1.0 - session_missing / expected)
+        else:
+            continuity_score = 0.0
+            reasons.append("session_calendar_not_applied")
     score = history_score + freshness_score + continuity_score
     if any(reason != "session_calendar_not_applied" for reason in reasons):
         score = 0.0
