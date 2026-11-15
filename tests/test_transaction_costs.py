@@ -21,6 +21,7 @@ def model():
             "uri": "https://example.com/fees",
             "license_status": "open",
             "observed_at": "2026-01-01T00:00:00Z",
+            "covers": ["fee_bps", "spread_bps", "slippage_bps", "market_impact_bps", "funding_bps_per_bar", "borrow_bps_per_bar", "contract_multiplier"],
         }],
     }
 
