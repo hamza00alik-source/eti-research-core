@@ -1,12 +1,12 @@
 # Approved multi-market research runner
 
 The research allocator remains plan-only. It ranks data readiness and marks
-candidates eligible for economic evaluation only when a `venue:market_type:symbol` cost-model
-status is explicitly validated. It never authorizes training.
+candidates eligible for economic evaluation only when a
+`venue:market_type:symbol` cost-model status is explicitly validated. It never authorizes training.
 
 The separate runner in `eti.research_runner` requires a reviewed local approval
-artifact. Approval is explicit, scoped to exact `venue:market_type:symbol` keys, and must
-include:
+artifact. Approval is explicit, scoped to exact `venue:market_type:symbol`
+keys, and must include:
 - `approved=true` and `authorize_research_fits=true`,
 - `execution_enabled=false`,
 - per-instrument fee, slippage, funding-per-bar, and short-capability assumptions,
@@ -54,7 +54,9 @@ to authorize a run):
 }
 ```
 
-Instrument identity includes venue, market type, and symbol to prevent spot/derivative collisions. Duplicate identities and scan/allocation metadata mismatches are rejected. Contract multipliers are validated rather than silently replacing falsey values.\n\nThis artifact is an operator governance input, not a cryptographic signature
+Instrument identity includes venue, market type, and symbol to prevent spot/derivative collisions. Duplicate identities and scan/allocation metadata mismatches are rejected. Contract multipliers are validated rather than silently replacing falsey values.
+
+This artifact is an operator governance input, not a cryptographic signature
 or proof of independent review. USD figures are operator estimates, not
 measured Kaggle billing. Fit-call limits are compute proxies, not dollar costs.
 The runner does not submit orders and cannot enable execution.
