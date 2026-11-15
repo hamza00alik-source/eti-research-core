@@ -102,11 +102,11 @@ class EquityAdapter:
     def fetch_ohlcv(self, symbol, timeframe, limit):
         stamps = pd.to_datetime([
             "2026-01-05T14:30:00Z", "2026-01-05T15:30:00Z",
-            "2026-01-05T17:30:00Z",
+            "2026-01-05T16:30:00Z", "2026-01-05T17:30:00Z",
         ])
         return pd.DataFrame({
-            "timestamp": stamps, "open": [100.0] * 3, "high": [101.0] * 3,
-            "low": [99.0] * 3, "close": [100.5] * 3, "volume": [1000.0] * 3,
+            "timestamp": stamps, "open": [100.0] * 4, "high": [101.0] * 4,
+            "low": [99.0] * 4, "close": [100.5] * 4, "volume": [1000.0] * 4,
         })
 
 
@@ -117,9 +117,9 @@ def test_market_hub_applies_registered_calendar_to_equity_quality():
     instrument = InstrumentSpec(
         symbol="SPY", venue="yahoo", asset_class="equity", market_type="spot"
     )
-    snapshot = hub.fetch(instrument, "1h", 3)
+    snapshot = hub.fetch(instrument, "1h", 4)
     assert snapshot.quality["session_calendar_applied"] is True
-    assert snapshot.quality["expected_session_bars"] == 3
+    assert snapshot.quality["expected_session_bars"] == 4
     assert snapshot.quality["missing_interval_estimate"] == 0
     assert snapshot.quality["session_calendar_id"] == "TEST-NYSE"
 
