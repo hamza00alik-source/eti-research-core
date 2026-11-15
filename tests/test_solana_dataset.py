@@ -471,3 +471,64 @@ def test_token_lifecycle_coverage_rejects_non_list_inputs_and_does_not_infer_ina
     assert report["tokens"][0]["lifecycle_evidence_status"] == "DISCOVERED_NO_MARKET_SCAN_EVIDENCE"
     with pytest.raises(ValueError):
         evaluate_solana_token_lifecycle_coverage([], [], {}, [])
+
+
+def test_training_preparation_binds_label_times_and_outcome_to_snapshot_evidence():
+    from copy import deepcopy
+    from eti.solana_dataset import prepare_solana_training_rows
+
+    baseline = {
+        "id": "base", "capability": "solana.market.scan", "mint": "A" * 40,
+        "pool_address": "PoolA", "schema_version": 1,
+        "fetched_at": "2026-01-01T00:00:00Z",
+        "payload": {"evidence": {
+            "price_usd": 1.0, "liquidity_usd": 100.0, "volume_h24_usd": 20.0,
+            "txns_h1_buys": 3, "txns_h1_sells": 2,
+        }},
+    }
+    target = {
+        "id": "target", "capability": "solana.market.scan", "mint": "A" * 40,
+        "pool_address": "PoolA", "schema_version": 1,
+        "fetched_at": "2026-01-01T00:06:00Z",
+        "payload": {"evidence": {
+            "price_usd": 2.0, "liquidity_usd": 90.0, "volume_h24_usd": 30.0,
+            "txns_h1_buys": 5, "txns_h1_sells": 1,
+        }},
+    }
+    label = {
+        "id": "label-1", "mint": "A" * 40, "pool_address": "PoolA",
+        "baseline_snapshot_id": "base", "target_snapshot_id": "target",
+        "baseline_snapshot_in_export": True, "target_snapshot_in_export": True,
+        "horizon_seconds": 300, "label_parse_error": False,
+        "reference_issues": [],
+        "label": {
+            "baseline_at": baseline["fetched_at"],
+            "target_at": target["fetched_at"],
+            "actual_elapsed_seconds": 360.0,
+            "sampled_price_return_pct": 100.0,
+        },
+    }
+    valid_export = {
+        "schema": "eti.solana.research_dataset.v1",
+        "snapshots": [baseline, target], "labels": [label],
+    }
+    assert prepare_solana_training_rows(valid_export)["eligible_row_count"] == 1
+
+    mutations = [
+        ("baseline_at", "2026-01-01T00:01:00Z", "label_snapshot_timestamp_mismatch"),
+        ("target_at", "2026-01-01T00:07:00Z", "label_snapshot_timestamp_mismatch"),
+        ("actual_elapsed_seconds", 999.0, "label_elapsed_time_mismatch"),
+        ("sampled_price_return_pct", 99.0, "label_outcome_snapshot_mismatch"),
+    ]
+    for field, value, reason in mutations:
+        corrupted = deepcopy(valid_export)
+        corrupted["labels"][0]["label"][field] = value
+        result = prepare_solana_training_rows(corrupted)
+        assert result["eligible_row_count"] == 0
+        assert result["exclusion_counts"] == {reason: 1}
+
+    corrupted_target = deepcopy(valid_export)
+    corrupted_target["snapshots"][1]["payload"]["evidence"]["price_usd"] = 3.0
+    result = prepare_solana_training_rows(corrupted_target)
+    assert result["eligible_row_count"] == 0
+    assert result["exclusion_counts"] == {"label_outcome_snapshot_mismatch": 1}
