@@ -310,3 +310,24 @@ def test_forward_label_coverage_excludes_ambiguous_and_missing_snapshot_ids():
     )
     assert report["ambiguous_or_invalid_snapshot_count"] == 3
     assert report["by_horizon_seconds"]["300"]["eligible_baseline_count"] == 1
+
+
+
+def test_forward_label_coverage_does_not_count_stale_persisted_target():
+    from eti.solana_labels import evaluate_forward_label_coverage
+
+    rows = [
+        _snapshot("base", "2026-01-01T00:00:00Z", 1.0),
+        _snapshot("earlier-target", "2026-01-01T00:06:00Z", 1.1),
+        _snapshot("late-target", "2026-01-01T00:10:00Z", 1.2),
+    ]
+    report = evaluate_forward_label_coverage(
+        rows,
+        [{"baseline_snapshot_id": "base", "target_snapshot_id": "late-target", "horizon_seconds": 300}],
+        now=datetime(2026, 1, 1, 0, 20, tzinfo=timezone.utc),
+        horizons_seconds=(300,),
+    )
+    coverage = report["by_horizon_seconds"]["300"]
+    assert coverage["mature_with_future_target_count"] == 2
+    assert coverage["label_record_count"] == 1
+    assert coverage["stale_label_target_conflict_count"] == 1
