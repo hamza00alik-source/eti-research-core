@@ -80,3 +80,29 @@ python -m eti.pipeline --scan-universe \
 ```
 
 The report records discovered counts, sources checked, provider errors, selected instruments, data readiness, provenance and timestamp-gap diagnostics. The initial default scan uses spot markets to keep the first research comparison simpler; derivatives can be included explicitly, but require separate contract, funding, expiry, margin and cost assumptions before model evaluation.
+
+
+## Session-aware continuity
+
+Non-crypto instruments require an explicitly registered venue/asset-class/
+market-type calendar before the allocator awards continuity credit. ETI now
+supports IANA timezone-aware weekly sessions, overnight sessions, explicit
+holidays and early closes. It does not infer a calendar from a ticker or ship
+an authoritative exchange holiday database. See
+[`docs/SESSION_CALENDARS.md`](SESSION_CALENDARS.md).
+
+A scan can load a reviewed calendar configuration:
+
+```bash
+python -m eti.research_cli scan \
+  --calendar-config config/market-calendars.json \
+  --output artifacts/market-universe.json
+```
+
+The JSON file contains a top-level `calendars` array. Each entry is scoped by
+`venue`, `asset_class`, and `market_type`, and supplies `calendar_id`,
+`timezone_name`, `sessions` (weekday keys 0–6 with local open/close times),
+optional ISO-date `holidays`, and optional `early_closes`. The operator must
+verify the calendar's source, applicability, licensing, and completeness before
+using it. Calendar-aware quality is not itself transaction-cost validation or
+evidence of an executable trading venue.
