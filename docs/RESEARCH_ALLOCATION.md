@@ -42,7 +42,7 @@ Each value must be a complete `eti.transaction_cost_model.v1` object, not a
 status string. It must explicitly state fee, spread, slippage, market impact,
 funding and borrow costs, contract multiplier, quote/settlement currencies,
 retrieval time, validity window, and at least one evidence record with an HTTPS
-source URI, observation time, and declared `open` or `licensed` status.
+source URI, observation time, declared `open` or `licensed` status, and a `covers` list naming the exact numeric assumptions supported. Across evidence records, every numeric assumption must be covered; unsupported or duplicate field names fail closed.
 Unknown/restricted license declarations, missing values, expired/future-dated
 records, and identity mismatches fail closed.
 
@@ -69,7 +69,8 @@ Example structure (illustrative values only; not a validated fee schedule):
       "source": "Published venue fee schedule",
       "uri": "https://example.com/fees",
       "license_status": "open",
-      "observed_at": "2026-01-01T00:00:00Z"
+      "observed_at": "2026-01-01T00:00:00Z",
+      "covers": ["fee_bps", "spread_bps", "slippage_bps", "market_impact_bps", "funding_bps_per_bar", "borrow_bps_per_bar", "contract_multiplier"]
     }]
   }
 }
