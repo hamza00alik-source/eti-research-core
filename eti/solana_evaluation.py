@@ -1368,13 +1368,33 @@ def evaluate_prepared_solana_walk_forward(
 
             label_baseline = parse_aware_timestamp(label.get("baseline_at"))
             prepared_baseline = parse_aware_timestamp(prepared.get("baseline_at"))
+            label_target = parse_aware_timestamp(label.get("target_at"))
+            prepared_target = parse_aware_timestamp(prepared.get("target_at"))
             if (
                 label_baseline is None
                 or prepared_baseline is None
+                or label_target is None
+                or prepared_target is None
                 or label_baseline != prepared_baseline
+                or label_target != prepared_target
                 or prepared.get("horizon_seconds") != label.get("horizon_seconds")
             ):
                 raise ValueError("prepared row temporal metadata does not match its exported label")
+            elapsed = (label_target - label_baseline).total_seconds()
+            reported_elapsed = label.get("actual_elapsed_seconds")
+            if (
+                label_target <= label_baseline
+                or elapsed < label.get("horizon_seconds", 0)
+                or isinstance(reported_elapsed, bool)
+                or not isinstance(reported_elapsed, (int, float))
+                or not math.isfinite(float(reported_elapsed))
+                or abs(float(reported_elapsed) - elapsed) > 0.001
+                or isinstance(prepared.get("actual_elapsed_seconds"), bool)
+                or not isinstance(prepared.get("actual_elapsed_seconds"), (int, float))
+                or not math.isfinite(float(prepared.get("actual_elapsed_seconds")))
+                or abs(float(prepared["actual_elapsed_seconds"]) - elapsed) > 0.001
+            ):
+                raise ValueError("prepared row elapsed time does not match its authoritative label interval")
             for snapshot_field in ("baseline_snapshot_id", "target_snapshot_id"):
                 if snapshot_field in label and prepared.get(snapshot_field) != label.get(snapshot_field):
                     raise ValueError("prepared row snapshot identity does not match its exported label")
