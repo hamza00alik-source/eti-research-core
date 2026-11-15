@@ -54,8 +54,9 @@ def run_approved_multi_market_research(
     It must be reviewed by the operator. Costs are explicit assumptions, not
     automatically inferred from a provider's market data.
     """
-    if not isinstance(scan_report, dict) or scan_report.get("scan_only") is not True:
-        raise ValueError("A read-only market-universe scan is required")
+    if (not isinstance(scan_report, dict) or scan_report.get("scan_only") is not True
+            or scan_report.get("execution_enabled") is not False):
+        raise ValueError("A read-only market-universe scan with execution disabled is required")
     if not isinstance(allocation_plan, dict) or allocation_plan.get("plan_only") is not True:
         raise ValueError("A plan-only research allocation is required")
     if allocation_plan.get("training_authorized") is not False:
@@ -157,6 +158,8 @@ def run_approved_multi_market_research(
             raise ValueError(f"{key} is inactive and cannot be researched")
         if source.get("instrument") != allocated.get("instrument"):
             raise ValueError(f"{key} instrument metadata differs between scan and allocation")
+        if source.get("provenance") != allocated.get("provenance") or source.get("quality") != allocated.get("quality"):
+            raise ValueError(f"{key} scan provenance/quality differs from allocation evidence")
         if allow_short and not instrument.supports_short:
             raise ValueError(f"{key} does not declare short capability")
         if instrument.supports_funding is False and funding != 0:
