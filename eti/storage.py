@@ -14,6 +14,7 @@ import math
 import os
 from pathlib import Path
 import sqlite3
+from statistics import median
 from typing import Any, Iterator
 from uuid import uuid4
 
@@ -2606,19 +2607,24 @@ class MemoryStore:
                     "labels": 0, "distinct_mints": 0, "price_returns_available": 0,
                 })["distinct_mints"] = row["n"]
         intervals: list[float] = []
+        duplicate_timestamp_intervals = 0
         gaps_over_10m = 0
         for stamps in groups.values():
             stamps.sort()
             for previous, current in zip(stamps, stamps[1:]):
                 seconds = (current - previous).total_seconds()
+                if seconds == 0:
+                    duplicate_timestamp_intervals += 1
+                    continue
                 if seconds > 0:
                     intervals.append(seconds)
                     if seconds > 600:
                         gaps_over_10m += 1
         intervals.sort()
-        median_interval = (
-            intervals[len(intervals) // 2] if intervals else None
-        )
+        median_interval = median(intervals) if intervals else None
+        p90_interval = intervals[math.ceil(0.90 * len(intervals)) - 1] if intervals else None
+        maximum_interval = intervals[-1] if intervals else None
+        gap_fraction = gaps_over_10m / len(intervals) if intervals else 0.0
         coverage = {
             key: round(count / market_count, 6) if market_count else 0.0
             for key, count in feature_counts.items()
@@ -2632,8 +2638,13 @@ class MemoryStore:
                 "first_observation_at": first_at.isoformat().replace("+00:00", "Z") if first_at else None,
                 "last_observation_at": last_at.isoformat().replace("+00:00", "Z") if last_at else None,
                 "observation_span_seconds": round((last_at - first_at).total_seconds(), 3) if first_at and last_at else 0,
+                "sample_interval_count": len(intervals),
                 "median_sample_interval_seconds": median_interval,
+                "p90_sample_interval_seconds": p90_interval,
+                "maximum_sample_interval_seconds": maximum_interval,
+                "duplicate_timestamp_intervals": duplicate_timestamp_intervals,
                 "sample_gaps_over_10_minutes": gaps_over_10m,
+                "sample_gap_fraction_over_10_minutes": round(gap_fraction, 6),
                 "malformed_payloads": malformed_payloads,
             },
             "feature_coverage": {
