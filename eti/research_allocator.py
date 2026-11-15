@@ -166,6 +166,7 @@ def allocate_research_budget(
         -row["data_readiness_score"],
         str(row["instrument"].get("asset_class", "")),
         str(row["instrument"].get("venue", "")),
+        str(row["instrument"].get("market_type", "")),
         str(row["instrument"].get("symbol", "")),
     ))
     ready = [row for row in ranked if row["data_readiness_score"] > 0]
