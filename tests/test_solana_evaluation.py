@@ -1047,3 +1047,25 @@ def test_market_wide_regime_shocks_reject_invalid_controls_and_timezone_naive_ro
     assert report["bucket_count"] == 0
     with pytest.raises(ValueError):
         evaluate_solana_market_wide_regime_shocks([], bucket_seconds=0)
+
+
+def test_market_wide_regime_shocks_keep_horizons_separate():
+    from eti.solana_regime_shocks import evaluate_solana_market_wide_regime_shocks
+
+    rows = []
+    for mint in ("mint-a", "mint-b"):
+        for horizon in ("60", "300"):
+            rows.extend([
+                {"mint": mint, "pool_address": "pool-" + mint, "horizon_seconds": horizon,
+                 "baseline_at": "2026-01-01T00:00:00Z", "regime": "UP"},
+                {"mint": mint, "pool_address": "pool-" + mint, "horizon_seconds": horizon,
+                 "baseline_at": "2026-01-01T00:01:00Z", "regime": "DOWN"},
+            ])
+    report = evaluate_solana_market_wide_regime_shocks(
+        rows, bucket_seconds=60, maximum_gap_seconds=90,
+        minimum_mints=3, minimum_transitions=3,
+    )
+    transition_buckets = [item for item in report["buckets"] if item["transition_count"]]
+    assert {item["horizon_seconds"] for item in transition_buckets} == {"60", "300"}
+    assert all(item["transition_mint_count"] == 2 for item in transition_buckets)
+    assert report["shock_bucket_count"] == 0
