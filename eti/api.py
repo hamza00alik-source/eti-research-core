@@ -24,6 +24,7 @@ from .risk import RiskEngine, RiskRequest
 from .storage import MemoryStore
 from .solana_dataset import (
     evaluate_solana_discovery_cohort_coverage,
+    evaluate_solana_token_lifecycle_coverage,
     prepare_solana_training_rows,
 )
 from .solana_cost_evaluation import evaluate_stored_solana_walk_forward
@@ -682,6 +683,36 @@ def solana_discovery_cohort_coverage(
         report["source_limits"] = {
             "events": limit, "snapshots": limit, "tasks": limit,
             "scope": "latest records returned by each owner/workspace-scoped ledger query",
+        }
+        report["may_be_incomplete"] = any(
+            len(items) == limit for items in (events, snapshots, tasks)
+        )
+        return report
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/lifecycle-coverage")
+def solana_token_lifecycle_coverage(
+    workspace_id: str,
+    limit: int = Query(default=500, ge=1, le=500),
+    account: dict[str, str] = Depends(current_account),
+):
+    """Return evidence-backed lifecycle coverage without inferring inactivity."""
+    store = _memory_store()
+    try:
+        events = store.list_solana_research_events(account["id"], workspace_id, limit=limit)
+        snapshots = store.list_solana_research_snapshots(account["id"], workspace_id, limit=limit)
+        tasks = store.list_agent_tasks(account["id"], workspace_id, limit=limit)
+        refresh_jobs = store.list_solana_research_refresh_jobs(account["id"], workspace_id)
+        report = evaluate_solana_token_lifecycle_coverage(
+            events, snapshots, tasks, refresh_jobs
+        )
+        report["source_limits"] = {
+            "events": limit, "snapshots": limit, "tasks": limit,
+            "refresh_jobs": "all returned for this owner/workspace",
         }
         report["may_be_incomplete"] = any(
             len(items) == limit for items in (events, snapshots, tasks)
