@@ -347,6 +347,13 @@ class MarketDataHub:
             raise ValueError(
                 f"{instrument.venue} returned {len(clean)} valid candles; {min_rows} required"
             )
+        now = pd.Timestamp.now(tz="UTC")
+        future = clean.loc[clean["timestamp"] > now, "timestamp"]
+        if not future.empty:
+            raise ValueError(
+                f"{instrument.venue} returned future-dated OHLCV candles; "
+                f"latest timestamp is {future.max().isoformat()}"
+            )
         quality = self._quality(clean, timeframe, instrument)
         provenance = {
             "venue": instrument.venue, "symbol": instrument.symbol,
