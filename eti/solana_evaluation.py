@@ -59,9 +59,10 @@ def _cluster_bootstrap_mean_interval(
     confidence_level: float = 0.95,
     seed: int = 1729,
 ) -> dict[str, Any]:
-    """Exploratory percentile interval resampling whole mint clusters.
+    """Exploratory percentile range from resampling whole mint clusters.
 
-    The estimand is the row-weighted mean among selected observations. Sampling
+    This is not a confidence interval and makes no coverage claim. The estimand
+    is the row-weighted mean among selected observations. Sampling
     whole mints preserves within-mint dependence, but does not correct selection,
     regime drift, overlapping cross-mint market shocks, or provider bias.
     """
@@ -76,7 +77,9 @@ def _cluster_bootstrap_mean_interval(
         "replicates": replicates,
         "seed": seed,
         "cluster_count": cluster_count,
-        "mean_return_pct_interval": None,
+        "mean_return_pct_percentile_range": None,
+        "mean_return_pct_interval": None,  # Deprecated compatibility alias; not a confidence interval.
+        "legacy_interval_field_deprecated": True,
         "status": "INSUFFICIENT_MINT_CLUSTERS",
         "minimum_clusters_for_interval": 20,
         "independent_observations_proven": False,
@@ -111,7 +114,9 @@ def _cluster_bootstrap_mean_interval(
             return estimates[lower]
         return estimates[lower] + (estimates[upper] - estimates[lower]) * (position - lower)
 
-    result["mean_return_pct_interval"] = [percentile(tail), percentile(1.0 - tail)]
+    percentile_range = [percentile(tail), percentile(1.0 - tail)]
+    result["mean_return_pct_percentile_range"] = percentile_range
+    result["mean_return_pct_interval"] = percentile_range  # Deprecated compatibility alias.
     result["status"] = "EXPLORATORY_INTERVAL_AVAILABLE"
     return result
 
