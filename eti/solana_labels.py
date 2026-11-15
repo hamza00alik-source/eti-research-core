@@ -328,14 +328,14 @@ def evaluate_forward_label_coverage(
     for observations in groups.values():
         observations.sort(key=lambda pair: (pair[0], pair[1]["id"]))
 
-    label_keys = {
-        (row.get("baseline_snapshot_id"), row.get("horizon_seconds"))
+    label_targets = {
+        (row.get("baseline_snapshot_id"), row.get("horizon_seconds")): row.get("target_snapshot_id")
         for row in labels if isinstance(row, dict)
     }
     by_horizon: dict[str, Any] = {}
     for horizon in horizons_seconds:
         eligible = mature = immature = with_target = without_target = labelled = 0
-        missing_price = 0
+        stale_label = missing_price = 0
         for observations in groups.values():
             for index, (base_time, base) in enumerate(observations):
                 eligible += 1
@@ -353,11 +353,15 @@ def evaluate_forward_label_coverage(
                     without_target += 1
                     continue
                 with_target += 1
-                if (base["id"], horizon) in label_keys:
-                    labelled += 1
-                    evidence = (target[1].get("payload") or {}).get("evidence", {})
-                    if not isinstance(evidence, dict) or _finite_positive(evidence.get("price_usd")) is None:
-                        missing_price += 1
+                label_key = (base["id"], horizon)
+                if label_key in label_targets:
+                    if label_targets[label_key] == target[1]["id"]:
+                        labelled += 1
+                        evidence = (target[1].get("payload") or {}).get("evidence", {})
+                        if not isinstance(evidence, dict) or _finite_positive(evidence.get("price_usd")) is None:
+                            missing_price += 1
+                    else:
+                        stale_label += 1
         by_horizon[str(horizon)] = {
             "eligible_baseline_count": eligible,
             "not_yet_mature_count": immature,
@@ -365,6 +369,7 @@ def evaluate_forward_label_coverage(
             "mature_with_future_target_count": with_target,
             "mature_without_future_target_count": without_target,
             "label_record_count": labelled,
+            "stale_label_target_conflict_count": stale_label,
             "label_missing_target_price_count": missing_price,
             "target_coverage_rate_among_mature": (
                 round(with_target / mature, 6) if mature else None
