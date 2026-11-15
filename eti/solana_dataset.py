@@ -455,6 +455,7 @@ def evaluate_solana_token_lifecycle_coverage(
             matching_snapshots = [
                 row for row in mint_snapshots
                 if row.get("pool_address") == job.get("pool_address")
+                and row.get("capability") == "solana.market.scan"
             ]
             latest_snapshot = max(
                 matching_snapshots,
