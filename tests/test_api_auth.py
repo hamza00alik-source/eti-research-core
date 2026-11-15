@@ -150,6 +150,46 @@ def test_solana_provider_observation_ledger_is_authenticated_scoped_and_minimal(
         assert after_tamper.json()["health"]["invalid_observation_count"] == 1
 
 
+
+def test_ingestor_pumpportal_observation_flows_into_authenticated_provider_health_api(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "ingestor-api.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    from eti.solana_ingest import PumpPortalIngestor
+
+    with TestClient(app) as client:
+        account = _register(client, "pumpportal_api")
+        headers = {"Authorization": f"Bearer {account['access_token']}"}
+        workspace = client.post("/v1/workspaces", headers=headers,
+                                json={"name": "pumpportal telemetry"}).json()
+        ingestor = PumpPortalIngestor(
+            account["account"]["id"], workspace["id"], MemoryStore()
+        )
+        ingestor._record_provider_observation({
+            "provider": "pumpportal",
+            "endpoint_id": "stream_connect",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "status": "success",
+            "latency_ms": 22.0,
+            "error_code": None,
+        })
+
+        response = client.get(
+            f"/v1/workspaces/{workspace['id']}/solana/provider-observations",
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert len(body["items"]) == 1
+        assert body["items"][0]["provider"] == "pumpportal"
+        assert body["items"][0]["integrity_valid"] is True
+        assert body["health"]["providers"][0]["provider"] == "pumpportal"
+        assert body["health"]["providers"][0]["status"] == "HEALTHY"
+        assert body["health"]["provider_health_proven"] is False
+        assert body["health"]["trading_authorized"] is False
+        assert "owner/workspace only" in body["scope"]
+
+
 def test_authenticated_agent_task_and_message_ledger_api(tmp_path, monkeypatch):
     monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "agents.sqlite3"))
     monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
