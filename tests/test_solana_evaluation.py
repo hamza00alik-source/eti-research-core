@@ -134,6 +134,58 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
     )
 
 
+def test_walk_forward_rejects_prepared_temporal_or_outcome_tampering():
+    from eti.solana_evaluation import evaluate_prepared_solana_walk_forward
+
+    exported, prepared = [], []
+    for index in range(8):
+        day = 1 + index * 2
+        stamp = f"2026-01-{day:02d}T00:00:00Z"
+        label_id = f"tamper-label-{index}"
+        exported.append({
+            "id": label_id,
+            "mint": f"tamper-mint-{index}",
+            "pool_address": f"tamper-pool-{index}",
+            "baseline_snapshot_id": f"base-{index}",
+            "target_snapshot_id": f"target-{index}",
+            "horizon_seconds": 3600,
+            "label": {
+                "baseline_at": stamp,
+                "target_at": f"2026-01-{day:02d}T01:00:00Z",
+                "sampled_price_return_pct": 3.0,
+            },
+        })
+        prepared.append({
+            "label_id": label_id,
+            "mint": f"tamper-mint-{index}",
+            "pool_address": f"tamper-pool-{index}",
+            "baseline_snapshot_id": f"base-{index}",
+            "target_snapshot_id": f"target-{index}",
+            "baseline_at": stamp,
+            "horizon_seconds": 3600,
+            "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
+            "target_sampled_price_return_pct": 3.0,
+        })
+
+    for field, value in (
+        ("baseline_at", "2026-01-01T00:00:00Z"),
+        ("horizon_seconds", 86400),
+        ("target_sampled_price_return_pct", 999.0),
+        ("baseline_snapshot_id", "wrong-baseline"),
+        ("target_snapshot_id", "wrong-target"),
+    ):
+        tampered = [dict(row) for row in prepared]
+        tampered[-1][field] = value
+        with pytest.raises(ValueError):
+            evaluate_prepared_solana_walk_forward(
+                exported,
+                {"status": "PREPARATION_ONLY", "training_authorized": False, "rows": tampered},
+                n_splits=2,
+                min_train_groups=3,
+                embargo_seconds=3600,
+            )
+
+
 def test_walk_forward_runner_rejects_duplicate_prepared_ids_and_non_preparation_input():
     from eti.solana_evaluation import evaluate_prepared_solana_walk_forward
 
