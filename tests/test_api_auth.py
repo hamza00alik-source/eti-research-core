@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from datetime import datetime, timezone
 import numpy as np
 import pytest
@@ -128,6 +129,22 @@ def test_solana_provider_observation_ledger_is_authenticated_scoped_and_minimal(
             f"/v1/workspaces/{workspace_id}/solana/provider-observations",
             headers=headers_a, json=bad_error,
         ).status_code == 422
+
+        # A stored row whose digest no longer matches must remain visible as
+        # damaged evidence, but it must not influence provider-health status.
+        with sqlite3.connect(tmp_path / "provider-observations.sqlite3") as conn:
+            conn.execute(
+                "UPDATE solana_provider_observations SET latency_ms=? WHERE provider=?",
+                (999999.0, "dexscreener"),
+            )
+        after_tamper = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/provider-observations",
+            headers=headers_a,
+        )
+        assert after_tamper.status_code == 200
+        assert after_tamper.json()["items"][0]["integrity_valid"] is False
+        assert after_tamper.json()["health"]["provider_count"] == 0
+        assert after_tamper.json()["health"]["invalid_observation_count"] == 1
 
 
 def test_authenticated_agent_task_and_message_ledger_api(tmp_path, monkeypatch):
