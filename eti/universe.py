@@ -102,6 +102,7 @@ def scan_market_universe(
                     "contract_multiplier": instrument.contract_multiplier,
                     "supports_short": instrument.supports_short,
                     "supports_funding": instrument.supports_funding,
+                    "active": instrument.active,
                 },
                 "status": "unavailable",
             }

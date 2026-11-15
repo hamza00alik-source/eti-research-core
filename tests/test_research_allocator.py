@@ -7,7 +7,7 @@ def candidate(symbol="BTC/USD", venue="kraken", age=300, missing=0, gap=3600,
               rows=1000, requested=1000, asset_class="crypto"):
     return {
         "status": "data_ready",
-        "instrument": {"venue": venue, "symbol": symbol, "asset_class": asset_class},
+        "instrument": {"venue": venue, "symbol": symbol, "asset_class": asset_class, "market_type": "spot"},
         "provenance": {"requested_rows": requested, "timeframe": "1h"},
         "quality": {
             "rows": rows, "last_candle_age_seconds": age,
@@ -37,7 +37,7 @@ def test_allocator_ranks_data_readiness_without_claiming_profitability():
 def test_allocator_requires_validated_cost_model_for_economic_eligibility():
     item = candidate()
     result = allocate_research_budget(
-        scan(item), cost_model_status={"kraken:BTC/USD": "validated"},
+        scan(item), cost_model_status={"kraken:spot:BTC/USD": "validated"},
         estimated_run_cost_usd=2, daily_spend_to_date_usd=1,
         monthly_spend_to_date_usd=10,
     )
@@ -91,3 +91,18 @@ def test_session_based_assets_are_not_misclassified_without_calendar():
     assert row["data_readiness_score"] > 0
     assert "session_calendar_not_applied" in row["eligibility_reasons"]
     assert row["economic_evaluation_eligible"] is False
+
+
+def test_allocator_cost_models_are_scoped_by_market_type():
+    spot = candidate("BTC/USD", venue="kraken")
+    swap = candidate("BTC/USD", venue="kraken")
+    swap["instrument"]["market_type"] = "swap"
+    result = allocate_research_budget(
+        scan(spot, swap),
+        cost_model_status={"kraken:spot:BTC/USD": "validated"},
+        estimated_run_cost_usd=1, daily_spend_to_date_usd=0,
+        monthly_spend_to_date_usd=0,
+    )
+    rows = {row["instrument"]["market_type"]: row for row in result["candidates"]}
+    assert rows["spot"]["economic_evaluation_eligible"] is True
+    assert rows["swap"]["economic_evaluation_eligible"] is False

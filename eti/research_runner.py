@@ -34,10 +34,10 @@ def _instrument(record: dict[str, Any]) -> InstrumentSpec:
         base_currency=item.get("base_currency"),
         quote_currency=item.get("quote_currency"),
         settlement_currency=item.get("settlement_currency"),
-        contract_multiplier=item.get("contract_multiplier") or 1.0,
+        contract_multiplier=(1.0 if item.get("contract_multiplier") is None else item.get("contract_multiplier")),
         supports_short=item.get("supports_short", False),
         supports_funding=item.get("supports_funding", False),
-        active=True,
+        active=item.get("active", True),
     )
 
 
@@ -111,7 +111,9 @@ def run_approved_multi_market_research(
         if not isinstance(source, dict) or not isinstance(source.get("instrument"), dict):
             continue
         source_instrument = source["instrument"]
-        source_key = f"{source_instrument.get('venue')}:{source_instrument.get('symbol')}"
+        source_key = f"{source_instrument.get('venue')}:{source_instrument.get('market_type')}:{source_instrument.get('symbol')}"
+        if source_key in scan_rows:
+            raise ValueError(f"Duplicate instrument identity in scan report: {source_key}")
         scan_rows[source_key] = source
 
     rows_by_key = {}
@@ -119,12 +121,14 @@ def run_approved_multi_market_research(
         if not isinstance(row, dict) or not isinstance(row.get("instrument"), dict):
             continue
         instrument = row["instrument"]
-        key = f"{instrument.get('venue')}:{instrument.get('symbol')}"
+        key = f"{instrument.get('venue')}:{instrument.get('market_type')}:{instrument.get('symbol')}"
+        if key in rows_by_key:
+            raise ValueError(f"Duplicate instrument identity in allocation plan: {key}")
         rows_by_key[key] = row
 
     approvals = approval.get("instruments")
     if not isinstance(approvals, dict) or not approvals:
-        raise ValueError("Approval must list exact venue:symbol instruments")
+        raise ValueError("Approval must list exact venue:market_type:symbol instruments")
     prepared = []
     data_hub = hub or build_public_market_hub()
     for key, cost in sorted(approvals.items()):
@@ -149,6 +153,10 @@ def run_approved_multi_market_research(
         if not isinstance(allow_short, bool):
             raise ValueError(f"{key}.allow_short must be boolean")
         instrument = _instrument(allocated)
+        if not instrument.active:
+            raise ValueError(f"{key} is inactive and cannot be researched")
+        if source.get("instrument") != allocated.get("instrument"):
+            raise ValueError(f"{key} instrument metadata differs between scan and allocation")
         if allow_short and not instrument.supports_short:
             raise ValueError(f"{key} does not declare short capability")
         if instrument.supports_funding is False and funding != 0:

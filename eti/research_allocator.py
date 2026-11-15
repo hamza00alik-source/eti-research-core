@@ -143,7 +143,7 @@ def allocate_research_budget(
             continue
         score, reasons = _candidate_score(source, max_age_seconds=max_age)
         instrument = source["instrument"]
-        key = f"{instrument.get('venue', '')}:{instrument.get('symbol', '')}"
+        key = f"{instrument.get('venue', '')}:{instrument.get('market_type', '')}:{instrument.get('symbol', '')}"
         transaction_cost_status = cost_status.get(key, "unknown")
         if transaction_cost_status != "validated":
             reasons.append("transaction_cost_model_not_validated")
@@ -166,6 +166,7 @@ def allocate_research_budget(
         -row["data_readiness_score"],
         str(row["instrument"].get("asset_class", "")),
         str(row["instrument"].get("venue", "")),
+        str(row["instrument"].get("market_type", "")),
         str(row["instrument"].get("symbol", "")),
     ))
     ready = [row for row in ranked if row["data_readiness_score"] > 0]
@@ -181,7 +182,7 @@ def allocate_research_budget(
             else "research_plan_only_training_not_invoked"
         )
     selected_keys = {
-        (row["instrument"].get("venue"), row["instrument"].get("symbol"))
+        (row["instrument"].get("venue"), row["instrument"].get("market_type"), row["instrument"].get("symbol"))
         for row in selected
     }
     for row in ranked:
@@ -250,7 +251,7 @@ def main() -> None:
     parser.add_argument("--monthly-spend-to-date-usd", type=float)
     parser.add_argument(
         "--cost-models", type=Path,
-        help="JSON mapping 'venue:symbol' to 'validated'; omitted costs remain unknown",
+        help="JSON mapping 'venue:market_type:symbol' to 'validated'; omitted costs remain unknown",
     )
     args = parser.parse_args()
     scan = json.loads(args.scan_report.read_text(encoding="utf-8"))
