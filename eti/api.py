@@ -676,17 +676,22 @@ def solana_discovery_cohort_coverage(
     """Report event-linked discovery coverage; absence is not a token failure."""
     store = _memory_store()
     try:
-        events = store.list_solana_research_events(account["id"], workspace_id, limit=limit)
-        snapshots = store.list_solana_research_snapshots(account["id"], workspace_id, limit=limit)
-        tasks = store.list_agent_tasks(account["id"], workspace_id, limit=limit)
+        events = store.list_solana_research_events(account["id"], workspace_id, limit=limit + 1)
+        snapshots = store.list_solana_research_snapshots(account["id"], workspace_id, limit=limit + 1)
+        tasks = store.list_agent_tasks(account["id"], workspace_id, limit=limit + 1)
+        source_has_more = {
+            "events": len(events) > limit,
+            "snapshots": len(snapshots) > limit,
+            "tasks": len(tasks) > limit,
+        }
+        events, snapshots, tasks = events[:limit], snapshots[:limit], tasks[:limit]
         report = evaluate_solana_discovery_cohort_coverage(events, snapshots, tasks)
         report["source_limits"] = {
             "events": limit, "snapshots": limit, "tasks": limit,
+            "has_more": source_has_more,
             "scope": "latest records returned by each owner/workspace-scoped ledger query",
         }
-        report["may_be_incomplete"] = any(
-            len(items) == limit for items in (events, snapshots, tasks)
-        )
+        report["may_be_incomplete"] = any(source_has_more.values())
         return report
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
@@ -703,20 +708,25 @@ def solana_token_lifecycle_coverage(
     """Return evidence-backed lifecycle coverage without inferring inactivity."""
     store = _memory_store()
     try:
-        events = store.list_solana_research_events(account["id"], workspace_id, limit=limit)
-        snapshots = store.list_solana_research_snapshots(account["id"], workspace_id, limit=limit)
-        tasks = store.list_agent_tasks(account["id"], workspace_id, limit=limit)
+        events = store.list_solana_research_events(account["id"], workspace_id, limit=limit + 1)
+        snapshots = store.list_solana_research_snapshots(account["id"], workspace_id, limit=limit + 1)
+        tasks = store.list_agent_tasks(account["id"], workspace_id, limit=limit + 1)
+        source_has_more = {
+            "events": len(events) > limit,
+            "snapshots": len(snapshots) > limit,
+            "tasks": len(tasks) > limit,
+        }
+        events, snapshots, tasks = events[:limit], snapshots[:limit], tasks[:limit]
         refresh_jobs = store.list_solana_research_refresh_jobs(account["id"], workspace_id)
         report = evaluate_solana_token_lifecycle_coverage(
             events, snapshots, tasks, refresh_jobs
         )
         report["source_limits"] = {
             "events": limit, "snapshots": limit, "tasks": limit,
+            "has_more": source_has_more,
             "refresh_jobs": "all returned for this owner/workspace",
         }
-        report["may_be_incomplete"] = any(
-            len(items) == limit for items in (events, snapshots, tasks)
-        )
+        report["may_be_incomplete"] = any(source_has_more.values())
         return report
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
