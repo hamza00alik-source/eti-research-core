@@ -200,3 +200,39 @@ def test_ccxt_spot_discovery_defaults_missing_contract_size_to_one(monkeypatch):
     assert result["count"] == 1
     assert result["instruments"][0].contract_multiplier == 1.0
     assert result["source_errors"] == []
+
+
+def test_ccxt_discovery_errors_are_scoped_to_requested_market_type(monkeypatch):
+    import eti.market_data_hub as hub_module
+
+    class Provider:
+        def __init__(self, venue, market_type):
+            self.market_type = market_type
+
+        def discover_markets(self, limit=1000):
+            if self.market_type == "swap":
+                return [{
+                    "symbol": "BAD/USDT:USDT", "base": "BAD", "quote": "USDT",
+                    "settle": "USDT", "contract_size": None, "active": True,
+                }]
+            return [{
+                "symbol": "BTC/USDT:USDT", "base": "BTC", "quote": "USDT",
+                "settle": "USDT", "contract_size": 1.0, "active": True,
+            }]
+
+    monkeypatch.setattr(hub_module, "CcxtPublicProvider", Provider)
+    adapter = hub_module.CcxtMarketAdapter("binance", ("swap", "future"))
+    hub = hub_module.MarketDataHub([adapter])
+
+    swap_result = hub.discover(asset_class="crypto", market_type="swap")
+    assert len(swap_result["source_errors"]) == 1
+    assert "swap" in swap_result["source_errors"][0]["message"]
+
+    future_result = hub.discover(asset_class="crypto", market_type="future")
+    assert future_result["count"] == 1
+    assert future_result["source_errors"] == []
+
+    combined_result = hub.discover(asset_class="crypto")
+    assert combined_result["count"] == 2
+    assert len(combined_result["source_errors"]) == 1
+    assert "swap" in combined_result["source_errors"][0]["message"]
