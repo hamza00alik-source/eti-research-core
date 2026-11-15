@@ -251,3 +251,17 @@ def test_forward_labels_are_invariant_to_input_order_for_unique_snapshot_ids():
     forward = build_forward_labels(rows, now=now, horizons_seconds=(300,))
     reversed_rows = build_forward_labels(list(reversed(rows)), now=now, horizons_seconds=(300,))
     assert forward == reversed_rows
+
+
+
+def test_forward_label_duplicate_id_filter_supports_one_shot_iterables():
+    rows = iter([
+        _snapshot("duplicate", "2026-01-01T00:00:00Z", 1.0),
+        _snapshot("duplicate", "2026-01-01T00:06:00Z", 2.0),
+        _snapshot("unique", "2026-01-01T00:12:00Z", 3.0),
+    ])
+    labels = build_forward_labels(
+        rows, now=datetime(2026, 1, 1, 0, 20, tzinfo=timezone.utc),
+        horizons_seconds=(300,),
+    )
+    assert labels == []
