@@ -35,6 +35,20 @@ def test_provider_health_marks_missing_stale_and_future_evidence_unknown():
     assert report["missing_observation_means_failure"] is False
 
 
+def test_provider_health_withholds_status_for_conflicting_latest_timestamp():
+    report = evaluate_solana_provider_health([
+        {"provider": "rpc", "observed_at": "2026-01-01T00:04:00Z",
+         "status": "success", "latency_ms": 80},
+        {"provider": "rpc", "observed_at": "2026-01-01T00:04:00Z",
+         "status": "error", "error_code": "HTTP_503"},
+    ], now="2026-01-01T00:04:30Z")
+    provider = report["providers"][0]
+    assert provider["status"] == "UNKNOWN"
+    assert provider["reason"] == "conflicting_observations_share_latest_timestamp"
+    assert provider["latest_request_status"] is None
+    assert provider["latest_latency_ms"] is None
+
+
 def test_provider_health_rejects_naive_clock_and_invalid_thresholds():
     with pytest.raises(ValueError):
         evaluate_solana_provider_health([], now="2026-01-01T00:00:00")
