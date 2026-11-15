@@ -587,3 +587,36 @@ def test_dataset_report_uses_conventional_median_and_reports_sampling_gaps(tmp_p
     assert sampling["sample_gaps_over_10_minutes"] == 2
     assert sampling["sample_gap_fraction_over_10_minutes"] == 0.5
     assert report["training_gate"]["ready"] is False
+
+
+
+def test_dataset_report_includes_full_workspace_forward_label_coverage(tmp_path):
+    store = MemoryStore(tmp_path / "forward-coverage-report.sqlite3")
+    workspace = store.create_workspace("owner", "coverage")
+    rows = [
+        ("base-1", "2026-01-01T00:00:00Z"),
+        ("target-1", "2026-01-01T00:06:00Z"),
+        ("base-2", "2026-01-01T00:10:00Z"),
+        ("base-3", "2026-01-01T00:18:00Z"),
+    ]
+    for snapshot_id, stamp in rows:
+        store.record_solana_research_snapshot(
+            "owner", workspace["id"], snapshot_id, "solana.market.scan",
+            "A" * 40, "Pool111",
+            {"evidence": {"price_usd": 1.0, "liquidity_usd": 1000, "volume_h24_usd": 500}},
+            fetched_at=stamp,
+        )
+    store.record_solana_research_label(
+        "owner", workspace["id"], "label-1", "A" * 40, "Pool111",
+        "base-1", "target-1", 300,
+        {"sampled_price_return_pct": 0.0},
+    )
+    report = store.get_solana_research_dataset_report("owner", workspace["id"])
+    coverage = report["forward_label_coverage"]
+    horizon = coverage["by_horizon_seconds"]["300"]
+    assert horizon["eligible_baseline_count"] == 4
+    assert horizon["mature_baseline_count"] == 3
+    assert horizon["mature_with_future_target_count"] == 1
+    assert horizon["mature_without_future_target_count"] == 2
+    assert horizon["label_record_count"] == 1
+    assert coverage["training_authorized"] is False
