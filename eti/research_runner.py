@@ -190,7 +190,7 @@ def run_approved_multi_market_research(
     return {
         "schema_version": "eti.multi_market_research_result.v1",
         "training_performed": any(x["status"] == "evaluated" for x in results.values()),
-        "model_fits_started": total_fits,
+        "planned_model_fit_calls": total_fits,
         "model_fit_cap": max_fits,
         "usd_budget": {
             "estimated_run_cost_usd": estimated_cost,
