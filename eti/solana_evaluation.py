@@ -1351,6 +1351,42 @@ def evaluate_prepared_solana_walk_forward(
                 or prepared.get("pool_address") != label.get("pool_address")
             ):
                 raise ValueError("prepared row identity does not match its exported label")
+
+            # A prepared row is an untrusted derived artifact. Bind its temporal
+            # metadata and outcome back to the authoritative exported label before
+            # using it in validation metrics.
+            def parse_aware_timestamp(value: Any) -> datetime | None:
+                if not isinstance(value, str):
+                    return None
+                try:
+                    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError:
+                    return None
+                if parsed.tzinfo is None or parsed.utcoffset() is None:
+                    return None
+                return parsed
+
+            label_baseline = parse_aware_timestamp(label.get("baseline_at"))
+            prepared_baseline = parse_aware_timestamp(prepared.get("baseline_at"))
+            if (
+                label_baseline is None
+                or prepared_baseline is None
+                or label_baseline != prepared_baseline
+                or prepared.get("horizon_seconds") != label.get("horizon_seconds")
+            ):
+                raise ValueError("prepared row temporal metadata does not match its exported label")
+            for snapshot_field in ("baseline_snapshot_id", "target_snapshot_id"):
+                if snapshot_field in label and prepared.get(snapshot_field) != label.get(snapshot_field):
+                    raise ValueError("prepared row snapshot identity does not match its exported label")
+            if "sampled_price_return_pct" in label:
+                authoritative_outcome = label.get("sampled_price_return_pct")
+                prepared_outcome = prepared.get("target_sampled_price_return_pct")
+                if (
+                    not _finite(authoritative_outcome)
+                    or not _finite(prepared_outcome)
+                    or float(authoritative_outcome) != float(prepared_outcome)
+                ):
+                    raise ValueError("prepared row outcome does not match its exported label")
             validation_rows.append(prepared)
             if transaction_attestations_by_label_id is not None:
                 import hashlib
