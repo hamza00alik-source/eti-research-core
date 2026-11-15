@@ -531,8 +531,11 @@ interval and makes no statistical coverage claim. The bootstrap resamples
 whole mint clusters and estimates the row-weighted mean, but does not correct
 for cross-mint market shocks, selection, drift, or provider bias. Neither the
 row threshold nor the percentile range is a significance test or evidence of
-predictive edge. Thresholds must be predeclared in the stated volatility unit
-before examining validation outcomes. This diagnostic does not fit thresholds,
+predictive edge. The report exposes this as
+`mean_return_pct_percentile_range`; the older
+`mean_return_pct_interval` field remains only as a deprecated compatibility
+alias and must not be interpreted as a confidence interval. Thresholds must
+be predeclared in the stated volatility unit before examining validation outcomes. This diagnostic does not fit thresholds,
 select strategies, authorize training, or enable live execution.
 
 
