@@ -42,3 +42,25 @@ def test_allocate_command_requires_explicit_cost_inputs_and_writes_plan(tmp_path
     assert result["plan_only"] is True
     assert result["training_authorized"] is False
     assert result["execution_enabled"] is False
+
+
+
+def test_calendar_config_registers_explicit_venue_scope(tmp_path):
+    from eti.market_data_hub import MarketDataHub
+
+    path = tmp_path / "calendars.json"
+    path.write_text(json.dumps({
+        "calendars": [{
+            "venue": "yahoo", "asset_class": "equity", "market_type": "spot",
+            "calendar_id": "TEST-NYSE", "timezone_name": "America/New_York",
+            "sessions": {str(day): ["09:30", "16:00"] for day in range(5)},
+            "holidays": ["2026-01-01"],
+            "early_closes": {"2026-11-27": "13:00"},
+        }]
+    }))
+    hub = MarketDataHub()
+    research_cli._register_calendar_config(hub, path)
+    assert ("yahoo", "equity", "spot") in hub._session_calendars
+    calendar = hub._session_calendars[("yahoo", "equity", "spot")]
+    assert calendar.calendar_id == "TEST-NYSE"
+    assert len(calendar.holidays) == 1
