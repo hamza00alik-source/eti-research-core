@@ -17,7 +17,7 @@ def timeframe_delta(value: str) -> timedelta:
     """Parse a fixed bar interval; calendar months are intentionally unsupported."""
     if not isinstance(value, str):
         raise ValueError("timeframe must be a fixed-duration string")
-    match = re.fullmatch(r"(\d+)([smhdw])", value.strip().lower())
+    match = re.fullmatch(r"(\d+)([smhdw])", value.strip())
     if not match:
         raise ValueError(f"unsupported fixed-duration timeframe: {value}")
     amount, unit = int(match.group(1)), match.group(2)
