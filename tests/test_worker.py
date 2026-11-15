@@ -500,3 +500,48 @@ def test_solana_dataset_report_handles_empty_workspace(tmp_path):
     assert report["feature_coverage"]["price_usd"]["fraction"] == 0.0
     assert report["labels_by_horizon_seconds"] == {}
     assert report["training_gate"]["ready"] is False
+
+
+def test_worker_persists_solana_provider_telemetry_under_claimed_task_identity(tmp_path, monkeypatch):
+    import eti.agents as agents
+
+    store = MemoryStore(tmp_path / "solana-provider-worker.sqlite3")
+    workspace = store.create_workspace("owner-1", "Solana telemetry")
+    task = store.create_agent_task(
+        "owner-1", workspace["id"], "user", "solana.market.scan",
+        {"mint": "M" * 40},
+    )
+
+    class FakeDexScreener:
+        def __init__(self, observation_callback=None):
+            self.callback = observation_callback
+
+        def fetch_pairs(self, _mints):
+            self.callback({
+                "provider": "dexscreener", "endpoint_id": "tokens_v1_solana",
+                "observed_at": "2026-11-15T04:00:00Z", "status": "success",
+                "latency_ms": 42.5, "error_code": None,
+            })
+            return [{
+                "chainId": "solana", "pairAddress": "Pool111",
+                "baseToken": {"address": "M" * 40},
+                "liquidity": {"usd": 50000}, "priceChange": {"h1": 5},
+                "pairCreatedAt": 1_799_999_000_000,
+            }]
+
+        @staticmethod
+        def select_pair(_mint, pairs):
+            return pairs[0]
+
+    monkeypatch.setattr(agents, "DexScreenerClient", FakeDexScreener)
+    result = AgentWorker(store, registry=default_capabilities()).run_once()
+
+    assert result["id"] == task["id"]
+    assert result["status"] == "completed"
+    observations = store.list_solana_provider_observations("owner-1", workspace["id"])
+    assert len(observations) == 1
+    assert observations[0]["provider"] == "dexscreener"
+    assert observations[0]["endpoint_id"] == "tokens_v1_solana"
+    assert observations[0]["integrity_valid"] is True
+    assert observations[0]["latency_ms"] == 42.5
+    assert store.list_solana_provider_observations("other-owner", workspace["id"]) == []
