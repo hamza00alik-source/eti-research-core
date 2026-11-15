@@ -22,7 +22,10 @@ from .decision import build_research_decision
 from .portfolio import assess_portfolio
 from .risk import RiskEngine, RiskRequest
 from .storage import MemoryStore
-from .solana_dataset import prepare_solana_training_rows
+from .solana_dataset import (
+    evaluate_solana_discovery_cohort_coverage,
+    prepare_solana_training_rows,
+)
 from .solana_cost_evaluation import evaluate_stored_solana_walk_forward
 from .solana_research import ProviderError, SolanaRpcClient
 from .solana_tx_verification import verify_finalized_transaction_for_mint
@@ -657,6 +660,33 @@ def export_solana_research_dataset(
         return _memory_store().export_solana_research_dataset(
             account["id"], workspace_id, limit=limit, mint=mint
         )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/discovery-coverage")
+def solana_discovery_cohort_coverage(
+    workspace_id: str,
+    limit: int = Query(default=500, ge=1, le=500),
+    account: dict[str, str] = Depends(current_account),
+):
+    """Report event-linked discovery coverage; absence is not a token failure."""
+    store = _memory_store()
+    try:
+        events = store.list_solana_research_events(account["id"], workspace_id, limit=limit)
+        snapshots = store.list_solana_research_snapshots(account["id"], workspace_id, limit=limit)
+        tasks = store.list_agent_tasks(account["id"], workspace_id, limit=limit)
+        report = evaluate_solana_discovery_cohort_coverage(events, snapshots, tasks)
+        report["source_limits"] = {
+            "events": limit, "snapshots": limit, "tasks": limit,
+            "scope": "latest records returned by each owner/workspace-scoped ledger query",
+        }
+        report["may_be_incomplete"] = any(
+            len(items) == limit for items in (events, snapshots, tasks)
+        )
+        return report
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
     except ValueError as exc:
