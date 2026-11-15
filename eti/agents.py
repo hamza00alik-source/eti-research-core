@@ -6,6 +6,7 @@ are never interpreted as Python, shell commands, prompts or executable code.
 from __future__ import annotations
 
 from collections.abc import Callable
+from inspect import signature
 from typing import Any
 
 import numpy as np
@@ -47,7 +48,12 @@ class AgentCapabilityRegistry:
             raise LookupError(f"unsupported agent capability: {name}")
         if not isinstance(payload, dict):
             raise ValueError("agent task input must be a JSON object")
-        if name in {"solana.market.scan", "solana.token.audit"}:
+        supports_observation_callback = (
+            name in {"solana.market.scan", "solana.token.audit"}
+            and observation_callback is not None
+            and "observation_callback" in signature(handler).parameters
+        )
+        if supports_observation_callback:
             result = handler(payload, observation_callback=observation_callback)
         else:
             result = handler(payload)
