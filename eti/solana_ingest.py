@@ -48,8 +48,14 @@ class PumpPortalIngestor:
         self.workspace_id = workspace_id
         self.store = store or MemoryStore()
 
+    def _record_provider_observation(self, sample: dict[str, Any]) -> None:
+        """Persist minimal stream connection telemetry in this ingestor's tenant scope."""
+        self.store.record_solana_provider_observation(
+            self.owner_id, self.workspace_id, **sample
+        )
+
     async def run(self, stop: asyncio.Event | None = None) -> None:
-        stream = PumpPortalStream()
+        stream = PumpPortalStream(observation_callback=self._record_provider_observation)
         async for event in stream.events(stop=stop):
             normalized = normalize_pumpportal_event(event)
             if normalized is None:
