@@ -18,6 +18,9 @@ def funding_cost_series(position: pd.Series, events: list[dict[str, Any]] | None
         return costs
     if not isinstance(events, list):
         raise ValueError("funding_events must be a list")
+    # An empty schedule is a true no-op; it must not impose timestamp requirements.
+    if not events:
+        return costs
     if not events:
         return costs
     index = position.index
