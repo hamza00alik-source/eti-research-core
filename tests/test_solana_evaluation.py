@@ -458,6 +458,22 @@ def test_mint_cluster_bootstrap_withholds_small_cluster_counts_and_is_reproducib
     assert report_a["training_authorized"] is False
 
 
+def test_mint_cluster_bootstrap_rejects_invalid_parameters():
+    from eti.solana_evaluation import _cluster_bootstrap_mean_interval
+
+    for kwargs in (
+        {"replicates": 0},
+        {"replicates": True},
+        {"confidence_level": 0.0},
+        {"confidence_level": 1.0},
+        {"confidence_level": float("nan")},
+        {"seed": True},
+        {"seed": 1.5},
+    ):
+        with pytest.raises(ValueError):
+            _cluster_bootstrap_mean_interval({"mint-a": [1.0]}, **kwargs)
+
+
 def test_missing_mint_rows_are_not_treated_as_independent_bootstrap_clusters():
     from eti.solana_evaluation import evaluate_solana_research_folds
 
