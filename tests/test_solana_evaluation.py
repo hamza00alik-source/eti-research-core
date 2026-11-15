@@ -167,6 +167,8 @@ def test_walk_forward_rejects_prepared_temporal_or_outcome_tampering():
             "baseline_snapshot_id": f"base-{index}",
             "target_snapshot_id": f"target-{index}",
             "baseline_at": stamp,
+            "target_at": f"2026-01-{day:02d}T01:30:00Z",
+            "actual_elapsed_seconds": 5400.0,
             "horizon_seconds": 3600,
             "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
             "target_sampled_price_return_pct": 3.0,
