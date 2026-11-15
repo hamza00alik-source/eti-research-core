@@ -117,6 +117,10 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
     assert report["validation_dependence"]["overlapping_interval_pair_count"] >= 1
     assert "cross_mint_overlapping_interval_pair_count" in report["validation_dependence"]
     assert report["validation_dependence"]["cross_mint_overlapping_interval_pair_count"] >= 1
+    assert report["validation_dependence"]["independent_observations_proven"] is False
+    assert report["validation_dependence"]["confidence_intervals_authorized"] is False
+    assert report["cluster_uncertainty"]["always_long"]["status"] == "WITHHELD_CROSS_MINT_INTERVAL_OVERLAP"
+    assert report["cluster_uncertainty"]["always_long"]["mean_return_pct_interval"] is None
     assert "distinct_mints_repeated_across_validation_folds" in report["validation_dependence"]
     assert "7200" in report["by_horizon_seconds"]
     assert len(report["walk_forward"]["fold_metadata"]) == 2
