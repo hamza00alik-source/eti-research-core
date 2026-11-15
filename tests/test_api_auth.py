@@ -778,3 +778,65 @@ def test_solana_transaction_attestation_api_verifies_and_persists_server_report(
         assert listed.status_code == 200
         assert len(listed.json()["items"]) == 1
         assert client.get(url, headers=other_headers).status_code == 404
+
+
+def test_solana_coverage_endpoints_use_lookahead_for_exact_has_more_flags(tmp_path, monkeypatch):
+    from eti import api as api_module
+
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "coverage-lookahead.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        account = _register(client, "coverage_user")
+        headers = {"Authorization": f"Bearer {account['access_token']}"}
+        workspace = client.post(
+            "/v1/workspaces", headers=headers, json={"name": "coverage"}
+        ).json()
+        workspace_id = workspace["id"]
+        real_store = api_module._memory_store()
+
+        class LookaheadStore:
+            def __getattr__(self, name):
+                return getattr(real_store, name)
+
+            def list_solana_research_events(self, owner_id, workspace_id, limit=100, mint=None):
+                assert limit == 2
+                return [
+                    {"id": "event-1", "event_type": "new_token", "mint": "mint-1",
+                     "received_at": "2026-01-01T00:00:00Z"},
+                    {"id": "event-2", "event_type": "new_token", "mint": "mint-2",
+                     "received_at": "2026-01-01T00:01:00Z"},
+                ]
+
+            def list_solana_research_snapshots(self, owner_id, workspace_id, limit=100, mint=None):
+                assert limit == 2
+                return []
+
+            def list_agent_tasks(self, owner_id, workspace_id, status=None, limit=100):
+                assert limit == 2
+                return []
+
+            def list_solana_research_refresh_jobs(self, owner_id, workspace_id, mint=None):
+                return []
+
+        monkeypatch.setattr(api_module, "_memory_store", lambda: LookaheadStore())
+        discovery = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/discovery-coverage?limit=1",
+            headers=headers,
+        )
+        assert discovery.status_code == 200, discovery.text
+        assert discovery.json()["may_be_incomplete"] is True
+        assert discovery.json()["source_limits"]["has_more"] == {
+            "events": True, "snapshots": False, "tasks": False,
+        }
+        assert len(discovery.json()["event_rows"]) == 1
+
+        lifecycle = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/lifecycle-coverage?limit=1",
+            headers=headers,
+        )
+        assert lifecycle.status_code == 200, lifecycle.text
+        assert lifecycle.json()["may_be_incomplete"] is True
+        assert lifecycle.json()["source_limits"]["has_more"] == {
+            "events": True, "snapshots": False, "tasks": False,
+        }
