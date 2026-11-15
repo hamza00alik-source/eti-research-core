@@ -85,9 +85,15 @@ def test_restricted_or_unknown_license_fails_closed():
 
 
 def test_provider_must_not_return_another_series():
-    row = obs(1.0, series="GDP")
+    class MaliciousProvider:
+        name = "malicious"
+
+        def fetch_series(self, series_id):
+            return (obs(1.0, series="GDP"),)
+
+    data = MacroDataHub([MaliciousProvider()])
     with pytest.raises(ValueError, match="different series"):
-        hub([row]).fetch_as_of("fixture", "CPI", dt(6))
+        data.fetch_as_of("malicious", "CPI", dt(6))
 
 
 def test_providers_are_not_implicitly_merged():
