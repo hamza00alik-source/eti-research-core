@@ -2499,9 +2499,29 @@ class MemoryStore:
                     "fetched_at": row["fetched_at"],
                 })
             labels = build_forward_labels(snapshots, now=now)
-            inserted = 0
+            existing_rows = conn.execute(
+                "SELECT baseline_snapshot_id,horizon_seconds,target_snapshot_id "
+                "FROM solana_research_labels WHERE owner_id=? AND workspace_id=?",
+                (owner_id, workspace_id),
+            ).fetchall()
+            existing = {
+                (row["baseline_snapshot_id"], row["horizon_seconds"]): row["target_snapshot_id"]
+                for row in existing_rows
+            }
+            inserted = unchanged = conflicts = 0
             created_at = _utc_now()
             for label in labels:
+                key = (label["baseline_snapshot_id"], label["horizon_seconds"])
+                existing_target = existing.get(key)
+                if existing_target is not None:
+                    if existing_target == label["target_snapshot_id"]:
+                        unchanged += 1
+                    else:
+                        # Never silently replace a persisted label: late-arriving
+                        # earlier samples can change the selected target. Surface
+                        # the conflict for explicit dataset review/versioning.
+                        conflicts += 1
+                    continue
                 cursor = conn.execute(
                     "INSERT OR IGNORE INTO solana_research_labels(id,owner_id,workspace_id,mint,"
                     "pool_address,baseline_snapshot_id,target_snapshot_id,horizon_seconds,label_json,created_at) "
@@ -2514,6 +2534,7 @@ class MemoryStore:
         return {
             "generated": inserted, "available": len(labels),
             "skipped_invalid_snapshots": skipped_invalid_snapshots,
+            "unchanged": unchanged, "conflicts": conflicts,
         }
 
     def get_solana_research_dataset_report(
