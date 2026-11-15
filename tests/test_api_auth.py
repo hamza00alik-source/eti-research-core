@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -72,7 +73,7 @@ def test_solana_provider_observation_ledger_is_authenticated_scoped_and_minimal(
         workspace_id = workspace["id"]
         payload = {
             "provider": "DexScreener", "endpoint_id": "token-pairs-v1",
-            "observed_at": "2026-11-15T10:00:00Z", "status": "success",
+            "observed_at": datetime.now(timezone.utc).isoformat(), "status": "success",
             "latency_ms": 125.5,
         }
         created = client.post(
