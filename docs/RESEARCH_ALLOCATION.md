@@ -42,9 +42,12 @@ Each value must be a complete `eti.transaction_cost_model.v1` object, not a
 status string. It must explicitly state fee, spread, slippage, market impact,
 funding and borrow costs, contract multiplier, quote/settlement currencies,
 retrieval time, validity window, and at least one evidence record with an HTTPS
-source URI, observation time, and declared `open` or `licensed` status.
-Unknown/restricted license declarations, missing values, expired/future-dated
-records, and identity mismatches fail closed.
+source URI, observation time, declared `open` or `licensed` status, and an
+explicit `covers` list. Across evidence records, every numeric assumption
+(including explicit zeroes and the contract multiplier) must be covered by at
+least one source. Unknown/restricted license declarations, missing values,
+expired/future-dated records, incomplete evidence coverage, and identity
+mismatches fail closed.
 
 Example structure (illustrative values only; not a validated fee schedule):
 
@@ -69,15 +72,16 @@ Example structure (illustrative values only; not a validated fee schedule):
       "source": "Published venue fee schedule",
       "uri": "https://example.com/fees",
       "license_status": "open",
-      "observed_at": "2026-01-01T00:00:00Z"
+      "observed_at": "2026-01-01T00:00:00Z",
+      "covers": ["fee_bps", "spread_bps", "slippage_bps", "market_impact_bps", "funding_bps_per_bar", "borrow_bps_per_bar", "contract_multiplier"]
     }]
   }
 }
 ```
 
 The validator checks schema, exact identity, explicit numeric assumptions,
-currency fields, timestamps, validity window, HTTPS evidence references, and
-declared license status. The runner also requires approval assumptions to match
+currency fields, timestamps, validity window, HTTPS evidence references,
+declared license status, and field-by-field evidence coverage. The runner also requires approval assumptions to match
 the validated model. Half-spread, slippage, and market impact are included in
 the evaluator's slippage input. Nonzero borrow cost is rejected until the
 evaluator supports it.
