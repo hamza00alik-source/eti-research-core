@@ -4,6 +4,7 @@ import types
 
 from eti.solana_ingest import PumpPortalIngestor
 from eti.solana_research import PumpPortalStream
+from eti.storage import MemoryStore
 
 
 class _FakeSocket:
@@ -128,3 +129,26 @@ def test_ingestor_binds_provider_telemetry_to_configured_owner_and_workspace():
 
     assert store.args[0:2] == ("trusted-owner", "trusted-workspace")
     assert store.args[2]["provider"] == "pumpportal"
+
+
+def test_ingestor_persists_pumpportal_connection_observation_in_real_workspace(tmp_path):
+    store = MemoryStore(tmp_path / "pumpportal-telemetry.sqlite3")
+    workspace = store.create_workspace("owner-a", "pumpportal research")
+    ingestor = PumpPortalIngestor("owner-a", workspace["id"], store)
+
+    ingestor._record_provider_observation({
+        "provider": "pumpportal",
+        "endpoint_id": "stream_connect",
+        "observed_at": "2026-11-15T00:00:00Z",
+        "status": "success",
+        "latency_ms": 18.25,
+        "error_code": None,
+    })
+
+    own = store.list_solana_provider_observations("owner-a", workspace["id"])
+    assert len(own) == 1
+    assert own[0]["provider"] == "pumpportal"
+    assert own[0]["endpoint_id"] == "stream_connect"
+    assert own[0]["integrity_valid"] is True
+    assert own[0]["status"] == "success"
+    assert store.list_solana_provider_observations("owner-b", workspace["id"]) == []
