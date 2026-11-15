@@ -449,6 +449,8 @@ def test_mint_cluster_bootstrap_withholds_small_cluster_counts_and_is_reproducib
     assert interval["coverage_claimed"] is False
     assert interval["is_confidence_interval"] is False
     assert interval["range_type"] == "BOOTSTRAP_PERCENTILE_RANGE_NOT_CONFIDENCE_INTERVAL"
+    assert interval["mean_return_pct_percentile_range"] == interval["mean_return_pct_interval"]
+    assert interval["legacy_interval_field_deprecated"] is True
     assert interval["nominal_percentile_level"] == interval["confidence_level"]
     assert interval["mean_return_pct_interval"] == report_b["cluster_uncertainty"]["always_long"]["mean_return_pct_interval"]
     low, high = interval["mean_return_pct_interval"]
