@@ -133,7 +133,7 @@ class SolanaProviderObservationPayload(BaseModel):
     provider: str = Field(min_length=1, max_length=80)
     endpoint_id: str = Field(min_length=1, max_length=120)
     observed_at: str = Field(min_length=20, max_length=40)
-    status: str = Field(regex="^(success|error)$")
+    status: str = Field(pattern="^(success|error)$")
     latency_ms: float | None = Field(default=None, ge=0, le=3600000)
     error_code: str | None = Field(default=None, min_length=1, max_length=80)
 
