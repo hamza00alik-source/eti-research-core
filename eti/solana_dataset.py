@@ -488,9 +488,13 @@ def evaluate_solana_token_lifecycle_coverage(
                 "status": status,
             })
 
+        market_scan_snapshots = [
+            row for row in mint_snapshots
+            if row.get("capability") == "solana.market.scan"
+        ]
         if migrations:
             lifecycle_status = "MIGRATION_EVENT_OBSERVED"
-        elif mint_snapshots:
+        elif market_scan_snapshots:
             lifecycle_status = "MARKET_SCAN_OBSERVED"
         elif any(row["status"] == "REFRESH_TASK_FAILED_NO_SNAPSHOT" for row in job_rows):
             lifecycle_status = "REFRESH_FAILURE_EVIDENCE"
