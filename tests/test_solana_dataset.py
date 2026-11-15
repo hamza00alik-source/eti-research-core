@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from eti.solana_dataset import validate_snapshot_rows
 from eti.storage import MemoryStore
 
