@@ -362,6 +362,7 @@ class MarketDataHub:
 def build_public_market_hub(
     crypto_venues: tuple[str, ...] = ("binance", "mexc", "coinbaseexchange", "kraken"),
     *, include_yahoo: bool = True,
+    calendar_registry: SessionCalendarRegistry | None = None,
 ) -> MarketDataHub:
     """Build ETI's default public-data hub without credentials or execution access."""
     adapters: list[MarketAdapter] = []
@@ -374,4 +375,4 @@ def build_public_market_hub(
         adapters.append(CcxtMarketAdapter(normalized, market_types))
     if include_yahoo:
         adapters.append(YahooFinanceMarketAdapter())
-    return MarketDataHub(adapters)
+    return MarketDataHub(adapters, calendar_registry=calendar_registry)
