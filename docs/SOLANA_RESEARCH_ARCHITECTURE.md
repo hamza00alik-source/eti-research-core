@@ -667,3 +667,16 @@ separately rather than treated as zero-duration sampling intervals. These are
 descriptive per-mint/pool observation intervals, not scheduled-cadence
 compliance, provider uptime, or proof of why a gap occurred. The report does
 not infer failure, inactivity, delisting, or training eligibility from gaps.
+
+
+### Forward-label coverage by requested horizon
+
+`evaluate_forward_label_coverage` reports candidate baselines, baselines
+not yet mature at the observation cutoff, mature baselines with and without a
+qualifying future sample, emitted label records, and labels whose target price
+is unavailable. Rates are calculated only among mature baselines. Repeated or
+missing snapshot IDs are excluded because their persisted references are not
+unambiguous. A mature baseline without a target is an unresolved observation
+gap in the exported evidence; it does not establish provider failure, token
+inactivity, delisting, or any other cause. Coverage diagnostics never authorize
+training.
