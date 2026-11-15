@@ -275,7 +275,7 @@ def main() -> None:
     parser.add_argument("--monthly-spend-to-date-usd", type=float)
     parser.add_argument(
         "--cost-models", type=Path,
-        help="JSON mapping 'venue:market_type:symbol' to 'validated'; omitted costs remain unknown",
+        help="Evidence-backed eti.transaction_cost_model.v1 objects keyed by venue:market_type:symbol",
     )
     args = parser.parse_args()
     scan = json.loads(args.scan_report.read_text(encoding="utf-8"))
