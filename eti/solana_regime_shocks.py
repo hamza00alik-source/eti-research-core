@@ -112,6 +112,7 @@ def evaluate_solana_market_wide_regime_shocks(
             "bucket_start": datetime.fromtimestamp(bucket, tz=timezone.utc).isoformat(),
             "observed_mint_count": len(observed_mints),
             "transition_mint_count": len(changed_mints),
+            "transition_mints": sorted(changed_mints),
             "transition_count": transition_count,
             "transition_mint_share": len(changed_mints) / len(observed_mints) if observed_mints else None,
             "transition_types": dict(sorted(event["transition_types"].items())),
@@ -143,4 +144,89 @@ def evaluate_solana_market_wide_regime_shocks(
             "aggregation can create dependence. Buckets do not establish causality, "
             "independent replications, predictive value, executable returns or P&L."
         ),
+    }
+
+
+
+def evaluate_solana_shock_recurrence(
+    shock_report: dict[str, Any],
+    *,
+    minimum_event_separation_seconds: int = 3600,
+    minimum_distinct_event_periods: int = 2,
+) -> dict[str, Any]:
+    """Describe recurrence and mint concentration among prequalified shock buckets.
+
+    Adjacent qualifying buckets within the separation window are one event period.
+    Mint counts are descriptive recurrence, not independent replications.
+    """
+    for name, value in (
+        ("minimum_event_separation_seconds", minimum_event_separation_seconds),
+        ("minimum_distinct_event_periods", minimum_distinct_event_periods),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+    if not isinstance(shock_report, dict) or not isinstance(shock_report.get("shock_buckets"), list):
+        raise ValueError("shock_report must contain shock_buckets")
+
+    by_horizon: dict[str, list[tuple[datetime, set[str]]]] = defaultdict(list)
+    for row in shock_report["shock_buckets"]:
+        if not isinstance(row, dict):
+            continue
+        horizon = row.get("horizon_seconds")
+        mints = row.get("transition_mints")
+        if not isinstance(horizon, str) or not horizon.strip() or not isinstance(mints, list):
+            continue
+        try:
+            stamp = _aware_timestamp(row.get("bucket_start"))
+        except ValueError:
+            continue
+        clean_mints = {mint.strip() for mint in mints if isinstance(mint, str) and mint.strip()}
+        by_horizon[horizon].append((stamp, clean_mints))
+
+    summaries = {}
+    for horizon, events in sorted(by_horizon.items()):
+        events.sort(key=lambda item: item[0])
+        periods: list[dict[str, Any]] = []
+        for stamp, mints in events:
+            if not periods or (stamp - periods[-1]["last_timestamp"]).total_seconds() > minimum_event_separation_seconds:
+                periods.append({"first_timestamp": stamp, "last_timestamp": stamp, "mints": set(), "bucket_count": 0})
+            period = periods[-1]
+            period["last_timestamp"] = stamp
+            period["mints"].update(mints)
+            period["bucket_count"] += 1
+
+        mint_period_counts: dict[str, int] = defaultdict(int)
+        for period in periods:
+            for mint in period["mints"]:
+                mint_period_counts[mint] += 1
+        repeated = {mint: count for mint, count in mint_period_counts.items() if count > 1}
+        total_mint_periods = sum(mint_period_counts.values())
+        top_mint_periods = max(mint_period_counts.values(), default=0)
+        summaries[horizon] = {
+            "qualifying_bucket_count": len(events),
+            "distinct_event_period_count": len(periods),
+            "event_periods": [{
+                "first_timestamp": period["first_timestamp"].isoformat(),
+                "last_timestamp": period["last_timestamp"].isoformat(),
+                "qualifying_bucket_count": period["bucket_count"],
+                "distinct_mint_count": len(period["mints"]),
+            } for period in periods],
+            "distinct_mint_count": len(mint_period_counts),
+            "mints_reappearing_in_multiple_event_periods": dict(sorted(repeated.items())),
+            "mint_period_observation_count": total_mint_periods,
+            "largest_mint_period_share": top_mint_periods / total_mint_periods if total_mint_periods else None,
+            "meets_recurrence_threshold": len(periods) >= minimum_distinct_event_periods,
+        }
+
+    return {
+        "status": "DESCRIPTIVE_SHOCK_RECURRENCE_AND_MINT_CONCENTRATION",
+        "minimum_event_separation_seconds": minimum_event_separation_seconds,
+        "minimum_distinct_event_periods": minimum_distinct_event_periods,
+        "by_horizon_seconds": summaries,
+        "causality_established": False,
+        "independent_mint_replications_established": False,
+        "predictive_value_established": False,
+        "training_authorized": False,
+        "realized_pnl_available": False,
+        "note": "Event periods are a configurable grouping of observed qualifying buckets, not statistically independent shocks. Repeated mint appearances indicate concentration, not independent replication or predictive value.",
     }
