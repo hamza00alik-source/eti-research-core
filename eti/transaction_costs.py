@@ -14,6 +14,7 @@ NUMERIC_FIELDS = (
     "fee_bps", "spread_bps", "slippage_bps", "market_impact_bps",
     "funding_bps_per_bar", "borrow_bps_per_bar", "contract_multiplier",
 )
+REQUIRED_EVIDENCE_FIELDS = frozenset(NUMERIC_FIELDS)
 
 
 def _timestamp(name: str, value: Any) -> datetime:
@@ -65,6 +66,7 @@ def validate_transaction_cost_model(
     if not isinstance(evidence, list) or not evidence:
         raise ValueError("at least one evidence record is required")
     normalized_evidence = []
+    covered_fields: set[str] = set()
     for index, item in enumerate(evidence):
         if not isinstance(item, dict):
             raise ValueError(f"evidence[{index}] must be an object")
@@ -80,10 +82,20 @@ def validate_transaction_cost_model(
         observed_at = _timestamp(f"evidence[{index}].observed_at", item.get("observed_at"))
         if observed_at > current:
             raise ValueError(f"evidence[{index}] is dated in the future")
+        covers = item.get("covers")
+        if not isinstance(covers, list) or not covers:
+            raise ValueError(f"evidence[{index}].covers must list the cost fields supported by this source")
+        if any(not isinstance(field, str) or field not in REQUIRED_EVIDENCE_FIELDS for field in covers):
+            raise ValueError(f"evidence[{index}].covers contains an unsupported cost field")
+        covered_fields.update(covers)
         normalized_evidence.append({
             "source": source.strip(), "uri": uri,
             "license_status": license_status, "observed_at": observed_at.isoformat(),
+            "covers": sorted(set(covers)),
         })
+    missing_evidence = sorted(REQUIRED_EVIDENCE_FIELDS - covered_fields)
+    if missing_evidence:
+        raise ValueError("transaction-cost evidence does not cover: " + ", ".join(missing_evidence))
     return {
         "schema_version": SCHEMA_VERSION,
         "instrument_identity": identity,
