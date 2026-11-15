@@ -43,6 +43,7 @@ class CcxtMarketAdapter:
                 f"{self.venue} market_types must be a non-empty subset of {sorted(allowed)}"
             )
         self.market_types = tuple(market_types)
+        self.discovery_errors: list[dict[str, str]] = []
         self.capabilities = AdapterCapabilities(
             venue=self.venue, asset_classes=("crypto",), market_types=self.market_types,
             public_market_data=True, authenticated_market_data=False, order_execution=False,
@@ -55,14 +56,33 @@ class CcxtMarketAdapter:
     def _normalize_markets(self, market_type: str, rows: list[dict]) -> list[InstrumentSpec]:
         found: list[InstrumentSpec] = []
         for row in rows:
-            found.append(InstrumentSpec(
-                symbol=row["symbol"], venue=self.venue, asset_class="crypto",
-                market_type=market_type, base_currency=row.get("base"),
-                quote_currency=row.get("quote"), settlement_currency=row.get("settle"),
-                contract_multiplier=float(row.get("contract_size") or 1.0),
-                max_leverage=1.0, supports_short=market_type in {"swap", "future"},
-                supports_funding=market_type == "swap", active=bool(row.get("active", True)),
-            ))
+            symbol = row.get("symbol", "<unknown>")
+            try:
+                raw_multiplier = row.get("contract_size")
+                if raw_multiplier is None:
+                    if market_type in {"swap", "future"}:
+                        raise ValueError(
+                            "derivative market is missing an explicit contract_size"
+                        )
+                    multiplier = 1.0
+                else:
+                    if isinstance(raw_multiplier, bool):
+                        raise ValueError("contract_size must be a finite positive number")
+                    multiplier = float(raw_multiplier)
+                found.append(InstrumentSpec(
+                    symbol=symbol, venue=self.venue, asset_class="crypto",
+                    market_type=market_type, base_currency=row.get("base"),
+                    quote_currency=row.get("quote"), settlement_currency=row.get("settle"),
+                    contract_multiplier=multiplier,
+                    max_leverage=1.0, supports_short=market_type in {"swap", "future"},
+                    supports_funding=market_type == "swap", active=bool(row.get("active", True)),
+                ))
+            except (TypeError, ValueError, OverflowError) as exc:
+                self.discovery_errors.append({
+                    "market_type": market_type,
+                    "error_type": type(exc).__name__,
+                    "message": f"{symbol}: {str(exc)}"[:500],
+                })
         return found
 
     def discover_instruments_for(self, market_type: str) -> list[InstrumentSpec]:
@@ -77,7 +97,7 @@ class CcxtMarketAdapter:
 
     def discover_instruments(self) -> list[InstrumentSpec]:
         found: list[InstrumentSpec] = []
-        self.discovery_errors: list[dict[str, str]] = []
+        self.discovery_errors = []
         for market_type in self.market_types:
             try:
                 found.extend(self.discover_instruments_for(market_type))

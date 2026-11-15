@@ -149,3 +149,54 @@ def test_yahoo_discovery_is_scoped_and_keeps_partial_asset_class_results(monkeyp
     assert result["instruments"][0].asset_class == "forex"
     assert len(result["source_errors"]) == 1
     assert "equity reference endpoint unavailable" in result["source_errors"][0]["message"]
+
+
+def test_ccxt_derivative_discovery_rejects_missing_or_invalid_contract_size(monkeypatch):
+    import eti.market_data_hub as hub_module
+
+    class Provider:
+        def __init__(self, venue, market_type):
+            self.market_type = market_type
+
+        def discover_markets(self, limit=1000):
+            return [
+                {"symbol": "BTC/USDT:USDT", "base": "BTC", "quote": "USDT",
+                 "settle": "USDT", "contract_size": 1.0, "active": True},
+                {"symbol": "ETH/USDT:USDT", "base": "ETH", "quote": "USDT",
+                 "settle": "USDT", "contract_size": None, "active": True},
+                {"symbol": "SOL/USDT:USDT", "base": "SOL", "quote": "USDT",
+                 "settle": "USDT", "contract_size": 0, "active": True},
+            ]
+
+    monkeypatch.setattr(hub_module, "CcxtPublicProvider", Provider)
+    adapter = hub_module.CcxtMarketAdapter("binance", ("swap",))
+    result = hub_module.MarketDataHub([adapter]).discover(
+        asset_class="crypto", market_type="swap"
+    )
+    assert result["count"] == 1
+    assert result["instruments"][0].symbol == "BTC/USDT:USDT"
+    assert result["instruments"][0].contract_multiplier == 1.0
+    assert len(result["source_errors"]) == 2
+    assert any("missing an explicit contract_size" in x["message"] for x in result["source_errors"])
+    assert any("contract_multiplier must be finite and positive" in x["message"] for x in result["source_errors"])
+
+
+def test_ccxt_spot_discovery_defaults_missing_contract_size_to_one(monkeypatch):
+    import eti.market_data_hub as hub_module
+
+    class Provider:
+        def __init__(self, venue, market_type):
+            self.market_type = market_type
+
+        def discover_markets(self, limit=1000):
+            return [{"symbol": "BTC/USDT", "base": "BTC", "quote": "USDT",
+                     "contract_size": None, "active": True}]
+
+    monkeypatch.setattr(hub_module, "CcxtPublicProvider", Provider)
+    adapter = hub_module.CcxtMarketAdapter("binance", ("spot",))
+    result = hub_module.MarketDataHub([adapter]).discover(
+        asset_class="crypto", market_type="spot"
+    )
+    assert result["count"] == 1
+    assert result["instruments"][0].contract_multiplier == 1.0
+    assert result["source_errors"] == []
