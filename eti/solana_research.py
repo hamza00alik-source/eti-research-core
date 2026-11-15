@@ -237,9 +237,32 @@ class PumpPortalStream:
     server-side from ETI_PUMPPORTAL_API_KEY and never returned in event payloads.
     """
 
-    def __init__(self, api_key: str | None = None, max_backoff: float = 60.0):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        max_backoff: float = 60.0,
+        observation_callback: Callable[[dict[str, Any]], None] | None = None,
+    ):
         self.api_key = api_key if api_key is not None else os.getenv("ETI_PUMPPORTAL_API_KEY")
         self.max_backoff = max_backoff
+        self.observation_callback = observation_callback
+
+    def _observe_connection(self, status: str, latency_ms: float, error_code: str | None = None) -> None:
+        if self.observation_callback is None:
+            return
+        sample = {
+            "provider": "pumpportal",
+            "endpoint_id": "stream_connect",
+            "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "status": status,
+            "latency_ms": max(0.0, float(latency_ms)),
+            "error_code": error_code,
+        }
+        try:
+            self.observation_callback(sample)
+        except Exception:
+            # Telemetry is best-effort and must never interrupt public discovery.
+            pass
 
     async def events(self, stop: asyncio.Event | None = None) -> AsyncIterator[dict[str, Any]]:
         try:
@@ -251,8 +274,12 @@ class PumpPortalStream:
             endpoint += "?api-key=" + self.api_key
         delay = 1.0
         while stop is None or not stop.is_set():
+            attempt_started = time.perf_counter()
+            connected_observed = False
             try:
                 async with websockets.connect(endpoint, ping_interval=20, ping_timeout=20, open_timeout=15) as ws:
+                    self._observe_connection("success", (time.perf_counter() - attempt_started) * 1000)
+                    connected_observed = True
                     await ws.send(json.dumps({"method": "subscribeNewToken"}))
                     await ws.send(json.dumps({"method": "subscribeMigration"}))
                     delay = 1.0
@@ -268,7 +295,15 @@ class PumpPortalStream:
                             yield event
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                if not connected_observed:
+                    error_code = type(exc).__name__
+                    if not error_code.isalnum():
+                        error_code = "ConnectionError"
+                    self._observe_connection(
+                        "error", (time.perf_counter() - attempt_started) * 1000,
+                        error_code[:80],
+                    )
                 if stop is not None and stop.is_set():
                     return
                 await asyncio.sleep(delay)
