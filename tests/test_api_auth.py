@@ -57,6 +57,68 @@ def test_workspace_memory_and_agent_apis_require_auth_and_isolate_accounts(tmp_p
         ).status_code == 404
 
 
+
+def test_solana_provider_observation_ledger_is_authenticated_scoped_and_minimal(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "provider-observations.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        account_a = _register(client, "provider_a")
+        account_b = _register(client, "provider_b")
+        headers_a = {"Authorization": f"Bearer {account_a['access_token']}"}
+        headers_b = {"Authorization": f"Bearer {account_b['access_token']}"}
+        workspace = client.post("/v1/workspaces", headers=headers_a,
+                                json={"name": "provider research"}).json()
+        workspace_id = workspace["id"]
+        payload = {
+            "provider": "DexScreener", "endpoint_id": "token-pairs-v1",
+            "observed_at": "2026-11-15T10:00:00Z", "status": "success",
+            "latency_ms": 125.5,
+        }
+        created = client.post(
+            f"/v1/workspaces/{workspace_id}/solana/provider-observations",
+            headers=headers_a, json=payload,
+        )
+        assert created.status_code == 201, created.text
+        item = created.json()
+        assert item["provider"] == "dexscreener"
+        assert item["integrity_valid"] is True
+        assert "credential" not in item and "request_headers" not in item
+
+        listed = client.get(
+            f"/v1/workspaces/{workspace_id}/solana/provider-observations",
+            headers=headers_a,
+        )
+        assert listed.status_code == 200, listed.text
+        assert len(listed.json()["items"]) == 1
+        assert listed.json()["health"]["providers"][0]["status"] == "HEALTHY"
+        assert listed.json()["health"]["trading_authorized"] is False
+
+        assert client.get(
+            f"/v1/workspaces/{workspace_id}/solana/provider-observations",
+            headers=headers_b,
+        ).status_code == 404
+        assert client.post(
+            f"/v1/workspaces/{workspace_id}/solana/provider-observations",
+            headers=headers_b, json=payload,
+        ).status_code == 404
+        secret_payload = {**payload, "api_key": "must-not-be-accepted"}
+        assert client.post(
+            f"/v1/workspaces/{workspace_id}/solana/provider-observations",
+            headers=headers_a, json=secret_payload,
+        ).status_code == 422
+        error_payload = {**payload, "status": "error", "error_code": "HTTP_429"}
+        assert client.post(
+            f"/v1/workspaces/{workspace_id}/solana/provider-observations",
+            headers=headers_a, json=error_payload,
+        ).status_code == 201
+        bad_error = {**payload, "status": "error", "error_code": "Authorization: Bearer secret"}
+        assert client.post(
+            f"/v1/workspaces/{workspace_id}/solana/provider-observations",
+            headers=headers_a, json=bad_error,
+        ).status_code == 422
+
+
 def test_authenticated_agent_task_and_message_ledger_api(tmp_path, monkeypatch):
     monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "agents.sqlite3"))
     monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
