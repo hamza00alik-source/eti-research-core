@@ -637,3 +637,21 @@ walk-forward evaluation reports minimum, median, maximum and median overshoot
 by nominal horizon. Comparisons across nominal horizons must account for these
 actual sampling intervals. These diagnostics do not reconstruct the price
 path between observations or turn sampled marks into executable returns.
+
+
+## Duplicate snapshot identity and sampling-order diagnostics
+
+Dataset validation now flags every occurrence of a repeated non-empty snapshot ID.
+Preparation excludes snapshots carrying that issue, preventing an ID-to-row lookup
+from silently selecting one of multiple conflicting records. Forward-label
+generation independently excludes all occurrences of duplicate IDs before
+creating labels, because persisted baseline/target references would otherwise
+be ambiguous. Unique-ID inputs are sorted by observed timestamp and ID, so
+label results do not depend on export iteration order. Distinct snapshots with
+the same entity timestamp are still separately reported as duplicate
+entity/timestamp observations; they are not silently collapsed.
+
+The non-increasing entity-time diagnostic describes the supplied row order.
+It is not evidence of provider clock failure or a missing observation.
+Sampling gaps remain descriptive coverage information only: an absent sample
+does not establish why collection paused or whether the token/provider failed.
