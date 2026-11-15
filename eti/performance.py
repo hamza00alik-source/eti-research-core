@@ -32,8 +32,10 @@ def _trade_statistics(position: pd.Series, bar_returns: pd.Series) -> dict[str, 
         while i + 1 < len(values) and values[i + 1] == direction:
             i += 1
         end = i
-        # Include the following bar's turnover cost when the position closes.
-        stop = min(end + 2, len(returns))
+        # A holding episode owns only bars where its direction is active.
+        # The next bar may already belong to an opposite position; including it
+        # here would double-count that bar in both adjacent trades.
+        stop = end + 1
         trade_return = float(np.prod(1.0 + returns[start:stop]) - 1.0)
         trades.append(trade_return)
         i += 1
