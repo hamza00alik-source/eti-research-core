@@ -76,6 +76,9 @@ def _cluster_bootstrap_mean_interval(
         "mean_return_pct_interval": None,
         "status": "INSUFFICIENT_MINT_CLUSTERS",
         "minimum_clusters_for_interval": 20,
+        "independent_observations_proven": False,
+        "inferential_use_authorized": False,
+        "coverage_claimed": False,
         "interpretation": (
             "Exploratory cluster-resampling interval for the row-weighted mean; "
             "not a significance test, predictive guarantee, portfolio return, "
