@@ -89,3 +89,20 @@ def test_evidence_cannot_claim_unknown_or_duplicate_cost_fields():
             value, identity="kraken:spot:BTC/USD",
             now=datetime(2026, 11, 15, tzinfo=timezone.utc),
         )
+
+
+def test_signed_funding_rate_is_allowed_but_other_costs_stay_nonnegative():
+    value = model()
+    value["funding_bps_per_bar"] = -4.5
+    result = validate_transaction_cost_model(
+        value, identity="kraken:spot:BTC/USD",
+        now=datetime(2026, 11, 15, tzinfo=timezone.utc),
+    )
+    assert result["funding_bps_per_bar"] == -4.5
+
+    value["fee_bps"] = -1
+    with pytest.raises(ValueError, match="fee_bps"):
+        validate_transaction_cost_model(
+            value, identity="kraken:spot:BTC/USD",
+            now=datetime(2026, 11, 15, tzinfo=timezone.utc),
+        )
