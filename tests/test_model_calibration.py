@@ -155,3 +155,21 @@ def test_legacy_artifact_without_calibration_fields_defaults_to_uncalibrated():
     probabilities = model.predict_proba(pd.DataFrame({"x": [1.0]}))[0]
     np.testing.assert_allclose(probabilities, [0.1, 0.8, 0.1])
     assert not model.has_valid_calibration()
+
+
+
+def test_temperature_calibration_reports_before_after_reliability_bins():
+    model = BaselineModel()
+    model.estimator = FixedEstimator()
+    model.classes_ = np.array([0, 1, 2])
+    labels = np.tile(np.array([0, 1, 2]), 20)
+    report = model.fit_temperature_calibration(
+        pd.DataFrame({"x": np.arange(len(labels), dtype=float)}), labels
+    )
+    assert report["passed"] is True
+    for key in ("reliability_before", "reliability_after"):
+        reliability = report[key]
+        assert reliability["bin_count"] == 10
+        assert len(reliability["bins"]) == 10
+        assert 0.0 <= reliability["expected_calibration_error"] <= 1.0
+        assert sum(item["count"] for item in reliability["bins"]) == len(labels)
