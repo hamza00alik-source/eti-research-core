@@ -680,3 +680,13 @@ unambiguous. A mature baseline without a target is an unresolved observation
 gap in the exported evidence; it does not establish provider failure, token
 inactivity, delisting, or any other cause. Coverage diagnostics never authorize
 training.
+
+
+Label generation is idempotent for an existing baseline/horizon key. If a
+late-arriving earlier qualifying observation changes the deterministically
+selected target, generation does not silently overwrite the stored label; it
+reports a target conflict for explicit review. Coverage counts a persisted
+label as matched only when its stored target ID agrees with the currently
+selected target. Stale target conflicts are reported separately and are not
+counted as matched label records. Resolve such conflicts through an explicit
+dataset-versioning/rebuild process rather than silent mutation.
