@@ -135,6 +135,20 @@ def validate_transaction_cost_model(
             "observed_at": observed_at.isoformat(),
         })
     normalized_schedule.sort(key=lambda item: item["timestamp"])
+    coverage = model.get("funding_schedule_coverage")
+    normalized_coverage = None
+    if normalized_schedule:
+        if not isinstance(coverage, dict):
+            raise ValueError("funding_schedule_coverage is required when funding events are supplied")
+        coverage_start = _timestamp("funding_schedule_coverage.start", coverage.get("start"))
+        coverage_end = _timestamp("funding_schedule_coverage.end", coverage.get("end"))
+        if coverage_start > coverage_end or coverage_start < valid_from or coverage_end > valid_until or coverage_end > current:
+            raise ValueError("funding schedule coverage is invalid or outside its evidence window")
+        if normalized_schedule[0]["timestamp"] < coverage_start.isoformat() or normalized_schedule[-1]["timestamp"] > coverage_end.isoformat():
+            raise ValueError("funding events fall outside declared schedule coverage")
+        normalized_coverage = {"start": coverage_start.isoformat(), "end": coverage_end.isoformat()}
+    elif coverage is not None:
+        raise ValueError("funding schedule coverage cannot be supplied without funding events")
     if numeric["funding_bps_per_bar"] != 0 and normalized_schedule:
         raise ValueError("per-bar funding and event-timed funding cannot both be specified")
     return {
@@ -144,6 +158,7 @@ def validate_transaction_cost_model(
         "settlement_currency": model["settlement_currency"].strip().upper(),
         **numeric,
         "funding_schedule": normalized_schedule,
+        "funding_schedule_coverage": normalized_coverage,
         "retrieved_at": retrieved.isoformat(),
         "valid_from": valid_from.isoformat(),
         "valid_until": valid_until.isoformat(),
