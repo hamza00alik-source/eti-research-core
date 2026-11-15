@@ -247,7 +247,19 @@ class AgentWorker:
                         or task_input.get("scheduled_by") != "eti.live.supervisor"):
                     raise ValueError("live execution tasks must be created by the owner-authorized supervisor")
                 task_input = {**task_input, "owner_id": task["owner_id"], "task_id": task["id"]}
-            result = self.registry.execute(capability, task_input)
+            if capability in {"solana.market.scan", "solana.token.audit"}:
+                # Identity comes from the claimed, owner-scoped durable task,
+                # never from user-controlled capability input.
+                def record_provider_observation(sample: dict[str, Any]) -> None:
+                    self.store.record_solana_provider_observation(
+                        task["owner_id"], task["workspace_id"], **sample
+                    )
+                result = self.registry.execute(
+                    capability, task_input,
+                    observation_callback=record_provider_observation,
+                )
+            else:
+                result = self.registry.execute(capability, task_input)
             if capability == "model.train_research":
                 result = self._register_model_candidate(result)
             status, retryable = "completed", False
