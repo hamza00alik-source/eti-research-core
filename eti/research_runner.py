@@ -169,6 +169,8 @@ def run_approved_multi_market_research(
         if not isinstance(allow_short, bool):
             raise ValueError(f"{key}.allow_short must be boolean")
         instrument = _instrument(allocated)
+        if not math.isclose(validated_model["contract_multiplier"], instrument.contract_multiplier, rel_tol=0, abs_tol=1e-9):
+            raise ValueError(f"{key} contract multiplier does not match instrument metadata")
         if not instrument.active:
             raise ValueError(f"{key} is inactive and cannot be researched")
         if source.get("instrument") != allocated.get("instrument"):
