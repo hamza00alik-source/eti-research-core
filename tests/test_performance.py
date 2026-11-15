@@ -113,10 +113,10 @@ def test_funding_rate_rejects_boolean_and_non_finite_values():
 
 
 def test_trade_statistics_do_not_overlap_on_direction_reversal():
-    # Predicted positions after the one-bar signal delay are:
-    # flat, long, short, short, flat. The first short bar must not
-    # be included in the preceding long trade's return.
-    close = _series([100, 110, 55, 55, 55])
+    # Positions after the one-bar signal delay are:
+    # flat, flat, long, short, short. The reversal bar has a
+    # distinct adverse return for the short, not the preceding long.
+    close = _series([100, 110, 55, 80, 80])
     labels = pd.Series([1, 2, 0, 0, 1])
     report = evaluate_predictions(
         close, labels, labels, fee_bps=0, slippage_bps=0,
@@ -124,4 +124,4 @@ def test_trade_statistics_do_not_overlap_on_direction_reversal():
     )
     trades = report["trading"]["model"]["average_trade_return"]
     assert report["trading"]["model"]["trade_count"] == 2
-    assert trades == pytest.approx(0.30)
+    assert trades == pytest.approx((-0.50 - (25.0 / 55.0)) / 2.0)
