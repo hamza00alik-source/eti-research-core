@@ -225,3 +225,29 @@ def test_provider_observation_callback_failure_does_not_break_request(monkeypatc
         raise RuntimeError("telemetry storage unavailable")
 
     assert DexScreenerClient(observation_callback=broken_callback).fetch_pairs(["Mint111"])[0]["pairAddress"] == "Pool111"
+
+
+def test_solana_rpc_and_rugcheck_clients_emit_provider_observations(monkeypatch):
+    from eti.solana_research import RugCheckClient, SolanaRpcClient
+
+    observations = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"jsonrpc": "2.0", "result": {"value": {"amount": "1"}}}
+
+    monkeypatch.setattr("eti.solana_research.httpx.post", lambda *_args, **_kwargs: Response())
+    rpc = SolanaRpcClient(url="https://rpc.example", observation_callback=observations.append)
+    assert rpc.token_supply("Mint111")["amount"] == "1"
+
+    monkeypatch.setattr("eti.solana_research.httpx.get", lambda *_args, **_kwargs: Response())
+    rugcheck = RugCheckClient(observation_callback=observations.append)
+    assert rugcheck.report("Mint111")["result"]["value"]["amount"] == "1"
+
+    assert [(item["provider"], item["endpoint_id"], item["status"]) for item in observations] == [
+        ("solana-rpc", "getTokenSupply", "success"),
+        ("rugcheck", "token_report", "success"),
+    ]
