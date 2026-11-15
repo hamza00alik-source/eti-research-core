@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
+from .colony_intelligence import build_colony_intelligence
 from .storage import MemoryStore
 from .worker import AgentWorker
 
@@ -104,6 +105,7 @@ class QueenOrchestrator:
         self._next_slot_id = 1
         self._lock = threading.RLock()
         self._shutdown = threading.Event()
+        self._last_intelligence_emit = 0.0
 
     @staticmethod
     def _emit(event: str, **fields: object) -> None:
@@ -187,6 +189,22 @@ class QueenOrchestrator:
             active_workers=active_now,
             max_workers=self.config.max_workers,
         )
+        # Operational history informs observability only. It cannot alter
+        # permissions, budgets, model promotion, or execution authority.
+        now_monotonic = time.monotonic()
+        if now_monotonic - self._last_intelligence_emit >= 60.0:
+            task_history = self.store.list_agent_tasks(
+                self.owner_id, self.workspace_id, limit=500
+            )
+            intelligence = build_colony_intelligence(task_history)
+            self._emit(
+                "queen.colony.intelligence",
+                observed_tasks=intelligence["observed_tasks"],
+                history_may_be_truncated=intelligence["history_may_be_truncated"],
+                capabilities=intelligence["capabilities"],
+                authority="observational_only",
+            )
+            self._last_intelligence_emit = now_monotonic
         return {
             "queued_tasks": queued,
             "target_workers": target,
