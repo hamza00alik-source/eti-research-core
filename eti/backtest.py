@@ -14,9 +14,9 @@ def backtest_positions(
     fee_bps: float = 6.0,
     slippage_bps: float = 2.0,
     funding_bps_per_bar: float = 0.0,
-    funding_events: list[dict] | None = None,
     allow_short: bool = False,
     initial_equity: float = 1.0,
+    funding_events: list[dict] | None = None,
 ) -> dict:
     costs_input = (fee_bps, slippage_bps, funding_bps_per_bar, initial_equity)
     if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in costs_input):
