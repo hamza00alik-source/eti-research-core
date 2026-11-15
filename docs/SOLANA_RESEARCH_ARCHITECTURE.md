@@ -690,3 +690,10 @@ label as matched only when its stored target ID agrees with the currently
 selected target. Stale target conflicts are reported separately and are not
 counted as matched label records. Resolve such conflicts through an explicit
 dataset-versioning/rebuild process rather than silent mutation.
+
+
+Coverage also flags a persisted label as a stale target conflict when its
+baseline/horizon no longer has any qualifying future target in the full
+observed snapshot set. Such a record is not counted as matched coverage. This
+can reveal orphaned label references or changed evidence history; it does not
+establish why the supporting observation is absent.
