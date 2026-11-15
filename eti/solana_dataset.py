@@ -381,3 +381,166 @@ def evaluate_solana_discovery_cohort_coverage(
             "task status. This diagnostic cannot rule out survivorship bias or provider gaps."
         ),
     }
+
+
+def evaluate_solana_token_lifecycle_coverage(
+    events: list[dict[str, Any]],
+    snapshots: list[dict[str, Any]],
+    tasks: list[dict[str, Any]],
+    refresh_jobs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Describe only lifecycle states supported by explicit ledger evidence.
+
+    No absence of events, scans, or provider updates is interpreted as token
+    inactivity, delisting, rug pull, or terminal failure.
+    """
+    if not all(isinstance(value, list) for value in (events, snapshots, tasks, refresh_jobs)):
+        raise ValueError("events, snapshots, tasks and refresh_jobs must be lists")
+
+    def parse_time(value: Any) -> datetime | None:
+        return _timestamp(value)
+
+    events_by_mint: dict[str, list[dict[str, Any]]] = {}
+    snapshots_by_mint: dict[str, list[dict[str, Any]]] = {}
+    tasks_by_refresh: dict[str, list[dict[str, Any]]] = {}
+    mint_set: set[str] = set()
+
+    for event in events:
+        if isinstance(event, dict) and isinstance(event.get("mint"), str):
+            mint = event["mint"]
+            mint_set.add(mint)
+            events_by_mint.setdefault(mint, []).append(event)
+    for snapshot in snapshots:
+        if isinstance(snapshot, dict) and isinstance(snapshot.get("mint"), str):
+            mint = snapshot["mint"]
+            mint_set.add(mint)
+            snapshots_by_mint.setdefault(mint, []).append(snapshot)
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        payload = task.get("input")
+        if isinstance(payload, dict) and isinstance(payload.get("refresh_job_id"), str):
+            tasks_by_refresh.setdefault(payload["refresh_job_id"], []).append(task)
+        if isinstance(payload, dict) and isinstance(payload.get("mint"), str):
+            mint_set.add(payload["mint"])
+    for job in refresh_jobs:
+        if isinstance(job, dict) and isinstance(job.get("mint"), str):
+            mint_set.add(job["mint"])
+
+    rows: list[dict[str, Any]] = []
+    for mint in sorted(mint_set):
+        mint_events = events_by_mint.get(mint, [])
+        mint_snapshots = snapshots_by_mint.get(mint, [])
+        migrations = [
+            event for event in mint_events if event.get("event_type") == "migration"
+        ]
+        pools = sorted({
+            row.get("pool_address") for row in mint_snapshots
+            if isinstance(row.get("pool_address"), str) and row.get("pool_address")
+            and row.get("pool_address") != "__pending__"
+        })
+        jobs = [
+            job for job in refresh_jobs
+            if isinstance(job, dict) and job.get("mint") == mint
+        ]
+        job_rows = []
+        for job in jobs:
+            job_id = job.get("id")
+            linked_tasks = tasks_by_refresh.get(job_id, []) if isinstance(job_id, str) else []
+            ordered_tasks = sorted(
+                linked_tasks,
+                key=lambda row: parse_time(row.get("created_at")) or datetime.min.replace(tzinfo=__import__("datetime").timezone.utc),
+            )
+            latest_task = ordered_tasks[-1] if ordered_tasks else None
+            matching_snapshots = [
+                row for row in mint_snapshots
+                if row.get("pool_address") == job.get("pool_address")
+            ]
+            latest_snapshot = max(
+                matching_snapshots,
+                key=lambda row: parse_time(row.get("fetched_at")) or datetime.min.replace(tzinfo=__import__("datetime").timezone.utc),
+                default=None,
+            )
+            task_status = str(latest_task.get("status", "unknown")).lower() if latest_task else "no_task"
+            if latest_snapshot is not None:
+                status = "POOL_SCAN_OBSERVED"
+            elif task_status == "failed":
+                status = "REFRESH_TASK_FAILED_NO_SNAPSHOT"
+            elif task_status in {"queued", "running"}:
+                status = "REFRESH_TASK_PENDING"
+            elif task_status in {"cancelled", "canceled"}:
+                status = "REFRESH_TASK_CANCELLED"
+            elif task_status == "completed":
+                status = "COMPLETED_TASK_NO_SNAPSHOT_UNRESOLVED"
+            elif job.get("enabled") is True or job.get("enabled") == 1:
+                status = "REFRESH_SCHEDULED_NO_TASK_EVIDENCE"
+            else:
+                status = "NO_REFRESH_OR_SCAN_EVIDENCE"
+            job_rows.append({
+                "refresh_job_id": job_id,
+                "pool_address": job.get("pool_address"),
+                "enabled": bool(job.get("enabled")),
+                "interval_seconds": job.get("interval_seconds"),
+                "next_due_at": job.get("next_due_at"),
+                "last_enqueued_at": job.get("last_enqueued_at"),
+                "latest_task_status": task_status,
+                "latest_snapshot_at": latest_snapshot.get("fetched_at") if latest_snapshot else None,
+                "status": status,
+            })
+
+        if migrations:
+            lifecycle_status = "MIGRATION_EVENT_OBSERVED"
+        elif mint_snapshots:
+            lifecycle_status = "MARKET_SCAN_OBSERVED"
+        elif any(row["status"] == "REFRESH_TASK_FAILED_NO_SNAPSHOT" for row in job_rows):
+            lifecycle_status = "REFRESH_FAILURE_EVIDENCE"
+        elif mint_events:
+            lifecycle_status = "DISCOVERED_NO_MARKET_SCAN_EVIDENCE"
+        elif jobs:
+            lifecycle_status = "REFRESH_SCHEDULED_NO_MARKET_SCAN_EVIDENCE"
+        else:
+            lifecycle_status = "UNRESOLVED"
+
+        rows.append({
+            "mint": mint,
+            "discovery_event_count": len(mint_events),
+            "migration_event_count": len(migrations),
+            "distinct_observed_pool_count": len(pools),
+            "observed_pool_addresses": pools,
+            "market_scan_snapshot_count": sum(
+                row.get("capability") == "solana.market.scan" for row in mint_snapshots
+            ),
+            "audit_snapshot_count": sum(
+                row.get("capability") == "solana.token.audit" for row in mint_snapshots
+            ),
+            "latest_snapshot_at": max(
+                (row.get("fetched_at") for row in mint_snapshots if parse_time(row.get("fetched_at")) is not None),
+                default=None,
+            ),
+            "refresh_jobs": job_rows,
+            "lifecycle_evidence_status": lifecycle_status,
+        })
+
+    status_counts: dict[str, int] = {}
+    for row in rows:
+        status = row["lifecycle_evidence_status"]
+        status_counts[status] = status_counts.get(status, 0) + 1
+    return {
+        "status": "TOKEN_LIFECYCLE_EVIDENCE_COVERAGE",
+        "mint_count": len(rows),
+        "status_counts": status_counts,
+        "tokens": rows[:1000],
+        "tokens_truncated": len(rows) > 1000,
+        "provider_gap_confirmed": False,
+        "token_inactivity_inferred": False,
+        "delisting_inferred": False,
+        "rug_pull_inferred": False,
+        "survivorship_bias_ruled_out": False,
+        "training_authorized": False,
+        "note": (
+            "A missing or stale snapshot is not proof of provider failure or token inactivity. "
+            "Migration is reported only from an explicit migration event. Refresh-task outcomes "
+            "are reported separately from token lifecycle. Multiple observed pools do not by "
+            "themselves prove a migration relationship."
+        ),
+    }
