@@ -202,53 +202,52 @@ def prepare_solana_training_rows(dataset_export: dict[str, Any]) -> dict[str, An
         if baseline_stamp is None or target_stamp is None or target_stamp <= baseline_stamp:
             reject("invalid_snapshot_pair_timestamps")
             continue
+        timestamp_mismatch = False
         for label_key, snapshot_stamp in (
             ("baseline_at", baseline_stamp), ("target_at", target_stamp),
         ):
             if label_key in label_body:
                 label_stamp = _timestamp(label_body.get(label_key))
                 if label_stamp is None or label_stamp != snapshot_stamp:
-                    reject("label_snapshot_timestamp_mismatch")
+                    timestamp_mismatch = True
                     break
-        else:
-            elapsed = (target_stamp - baseline_stamp).total_seconds()
-            if "actual_elapsed_seconds" in label_body:
-                reported_elapsed = label_body.get("actual_elapsed_seconds")
-                if (
-                    isinstance(reported_elapsed, bool)
-                    or not isinstance(reported_elapsed, (int, float))
-                    or not _is_finite_number(reported_elapsed)
-                    or abs(float(reported_elapsed) - elapsed) > 0.001
-                ):
-                    reject("label_elapsed_time_mismatch")
-                    continue
-            if elapsed < horizon:
-                reject("target_before_label_horizon")
-                continue
-            base_evidence = baseline.get("payload", {}).get("evidence")
-            target_evidence = target.get("payload", {}).get("evidence")
-            if isinstance(base_evidence, dict) and isinstance(target_evidence, dict):
-                base_price = base_evidence.get("price_usd")
-                target_price = target_evidence.get("price_usd")
-                if (
-                    isinstance(base_price, bool) or isinstance(target_price, bool)
-                    or not isinstance(base_price, (int, float))
-                    or not isinstance(target_price, (int, float))
-                    or not _is_finite_number(base_price)
-                    or not _is_finite_number(target_price)
-                    or base_price <= 0
-                ):
-                    reject("invalid_snapshot_prices")
-                    continue
-                recomputed_outcome = round((float(target_price) / float(base_price) - 1.0) * 100.0, 8)
-                if float(outcome) != recomputed_outcome:
-                    reject("label_outcome_snapshot_mismatch")
-                    continue
-        if label_key in label_body and (
-            _timestamp(label_body.get(label_key)) is None
-            or _timestamp(label_body.get(label_key)) != snapshot_stamp
-        ):
+        if timestamp_mismatch:
+            reject("label_snapshot_timestamp_mismatch")
             continue
+
+        elapsed = (target_stamp - baseline_stamp).total_seconds()
+        if "actual_elapsed_seconds" in label_body:
+            reported_elapsed = label_body.get("actual_elapsed_seconds")
+            if (
+                isinstance(reported_elapsed, bool)
+                or not isinstance(reported_elapsed, (int, float))
+                or not _is_finite_number(reported_elapsed)
+                or abs(float(reported_elapsed) - elapsed) > 0.001
+            ):
+                reject("label_elapsed_time_mismatch")
+                continue
+        if elapsed < horizon:
+            reject("target_before_label_horizon")
+            continue
+        base_evidence = baseline.get("payload", {}).get("evidence")
+        target_evidence = target.get("payload", {}).get("evidence")
+        if isinstance(base_evidence, dict) and isinstance(target_evidence, dict):
+            base_price = base_evidence.get("price_usd")
+            target_price = target_evidence.get("price_usd")
+            if (
+                isinstance(base_price, bool) or isinstance(target_price, bool)
+                or not isinstance(base_price, (int, float))
+                or not isinstance(target_price, (int, float))
+                or not _is_finite_number(base_price)
+                or not _is_finite_number(target_price)
+                or base_price <= 0
+            ):
+                reject("invalid_snapshot_prices")
+                continue
+            recomputed_outcome = round((float(target_price) / float(base_price) - 1.0) * 100.0, 8)
+            if float(outcome) != recomputed_outcome:
+                reject("label_outcome_snapshot_mismatch")
+                continue
         evidence = baseline.get("payload", {}).get("evidence")
         if not isinstance(evidence, dict):
             reject("missing_baseline_evidence")
