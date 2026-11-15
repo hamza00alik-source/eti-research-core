@@ -244,3 +244,6 @@ The research-only Solana lane includes a descriptive market-wide regime shock re
 
 
 Shock robustness also reports chronological recurrence and mint concentration. Qualifying buckets within a configurable separation window are grouped into descriptive event periods, separately by horizon. The report counts recurring mint appearances across those periods and the largest mint-period share. This grouping is not a test of statistically independent shocks: repeated mints, shared market exposures and correlated assets remain dependent. Recurrence does not establish predictability, causality, strategy performance or training eligibility.
+
+
+Chronological shock-period stability partitions UTC observations into fixed, configurable periods (default seven days) and reports shock-bucket rates, transition counts, distinct observed/transition mint coverage, and minimum coverage eligibility by horizon. Periods failing the configured bucket or mint thresholds are explicitly marked insufficient. These are descriptive partitions; repeated mints and adjacent periods are not assumed independent, and no predictive or training claim follows from apparent stability.
