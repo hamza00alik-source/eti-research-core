@@ -70,6 +70,9 @@ def _cluster_bootstrap_mean_interval(
     result: dict[str, Any] = {
         "method": "MINT_CLUSTER_BOOTSTRAP_PERCENTILE",
         "confidence_level": confidence_level,
+        "nominal_percentile_level": confidence_level,
+        "range_type": "BOOTSTRAP_PERCENTILE_RANGE_NOT_CONFIDENCE_INTERVAL",
+        "is_confidence_interval": False,
         "replicates": replicates,
         "seed": seed,
         "cluster_count": cluster_count,
@@ -208,9 +211,10 @@ def evaluate_solana_research_folds(
                 "cluster_count": 0,
             },
             "note": (
-                "Intervals are withheld below 20 distinct mint clusters. Even when "
-                "available, this exploratory bootstrap does not account for common "
-                "market shocks across mints or establish strategy significance."
+                "Percentile ranges are withheld below 20 distinct mint clusters. "
+                "They are not confidence intervals and make no coverage claim, even "
+                "when available; mint clustering does not account for common market "
+                "shocks across mints or establish strategy significance."
             ),
         },
         "excluded_validation_rows": excluded_rows,
