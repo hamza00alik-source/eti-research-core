@@ -358,3 +358,58 @@ def test_training_preparation_excludes_bad_labels_and_truncated_targets():
         "referenced_snapshot_not_in_export": 1,
         "label_reference_issues": 1,
     }
+
+
+def test_discovery_cohort_coverage_requires_explicit_event_task_snapshot_linkage():
+    from eti.solana_dataset import evaluate_solana_discovery_cohort_coverage
+
+    events = [
+        {"id": "event-1", "event_type": "new_token", "mint": "mint-a",
+         "received_at": "2026-01-01T00:00:00Z"},
+        {"id": "event-2", "event_type": "migration", "mint": "mint-b",
+         "received_at": "2026-01-01T00:00:00Z"},
+        {"id": "event-3", "event_type": "new_token", "mint": "mint-c",
+         "received_at": "2026-01-01T00:00:00Z"},
+    ]
+    tasks = [
+        {"id": "task-1", "status": "completed",
+         "input": {"source_event_id": "event-1"}},
+        {"id": "task-2", "status": "failed",
+         "input": {"source_event_id": "event-2"}},
+    ]
+    snapshots = [
+        {"id": "snapshot-1", "task_id": "task-1", "mint": "mint-a",
+         "capability": "solana.market.scan", "fetched_at": "2026-01-01T00:01:00Z"},
+        # Same mint and later timestamp, but unrelated task: must not count.
+        {"id": "snapshot-unlinked", "task_id": "other-task", "mint": "mint-c",
+         "capability": "solana.market.scan", "fetched_at": "2026-01-01T00:02:00Z"},
+    ]
+    report = evaluate_solana_discovery_cohort_coverage(events, snapshots, tasks)
+    new_token = report["by_event_type"]["new_token"]
+    migration = report["by_event_type"]["migration"]
+    assert new_token["event_count"] == 2
+    assert new_token["scan_snapshot_recorded_event_count"] == 1
+    assert new_token["scan_snapshot_event_coverage_rate"] == 0.5
+    assert migration["failed_task_without_snapshot_event_count"] == 1
+    statuses = {row["event_id"]: row["coverage_status"] for row in report["event_rows"]}
+    assert statuses == {
+        "event-1": "SCAN_SNAPSHOT_RECORDED",
+        "event-2": "SCAN_TASK_FAILED_NO_SNAPSHOT",
+        "event-3": "NO_LINKED_SCAN_TASK",
+    }
+    assert report["survivorship_bias_ruled_out"] is False
+    assert report["training_authorized"] is False
+
+
+def test_discovery_cohort_coverage_marks_pending_and_rejects_bad_inputs():
+    from eti.solana_dataset import evaluate_solana_discovery_cohort_coverage
+
+    report = evaluate_solana_discovery_cohort_coverage(
+        [{"id": "e", "event_type": "new_token", "mint": "m",
+          "received_at": "2026-01-01T00:00:00Z"}],
+        [],
+        [{"id": "t", "status": "queued", "input_json": '{"source_event_id":"e"}'}],
+    )
+    assert report["event_rows"][0]["coverage_status"] == "SCAN_TASK_PENDING_OR_NO_RESULT"
+    with pytest.raises(ValueError):
+        evaluate_solana_discovery_cohort_coverage([], {}, [])
