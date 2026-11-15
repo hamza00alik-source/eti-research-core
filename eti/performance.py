@@ -9,6 +9,7 @@ import pandas as pd
 from sklearn.metrics import balanced_accuracy_score, confusion_matrix, precision_recall_fscore_support
 
 from .backtest import backtest_positions
+from .funding import funding_cost_series
 
 
 def _finite_nonnegative(value: float, name: str) -> float:
@@ -55,17 +56,23 @@ def _trade_statistics(position: pd.Series, bar_returns: pd.Series) -> dict[str, 
 
 def _strategy_metrics(close: pd.Series, signals: pd.Series, fee_bps: float,
                       slippage_bps: float, funding_bps_per_bar: float,
+                      funding_events: list[dict] | None,
                       allow_short: bool, bars_per_year: float) -> dict[str, Any]:
     result = backtest_positions(
         close, signals, fee_bps=fee_bps, slippage_bps=slippage_bps,
-        funding_bps_per_bar=funding_bps_per_bar, allow_short=allow_short,
+        funding_bps_per_bar=funding_bps_per_bar, funding_events=funding_events,
+        allow_short=allow_short,
     )
     equity = result.pop("equity_curve")
     position = signals.astype(float).shift(1).fillna(0.0)
     returns = close.astype(float).pct_change().fillna(0.0)
     turnover = position.diff().abs().fillna(position.abs())
     cost = (fee_bps + slippage_bps) / 10000.0
-    bar_returns = position * returns - turnover * cost - position * funding_bps_per_bar / 10000.0
+    if funding_events and funding_bps_per_bar != 0:
+        raise ValueError("Use either event-timed funding or legacy per-bar funding, not both")
+    bar_returns = (position * returns - turnover * cost
+                   - position * funding_bps_per_bar / 10000.0
+                   - funding_cost_series(position, funding_events))
     std = float(bar_returns.std(ddof=1))
     result["sharpe_annualized"] = float(bar_returns.mean() / std * math.sqrt(bars_per_year)) if std > 0 else 0.0
     result["sortino_annualized"] = float(
@@ -87,6 +94,7 @@ def evaluate_predictions(
     fee_bps: float = 6.0,
     slippage_bps: float = 2.0,
     funding_bps_per_bar: float = 0.0,
+    funding_events: list[dict] | None = None,
     allow_short: bool = True,
     bars_per_year: float = 365.25 * 24,
 ) -> dict[str, Any]:
@@ -135,16 +143,16 @@ def evaluate_predictions(
         actual_positions = actual_positions.clip(lower=0)
     strategy = _strategy_metrics(
         close_series, predicted_positions, fee_bps, slippage_bps,
-        funding_bps_per_bar, allow_short, float(bars_per_year),
+        funding_bps_per_bar, funding_events, allow_short, float(bars_per_year),
     )
     long_short_strategy = _strategy_metrics(
         close_series, prediction_series.astype(float) - 1.0,
-        fee_bps, slippage_bps, funding_bps_per_bar, True,
+        fee_bps, slippage_bps, funding_bps_per_bar, funding_events, True,
         float(bars_per_year),
     )
     buy_hold = _strategy_metrics(
         close_series, pd.Series(1.0, index=close_series.index), fee_bps,
-        slippage_bps, funding_bps_per_bar, False, float(bars_per_year),
+        slippage_bps, funding_bps_per_bar, funding_events, False, float(bars_per_year),
     )
     no_trade = _strategy_metrics(
         close_series, pd.Series(0.0, index=close_series.index), fee_bps,
@@ -152,7 +160,7 @@ def evaluate_predictions(
     )
     actual_oracle = _strategy_metrics(
         close_series, actual_positions, fee_bps, slippage_bps,
-        funding_bps_per_bar, allow_short, float(bars_per_year),
+        funding_bps_per_bar, funding_events, allow_short, float(bars_per_year),
     )
     return {
         "classification": {
