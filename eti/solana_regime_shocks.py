@@ -65,21 +65,21 @@ def evaluate_solana_market_wide_regime_shocks(
             continue
         grouped[(mint.strip(), pool.strip(), str(horizon).strip())].append((stamp, regime.strip()))
 
-    bucket_events: dict[int, dict[str, Any]] = defaultdict(
+    bucket_events: dict[tuple[int, str], dict[str, Any]] = defaultdict(
         lambda: {"transition_count": 0, "mints": set(), "transition_types": defaultdict(int)}
     )
-    observed_bucket_mints: dict[int, set[str]] = defaultdict(set)
+    observed_bucket_mints: dict[tuple[int, str], set[str]] = defaultdict(set)
     excluded_conflict_timestamp_count = 0
     eligible_group_count = 0
 
-    for (mint, _pool, _horizon), observations in grouped.items():
+    for (mint, _pool, horizon), observations in grouped.items():
         by_time: dict[datetime, set[str]] = defaultdict(set)
         for stamp, regime in observations:
             by_time[stamp].add(regime)
         ordered = sorted(by_time.items())
         eligible_group_count += 1
         for stamp, regimes in ordered:
-            bucket = int(stamp.timestamp()) // bucket_seconds * bucket_seconds
+            bucket = (int(stamp.timestamp()) // bucket_seconds * bucket_seconds, horizon)
             observed_bucket_mints[bucket].add(mint)
             if len(regimes) > 1:
                 excluded_conflict_timestamp_count += 1
@@ -95,19 +95,20 @@ def evaluate_solana_market_wide_regime_shocks(
             current_regime = next(iter(current_regimes))
             if previous_regime == current_regime:
                 continue
-            bucket = int(current_stamp.timestamp()) // bucket_seconds * bucket_seconds
+            bucket = (int(current_stamp.timestamp()) // bucket_seconds * bucket_seconds, horizon)
             event = bucket_events[bucket]
             event["transition_count"] += 1
             event["mints"].add(mint)
             event["transition_types"][f"{previous_regime}->{current_regime}"] += 1
 
     buckets = []
-    for bucket in sorted(set(observed_bucket_mints) | set(bucket_events)):
-        event = bucket_events[bucket]
-        observed_mints = observed_bucket_mints[bucket]
+    for bucket, horizon in sorted(set(observed_bucket_mints) | set(bucket_events)):
+        event = bucket_events[(bucket, horizon)]
+        observed_mints = observed_bucket_mints[(bucket, horizon)]
         changed_mints = event["mints"]
         transition_count = event["transition_count"]
         buckets.append({
+            "horizon_seconds": horizon,
             "bucket_start": datetime.fromtimestamp(bucket, tz=timezone.utc).isoformat(),
             "observed_mint_count": len(observed_mints),
             "transition_mint_count": len(changed_mints),
