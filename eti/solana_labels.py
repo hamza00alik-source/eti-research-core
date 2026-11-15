@@ -75,7 +75,7 @@ def build_forward_labels(
     for item in eligible_snapshots:
         if not isinstance(item, dict) or item.get("capability") != "solana.market.scan":
             continue
-        if isinstance(item.get("id"), str) and item["id"] in ambiguous_ids:
+        if not isinstance(item.get("id"), str) or not item["id"] or item["id"] in ambiguous_ids:
             continue
         mint, pool = item.get("mint"), item.get("pool_address")
         observed = _timestamp(item.get("fetched_at"))
@@ -276,3 +276,113 @@ def chronological_walk_forward_splits(
     if not folds:
         raise ValueError("purging and embargo left no usable walk-forward folds")
     return folds
+
+
+
+def evaluate_forward_label_coverage(
+    snapshots: Iterable[dict[str, Any]],
+    labels: Iterable[dict[str, Any]],
+    *,
+    now: datetime | None = None,
+    horizons_seconds: tuple[int, ...] = DEFAULT_HORIZONS_SECONDS,
+) -> dict[str, Any]:
+    """Quantify forward-label coverage without treating absent samples as failures.
+
+    Each valid, uniquely identified market-scan snapshot is one candidate
+    baseline per requested horizon. A baseline is either not yet mature,
+    mature with a future target, or mature without a target in the observed
+    export by the supplied cutoff. This is descriptive coverage, not provider
+    uptime, token inactivity, or a training-readiness decision.
+    """
+    if now is None:
+        current = datetime.now(timezone.utc)
+    elif now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    else:
+        current = now.astimezone(timezone.utc)
+    if any(isinstance(h, bool) or not isinstance(h, int) or h <= 0 for h in horizons_seconds):
+        raise ValueError("horizons_seconds must contain positive integers")
+
+    rows = list(snapshots)
+    counts: dict[str, int] = {}
+    for row in rows:
+        if isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"]:
+            counts[row["id"]] = counts.get(row["id"], 0) + 1
+    ambiguous_ids = {key for key, count in counts.items() if count > 1}
+    groups: dict[tuple[str, str], list[tuple[datetime, dict[str, Any]]]] = {}
+    invalid_or_ambiguous = 0
+    for row in rows:
+        if not isinstance(row, dict) or row.get("capability") != "solana.market.scan":
+            continue
+        snapshot_id = row.get("id")
+        mint, pool = row.get("mint"), row.get("pool_address")
+        stamp = _timestamp(row.get("fetched_at"))
+        if (not isinstance(snapshot_id, str) or not snapshot_id
+                or snapshot_id in ambiguous_ids
+                or not isinstance(mint, str) or not mint
+                or not isinstance(pool, str) or not pool or stamp is None
+                or not isinstance(row.get("payload"), dict)):
+            invalid_or_ambiguous += 1
+            continue
+        groups.setdefault((mint, pool), []).append((stamp, row))
+    for observations in groups.values():
+        observations.sort(key=lambda pair: (pair[0], pair[1]["id"]))
+
+    label_keys = {
+        (row.get("baseline_snapshot_id"), row.get("horizon_seconds"))
+        for row in labels if isinstance(row, dict)
+    }
+    by_horizon: dict[str, Any] = {}
+    for horizon in horizons_seconds:
+        eligible = mature = immature = with_target = without_target = labelled = 0
+        missing_price = 0
+        for observations in groups.values():
+            for index, (base_time, base) in enumerate(observations):
+                eligible += 1
+                due = base_time.timestamp() + horizon
+                if current.timestamp() < due:
+                    immature += 1
+                    continue
+                mature += 1
+                target = next(
+                    ((stamp, row) for stamp, row in observations[index + 1:]
+                     if stamp.timestamp() >= due and stamp <= current),
+                    None,
+                )
+                if target is None:
+                    without_target += 1
+                    continue
+                with_target += 1
+                if (base["id"], horizon) in label_keys:
+                    labelled += 1
+                    evidence = (target[1].get("payload") or {}).get("evidence", {})
+                    if not isinstance(evidence, dict) or _finite_positive(evidence.get("price_usd")) is None:
+                        missing_price += 1
+        by_horizon[str(horizon)] = {
+            "eligible_baseline_count": eligible,
+            "not_yet_mature_count": immature,
+            "mature_baseline_count": mature,
+            "mature_with_future_target_count": with_target,
+            "mature_without_future_target_count": without_target,
+            "label_record_count": labelled,
+            "label_missing_target_price_count": missing_price,
+            "target_coverage_rate_among_mature": (
+                round(with_target / mature, 6) if mature else None
+            ),
+            "label_record_rate_among_mature": (
+                round(labelled / mature, 6) if mature else None
+            ),
+        }
+    return {
+        "status": "FORWARD_LABEL_COVERAGE_DIAGNOSTICS",
+        "cutoff_at": current.isoformat().replace("+00:00", "Z"),
+        "ambiguous_or_invalid_snapshot_count": invalid_or_ambiguous,
+        "by_horizon_seconds": by_horizon,
+        "provider_gap_confirmed": False,
+        "token_inactivity_inferred": False,
+        "training_authorized": False,
+        "interpretation": (
+            "A mature baseline without a future target means no qualifying target "
+            "was present in this observed export by the cutoff; the reason is unknown."
+        ),
+    }
