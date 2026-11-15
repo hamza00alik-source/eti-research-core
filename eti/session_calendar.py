@@ -151,6 +151,11 @@ def session_quality(
     observed = list(timestamps)
     if not observed:
         raise ValueError("timestamps cannot be empty")
+    if any(
+        stamp.tzinfo is None or stamp.utcoffset() is None
+        for stamp in observed
+    ):
+        raise ValueError("all observed timestamps must be timezone-aware")
     start, end = observed[0], observed[-1]
     expected = calendar.expected_bar_timestamps(start, end, timeframe)
     observed_utc = {
