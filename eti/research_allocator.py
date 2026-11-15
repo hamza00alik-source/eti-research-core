@@ -186,7 +186,7 @@ def allocate_research_budget(
         for row in selected
     }
     for row in ranked:
-        if (row["instrument"].get("venue"), row["instrument"].get("symbol")) not in selected_keys:
+        if (row["instrument"].get("venue"), row["instrument"].get("market_type"), row["instrument"].get("symbol")) not in selected_keys:
             row["research_priority_rank"] = None
             row["allocated_model_fit_calls"] = 0
             row["training_authorized"] = False

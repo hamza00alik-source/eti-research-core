@@ -40,6 +40,8 @@ def allocation(eligible=True):
                 "supports_short": False, "supports_funding": False,
             },
             "economic_evaluation_eligible": eligible,
+            "provenance": {"requested_rows": 1000, "timeframe": "1h"},
+            "quality": {"rows": 1000, "ohlcv_validated": True, "timestamp_order": "ascending", "last_candle_age_seconds": 100, "missing_interval_estimate": 0, "max_gap_seconds": 3600},
             "transaction_cost_model_status": "validated" if eligible else "unknown",
             "training_authorized": False,
             "eligibility_reasons": [] if eligible else ["transaction_cost_model_not_validated"],
@@ -49,9 +51,11 @@ def allocation(eligible=True):
 
 def scan():
     return {
-        "scan_only": True,
+        "scan_only": True, "execution_enabled": False,
         "candidates": [{
             "status": "data_ready",
+            "provenance": {"requested_rows": 1000, "timeframe": "1h"},
+            "quality": {"rows": 1000, "ohlcv_validated": True, "timestamp_order": "ascending", "last_candle_age_seconds": 100, "missing_interval_estimate": 0, "max_gap_seconds": 3600},
             "instrument": {"venue": "kraken", "symbol": "BTC/USD", "market_type": "spot", "contract_multiplier": 1.0, "active": True, "supports_short": False, "supports_funding": False, "asset_class": "crypto"},
         }],
         "config": {
@@ -141,3 +145,10 @@ def test_runner_rejects_inactive_instrument():
         run_approved_multi_market_research(
             inactive_scan, inactive_allocation, approval(), hub=FakeHub()
         )
+
+
+def test_runner_rejects_modified_scan_quality_in_allocation():
+    altered = allocation()
+    altered["candidates"][0]["quality"]["last_candle_age_seconds"] = 0
+    with pytest.raises(ValueError, match="provenance/quality differs"):
+        run_approved_multi_market_research(scan(), altered, approval(), hub=FakeHub())
