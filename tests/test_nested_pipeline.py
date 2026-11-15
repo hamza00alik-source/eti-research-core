@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 import eti.pipeline as pipeline
 
@@ -32,6 +33,8 @@ def test_nested_training_pipeline_orchestrates_market_folds(monkeypatch):
         test_size=25, step_size=25)
     assert result["training_performed"] is True
     assert result["fold_count"] > 0
+    assert result["annualization"]["method"] == "observed_usable_bars_per_calendar_year"
+    assert result["annualization"]["bars_per_year"] == pytest.approx(365.25 * 24, rel=0.02)
     assert "hist_gradient_boosting" in result["folds"][0]["validation_scores"]
     assert "candidate_summary" in result
     assert "hist_gradient_boosting" in result["candidate_summary"]
@@ -43,3 +46,18 @@ def test_nested_training_pipeline_orchestrates_market_folds(monkeypatch):
         and "mean_max_drawdown" in item
         for item in scenarios
     )
+
+
+def test_observed_annualization_accounts_for_weekends_and_market_sessions():
+    timestamps = []
+    for day in pd.bdate_range("2024-01-01", periods=30):
+        for hour in range(10, 16):
+            timestamps.append(day + pd.Timedelta(hours=hour))
+    frame = pd.DataFrame({"timestamp": pd.to_datetime(timestamps, utc=True)})
+    dataset = pd.DataFrame(index=range(len(frame)))
+    bars_per_year, details = pipeline._estimate_observed_bars_per_year(frame, dataset)
+    continuous_hourly = 365.25 * 24
+    assert 1000 < bars_per_year < 2200
+    assert bars_per_year < continuous_hourly * 0.25
+    assert details["usable_rows"] == len(frame)
+    assert details["warning"].startswith("Sample-rate estimate")
