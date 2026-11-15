@@ -13,6 +13,7 @@ from .instruments import InstrumentSpec
 from .market_data_hub import MarketDataHub, build_public_market_hub
 from .pipeline import estimate_nested_model_fits_from_rows, run_nested_experiment
 from .research_allocator import MAX_DAILY_USD, MAX_MONTHLY_USD
+from .transaction_costs import validate_transaction_cost_model
 
 
 def _number(name: str, value: Any, *, positive: bool = False) -> float:
@@ -147,9 +148,23 @@ def run_approved_multi_market_research(
             raise ValueError(f"{key} has an unexpected allocator authorization state")
         if not isinstance(cost, dict):
             raise ValueError(f"Missing explicit cost assumptions for {key}")
+        evidence_model = allocated.get("transaction_cost_model")
+        validated_model = validate_transaction_cost_model(evidence_model, identity=key)
         fee = _number(f"{key}.fee_bps", cost.get("fee_bps"))
-        slippage = _number(f"{key}.slippage_bps", cost.get("slippage_bps"))
+        slippage_component = _number(f"{key}.slippage_bps", cost.get("slippage_bps"))
+        spread = _number(f"{key}.spread_bps", cost.get("spread_bps"))
+        market_impact = _number(f"{key}.market_impact_bps", cost.get("market_impact_bps"))
         funding = _number(f"{key}.funding_bps_per_bar", cost.get("funding_bps_per_bar"))
+        if _number(f"{key}.borrow_bps_per_bar", cost.get("borrow_bps_per_bar")) != 0:
+            raise ValueError(f"{key} borrow cost is not yet supported by the evaluator")
+        expected = {
+            "fee_bps": fee, "slippage_bps": slippage_component,
+            "spread_bps": spread, "market_impact_bps": market_impact,
+            "funding_bps_per_bar": funding,
+        }
+        for field, value in expected.items():
+            if not math.isclose(validated_model[field], value, rel_tol=0, abs_tol=1e-9):
+                raise ValueError(f"{key} approval {field} does not match validated evidence")
         allow_short = cost.get("allow_short", False)
         if not isinstance(allow_short, bool):
             raise ValueError(f"{key}.allow_short must be boolean")
@@ -177,8 +192,10 @@ def run_approved_multi_market_research(
         prepared.append({
             "key": key, "instrument": instrument, "frame": frame,
             "provenance": snapshot.provenance, "quality": snapshot.quality,
-            "fit_calls": fit_calls, "fee_bps": fee, "slippage_bps": slippage,
+            "fit_calls": fit_calls, "fee_bps": fee,
+            "slippage_bps": slippage_component + spread / 2.0 + market_impact,
             "funding_bps_per_bar": funding, "allow_short": allow_short,
+            "transaction_cost_model": validated_model,
         })
 
     total_fits = sum(item["fit_calls"] for item in prepared)
@@ -203,6 +220,7 @@ def run_approved_multi_market_research(
             results[item["key"]] = {
                 "status": "evaluated", "instrument": item["instrument"].__dict__,
                 "provenance": item["provenance"], "quality": item["quality"],
+                "transaction_cost_model": item["transaction_cost_model"],
                 "fit_calls": item["fit_calls"], "report": report,
             }
         except Exception as exc:
