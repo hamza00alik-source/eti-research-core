@@ -225,3 +225,29 @@ def test_group_split_purges_entire_mint_when_one_pool_label_crosses_boundary():
     assert split["purged_group_count"] >= 1
     assert all(row["target_at"] < split["boundary_at"] for row in split["train"])
     assert all(row["baseline_at"] >= split["validation_start_at"] for row in split["validation"])
+
+
+
+def test_forward_labels_exclude_all_rows_with_ambiguous_duplicate_snapshot_ids():
+    rows = [
+        _snapshot("duplicate", "2026-01-01T00:00:00Z", 1.0),
+        _snapshot("duplicate", "2026-01-01T00:06:00Z", 2.0),
+        _snapshot("unique", "2026-01-01T00:12:00Z", 3.0),
+    ]
+    labels = build_forward_labels(
+        rows, now=datetime(2026, 1, 1, 0, 20, tzinfo=timezone.utc),
+        horizons_seconds=(300,),
+    )
+    assert labels == []
+
+
+def test_forward_labels_are_invariant_to_input_order_for_unique_snapshot_ids():
+    rows = [
+        _snapshot("base", "2026-01-01T00:00:00Z", 1.0),
+        _snapshot("middle", "2026-01-01T00:03:00Z", 1.1),
+        _snapshot("target", "2026-01-01T00:06:00Z", 1.2),
+    ]
+    now = datetime(2026, 1, 1, 0, 20, tzinfo=timezone.utc)
+    forward = build_forward_labels(rows, now=now, horizons_seconds=(300,))
+    reversed_rows = build_forward_labels(list(reversed(rows)), now=now, horizons_seconds=(300,))
+    assert forward == reversed_rows
