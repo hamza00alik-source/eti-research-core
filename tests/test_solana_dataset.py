@@ -624,6 +624,9 @@ def test_dataset_report_includes_full_workspace_forward_label_coverage(tmp_path)
              "base-1", "target-1", 300, '{"sampled_price_return_pct":0}',
              now.isoformat().replace("+00:00", "Z")),
         )
+    bounded = store.export_solana_research_dataset("owner", workspace["id"], limit=1)
+    assert bounded["truncated_at_limit"] is True
+    assert bounded["snapshot_count"] == 1
     report = store.get_solana_research_dataset_report("owner", workspace["id"])
     coverage = report["forward_label_coverage"]
     horizon = coverage["by_horizon_seconds"]["300"]
