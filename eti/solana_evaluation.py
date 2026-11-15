@@ -992,6 +992,7 @@ def evaluate_solana_regime_robustness(
     from eti.solana_regime_shocks import (
         evaluate_solana_market_wide_regime_shocks,
         evaluate_solana_shock_recurrence,
+        evaluate_solana_shock_period_stability,
     )
 
     reports: dict[str, dict[str, Any]] = {}
@@ -1015,6 +1016,10 @@ def evaluate_solana_regime_robustness(
         name: evaluate_solana_shock_recurrence(shock_report)
         for name, shock_report in market_wide_shocks.items()
     }
+    shock_period_stability = {
+        name: evaluate_solana_shock_period_stability(shock_report)
+        for name, shock_report in market_wide_shocks.items()
+    }
     sensitivity = evaluate_solana_regime_sampling_sensitivity(reports)
     return {
         "status": "MULTI_CONFIGURATION_REGIME_ROBUSTNESS_DIAGNOSTICS_ONLY",
@@ -1024,6 +1029,7 @@ def evaluate_solana_regime_robustness(
         "persistence_by_configuration": persistence,
         "market_wide_shocks_by_configuration": market_wide_shocks,
         "shock_recurrence_by_configuration": shock_recurrence,
+        "shock_period_stability_by_configuration": shock_period_stability,
         "training_authorized": False,
         "model_fitting_performed": False,
         "limitations": [
