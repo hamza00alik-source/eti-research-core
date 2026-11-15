@@ -119,12 +119,12 @@ def test_solana_provider_observation_ledger_is_authenticated_scoped_and_minimal(
             f"/v1/workspaces/{workspace_id}/solana/provider-observations",
             headers=headers_a, json=plain_url_endpoint,
         ).status_code == 422
-        error_payload = {**payload, "status": "error", "error_code": "HTTP_429"}
+        error_payload = {**payload, "provider": "solana-rpc", "status": "error", "error_code": "HTTP_429"}
         assert client.post(
             f"/v1/workspaces/{workspace_id}/solana/provider-observations",
             headers=headers_a, json=error_payload,
         ).status_code == 201
-        bad_error = {**payload, "status": "error", "error_code": "Authorization: Bearer secret"}
+        bad_error = {**payload, "provider": "solana-rpc", "status": "error", "error_code": "Authorization: Bearer secret"}
         assert client.post(
             f"/v1/workspaces/{workspace_id}/solana/provider-observations",
             headers=headers_a, json=bad_error,
@@ -134,8 +134,8 @@ def test_solana_provider_observation_ledger_is_authenticated_scoped_and_minimal(
         # damaged evidence, but it must not influence provider-health status.
         with sqlite3.connect(tmp_path / "provider-observations.sqlite3") as conn:
             conn.execute(
-                "UPDATE solana_provider_observations SET latency_ms=? WHERE provider=?",
-                (999999.0, "dexscreener"),
+                "UPDATE solana_provider_observations SET latency_ms=? WHERE provider=? AND status=?",
+                (999999.0, "dexscreener", "success"),
             )
         after_tamper = client.get(
             f"/v1/workspaces/{workspace_id}/solana/provider-observations",
@@ -143,7 +143,9 @@ def test_solana_provider_observation_ledger_is_authenticated_scoped_and_minimal(
         )
         assert after_tamper.status_code == 200
         assert after_tamper.json()["items"][0]["integrity_valid"] is False
-        assert after_tamper.json()["health"]["provider_count"] == 0
+        assert after_tamper.json()["health"]["provider_count"] == 1
+        assert after_tamper.json()["health"]["providers"][0]["provider"] == "solana-rpc"
+        assert after_tamper.json()["health"]["providers"][0]["status"] == "DEGRADED"
         assert after_tamper.json()["health"]["invalid_observation_count"] == 1
 
 
