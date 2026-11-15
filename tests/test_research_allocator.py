@@ -106,3 +106,17 @@ def test_allocator_cost_models_are_scoped_by_market_type():
     rows = {row["instrument"]["market_type"]: row for row in result["candidates"]}
     assert rows["spot"]["economic_evaluation_eligible"] is True
     assert rows["swap"]["economic_evaluation_eligible"] is False
+
+
+def test_selected_candidate_identity_includes_market_type():
+    spot = candidate("BTC/USD", venue="kraken")
+    swap = candidate("BTC/USD", venue="kraken")
+    swap["instrument"]["market_type"] = "swap"
+    result = allocate_research_budget(
+        scan(spot, swap), max_model_fit_calls=2, fits_per_candidate=2,
+        max_candidates=2, cost_model_status={},
+    )
+    rows = {row["instrument"]["market_type"]: row for row in result["candidates"]}
+    assert rows["spot"]["research_priority_rank"] == 1
+    assert rows["swap"]["research_priority_rank"] is None
+    assert rows["swap"]["training_block_reason"] == "not_selected_within_research_budget"
