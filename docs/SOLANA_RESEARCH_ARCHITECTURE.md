@@ -608,3 +608,19 @@ truthfulness of the source measurements and never authorizes trading.
 The callback is an explicit integration seam, not an implicit global storage connection. The durable `AgentWorker` binds it to `Storage.record_solana_provider_observation(owner_id, workspace_id, **sample)` using the owner and workspace from the claimed durable task, never from untrusted capability input. Each task therefore writes only to its authenticated owner/workspace ledger. The adapters themselves do not infer identity, create credentials, or persist observations. Direct client use outside the worker remains uninstrumented unless the caller supplies a trusted callback.
 
 The separate `PumpPortalStream` also accepts an optional observation callback. It records a successful WebSocket connection with measured connection latency or a failed connection attempt with only a sanitized exception class. It does not emit one observation per message, and does not include the WebSocket URL, API key, event payload, mint or transaction signature. `PumpPortalIngestor` binds this callback to its explicitly configured owner/workspace and the same durable observation ledger. This process-level scope is separate from the durable agent worker's claimed-task identity; operators must configure the ingestor for the intended owner and workspace. Telemetry persistence remains best-effort and cannot interrupt stream ingestion. These observations describe connection attempts, not continuous stream uptime or message-delivery completeness.
+
+
+### Prepared-label snapshot integrity
+
+Before a label enters the preparation matrix, the preparation helper binds its
+baseline and target timestamps to the exact referenced market-scan snapshots.
+When present in the stored label, `baseline_at` and `target_at` must match the
+snapshot `fetched_at` values, and `actual_elapsed_seconds` must match the
+snapshot-time difference. The target must be at or beyond the requested
+horizon. The sampled price return is independently recomputed from the two
+referenced snapshot prices and must match the stored label outcome. Mismatches
+are excluded with explicit reason counts. This is an integrity check over the
+exported evidence, not proof that provider marks are executable prices or that
+the requested horizon was sampled exactly. Older hand-built exports without
+the optional label timing fields retain compatibility, but still undergo
+snapshot-time, horizon and outcome checks.
