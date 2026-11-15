@@ -74,8 +74,7 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
             "mint": f"mint-{index}",
             "pool_address": f"pool-{index}",
             "baseline_at": stamp,
-            "target_at": f"2026-01-{day:02d}T01:30:00Z",
-            "actual_elapsed_seconds": 5400.0,
+            "target_at": f"2026-01-{1 + index * 2 if index < 7 else 13:02d}T01:00:00Z",
             "horizon_seconds": 3600,
             "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
             "target_sampled_price_return_pct": 3.0,
@@ -336,7 +335,8 @@ def test_walk_forward_cost_evidence_rejects_cross_label_identity_reuse():
         })
         prepared.append({
             "label_id": label_id, "mint": f"identity-mint-{index}",
-            "pool_address": f"identity-pool-{index}", "horizon_seconds": 3600,
+            "pool_address": f"identity-pool-{index}", "baseline_at": stamp,
+            "target_at": f"2026-01-{day:02d}T01:00:00Z", "horizon_seconds": 3600,
             "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
             "target_sampled_price_return_pct": 5.0,
         })
