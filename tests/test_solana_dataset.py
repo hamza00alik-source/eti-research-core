@@ -413,3 +413,59 @@ def test_discovery_cohort_coverage_marks_pending_and_rejects_bad_inputs():
     assert report["event_rows"][0]["coverage_status"] == "SCAN_TASK_PENDING_OR_NO_RESULT"
     with pytest.raises(ValueError):
         evaluate_solana_discovery_cohort_coverage([], {}, [])
+
+
+def test_token_lifecycle_coverage_separates_migration_scan_and_refresh_evidence():
+    from eti.solana_dataset import evaluate_solana_token_lifecycle_coverage
+
+    events = [
+        {"id": "e1", "mint": "mint-a", "event_type": "new_token"},
+        {"id": "e2", "mint": "mint-a", "event_type": "migration"},
+        {"id": "e3", "mint": "mint-b", "event_type": "new_token"},
+        {"id": "e4", "mint": "mint-c", "event_type": "new_token"},
+    ]
+    snapshots = [
+        {"id": "s1", "mint": "mint-a", "pool_address": "pool-old",
+         "capability": "solana.market.scan", "fetched_at": "2026-01-01T00:00:00Z"},
+        {"id": "s2", "mint": "mint-a", "pool_address": "pool-new",
+         "capability": "solana.market.scan", "fetched_at": "2026-01-01T00:10:00Z"},
+        {"id": "s3", "mint": "mint-b", "pool_address": "pool-b",
+         "capability": "solana.token.audit", "fetched_at": "2026-01-01T00:05:00Z"},
+    ]
+    tasks = [
+        {"id": "task-failed", "status": "failed",
+         "input": {"refresh_job_id": "job-b", "mint": "mint-b"}},
+        {"id": "task-complete", "status": "completed",
+         "input": {"refresh_job_id": "job-c", "mint": "mint-c"}},
+    ]
+    jobs = [
+        {"id": "job-b", "mint": "mint-b", "pool_address": "pool-b",
+         "enabled": True, "interval_seconds": 300},
+        {"id": "job-c", "mint": "mint-c", "pool_address": "pool-c",
+         "enabled": True, "interval_seconds": 300},
+        {"id": "job-d", "mint": "mint-d", "pool_address": "pool-d",
+         "enabled": True, "interval_seconds": 300},
+    ]
+    report = evaluate_solana_token_lifecycle_coverage(events, snapshots, tasks, jobs)
+    by_mint = {row["mint"]: row for row in report["tokens"]}
+    assert by_mint["mint-a"]["lifecycle_evidence_status"] == "MIGRATION_EVENT_OBSERVED"
+    assert by_mint["mint-a"]["distinct_observed_pool_count"] == 2
+    assert by_mint["mint-b"]["lifecycle_evidence_status"] == "REFRESH_FAILURE_EVIDENCE"
+    assert by_mint["mint-b"]["refresh_jobs"][0]["status"] == "REFRESH_TASK_FAILED_NO_SNAPSHOT"
+    assert by_mint["mint-c"]["refresh_jobs"][0]["status"] == "COMPLETED_TASK_NO_SNAPSHOT_UNRESOLVED"
+    assert by_mint["mint-d"]["refresh_jobs"][0]["status"] == "REFRESH_SCHEDULED_NO_TASK_EVIDENCE"
+    assert report["provider_gap_confirmed"] is False
+    assert report["token_inactivity_inferred"] is False
+    assert report["rug_pull_inferred"] is False
+    assert report["training_authorized"] is False
+
+
+def test_token_lifecycle_coverage_rejects_non_list_inputs_and_does_not_infer_inactivity():
+    from eti.solana_dataset import evaluate_solana_token_lifecycle_coverage
+
+    report = evaluate_solana_token_lifecycle_coverage(
+        [{"mint": "mint-x", "event_type": "new_token"}], [], [], []
+    )
+    assert report["tokens"][0]["lifecycle_evidence_status"] == "DISCOVERED_NO_MARKET_SCAN_EVIDENCE"
+    with pytest.raises(ValueError):
+        evaluate_solana_token_lifecycle_coverage([], [], {}, [])
