@@ -247,3 +247,6 @@ Shock robustness also reports chronological recurrence and mint concentration. Q
 
 
 Chronological shock-period stability partitions UTC observations into fixed, configurable periods (default seven days) and reports shock-bucket rates, transition counts, distinct observed/transition mint coverage, and minimum coverage eligibility by horizon. Periods failing the configured bucket or mint thresholds are explicitly marked insufficient. These are descriptive partitions; repeated mints and adjacent periods are not assumed independent, and no predictive or training claim follows from apparent stability.
+
+
+Discovery-cohort coverage is available at `GET /v1/workspaces/{workspace_id}/solana/discovery-coverage`. It joins PumpPortal discovery events to their explicitly linked agent-task IDs and later market-scan snapshots. The report separates recorded scans, explicit failed tasks, pending/unresolved tasks and events without a linked task. It never infers rug pulls, inactivity, disappearance or token failure from missing observations. The endpoint is owner/workspace scoped and bounded to the latest requested records (maximum 500 per ledger); it flags potentially incomplete inputs when a source reaches its limit. Coverage diagnostics do not establish that survivorship bias has been eliminated.
