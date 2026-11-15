@@ -82,7 +82,7 @@ def test_evidence_cannot_claim_unknown_or_duplicate_cost_fields():
     value["evidence"][0]["covers"] = [
         "fee_bps", "spread_bps", "slippage_bps", "market_impact_bps",
         "funding_bps_per_bar", "borrow_bps_per_bar", "contract_multiplier",
-        "maker_fee_bps",
+        "fee_basis", "maker_fee_bps",
     ]
     with pytest.raises(ValueError, match="unsupported"):
         validate_transaction_cost_model(
