@@ -72,7 +72,7 @@ def build_forward_labels(
     # Ambiguous IDs cannot safely serve as persisted label references. Exclude
     # every occurrence rather than letting ordering choose one silently.
     ambiguous_ids = {snapshot_id for snapshot_id, count in id_counts.items() if count > 1}
-    for item in snapshots:
+    for item in eligible_snapshots:
         if not isinstance(item, dict) or item.get("capability") != "solana.market.scan":
             continue
         if isinstance(item.get("id"), str) and item["id"] in ambiguous_ids:
