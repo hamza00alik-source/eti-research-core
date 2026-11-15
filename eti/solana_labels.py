@@ -351,6 +351,10 @@ def evaluate_forward_label_coverage(
                 )
                 if target is None:
                     without_target += 1
+                    if (base["id"], horizon) in label_targets:
+                        # A persisted label whose supporting target is no longer
+                        # present in this full observed export is not current evidence.
+                        stale_label += 1
                     continue
                 with_target += 1
                 label_key = (base["id"], horizon)
