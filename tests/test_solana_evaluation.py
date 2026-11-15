@@ -74,6 +74,8 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
             "mint": f"mint-{index}",
             "pool_address": f"pool-{index}",
             "baseline_at": stamp,
+            "target_at": f"2026-01-{day:02d}T01:30:00Z",
+            "actual_elapsed_seconds": 5400.0,
             "horizon_seconds": 3600,
             "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
             "target_sampled_price_return_pct": 3.0,
@@ -113,6 +115,8 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
     assert report["walk_forward"]["training_rows_used_for_metrics"] is False
     assert "3600" in report["by_horizon_seconds"]
     assert report["by_horizon_seconds"]["3600"]["aggregate"]["always_long"]["trade_count"] > 0
+    assert report["by_horizon_seconds"]["3600"]["observed_elapsed_seconds"]["median"] == 3600.0
+    assert report["by_horizon_seconds"]["3600"]["observed_elapsed_seconds"]["median_overshoot_seconds"] == 0.0
     assert report["validation_dependence"]["repeated_mint_label_count"] >= 1
     assert report["validation_dependence"]["overlapping_interval_pair_count"] >= 1
     assert "cross_mint_overlapping_interval_pair_count" in report["validation_dependence"]
@@ -151,7 +155,8 @@ def test_walk_forward_rejects_prepared_temporal_or_outcome_tampering():
             "horizon_seconds": 3600,
             "label": {
                 "baseline_at": stamp,
-                "target_at": f"2026-01-{day:02d}T01:00:00Z",
+                "target_at": f"2026-01-{day:02d}T01:30:00Z",
+                "actual_elapsed_seconds": 5400.0,
                 "sampled_price_return_pct": 3.0,
             },
         })
@@ -169,6 +174,8 @@ def test_walk_forward_rejects_prepared_temporal_or_outcome_tampering():
 
     for field, value in (
         ("baseline_at", "2026-01-01T00:00:00Z"),
+        ("target_at", "2026-01-01T02:00:00Z"),
+        ("actual_elapsed_seconds", 999.0),
         ("horizon_seconds", 86400),
         ("target_sampled_price_return_pct", 999.0),
         ("baseline_snapshot_id", "wrong-baseline"),
