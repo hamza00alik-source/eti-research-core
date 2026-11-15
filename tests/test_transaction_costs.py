@@ -9,7 +9,7 @@ def model():
     return {
         "schema_version": "eti.transaction_cost_model.v1",
         "instrument_identity": "kraken:spot:BTC/USD",
-        "quote_currency": "USD", "settlement_currency": "USD",
+        "quote_currency": "USD", "settlement_currency": "USD", "fee_basis": "taker",
         "fee_bps": 6, "spread_bps": 2, "slippage_bps": 1,
         "market_impact_bps": 1, "funding_bps_per_bar": 0,
         "borrow_bps_per_bar": 0, "contract_multiplier": 1,
@@ -22,7 +22,7 @@ def model():
             "license_status": "open",
             "observed_at": "2026-01-01T00:00:00Z",
 
-            "covers": ["fee_bps", "spread_bps", "slippage_bps", "market_impact_bps", "funding_bps_per_bar", "borrow_bps_per_bar", "contract_multiplier"],
+            "covers": ["fee_bps", "spread_bps", "slippage_bps", "market_impact_bps", "funding_bps_per_bar", "borrow_bps_per_bar", "contract_multiplier", "fee_basis"],
         }],
     }
 
@@ -82,7 +82,7 @@ def test_evidence_cannot_claim_unknown_or_duplicate_cost_fields():
     value["evidence"][0]["covers"] = [
         "fee_bps", "spread_bps", "slippage_bps", "market_impact_bps",
         "funding_bps_per_bar", "borrow_bps_per_bar", "contract_multiplier",
-        "maker_fee_bps",
+        "fee_basis", "maker_fee_bps",
     ]
     with pytest.raises(ValueError, match="unsupported"):
         validate_transaction_cost_model(
@@ -216,4 +216,25 @@ def test_funding_schedule_expected_timestamps_must_be_ordered_and_unique():
         validate_transaction_cost_model(
             value, identity="kraken:spot:BTC/USD",
             now=datetime(2026, 11, 15, 10, tzinfo=timezone.utc),
+        )
+
+
+
+def test_market_order_cost_model_rejects_maker_only_fee_basis():
+    value = model()
+    value["fee_basis"] = "maker"
+    with pytest.raises(ValueError, match="fee_basis must be 'taker'"):
+        validate_transaction_cost_model(
+            value, identity="kraken:spot:BTC/USD",
+            now=datetime(2026, 11, 15, tzinfo=timezone.utc),
+        )
+
+
+def test_fee_basis_must_be_supported_by_field_level_evidence():
+    value = model()
+    value["evidence"][0]["covers"].remove("fee_basis")
+    with pytest.raises(ValueError, match="does not cover: fee_basis"):
+        validate_transaction_cost_model(
+            value, identity="kraken:spot:BTC/USD",
+            now=datetime(2026, 11, 15, tzinfo=timezone.utc),
         )
