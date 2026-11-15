@@ -591,32 +591,46 @@ def test_dataset_report_uses_conventional_median_and_reports_sampling_gaps(tmp_p
 
 
 def test_dataset_report_includes_full_workspace_forward_label_coverage(tmp_path):
+    import hashlib
+    from datetime import timedelta
+
     store = MemoryStore(tmp_path / "forward-coverage-report.sqlite3")
     workspace = store.create_workspace("owner", "coverage")
-    rows = [
-        ("base-1", "2026-01-01T00:00:00Z"),
-        ("target-1", "2026-01-01T00:06:00Z"),
-        ("base-2", "2026-01-01T00:10:00Z"),
-        ("base-3", "2026-01-01T00:18:00Z"),
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    payload = '{"evidence":{"price_usd":1,"liquidity_usd":1000,"volume_h24_usd":500}}'
+    digest = hashlib.sha256(payload.encode()).hexdigest()
+    stamps = [
+        ("base-1", now - timedelta(minutes=20)),
+        ("target-1", now - timedelta(minutes=14)),
+        ("base-2", now - timedelta(minutes=10)),
+        ("base-3", now - timedelta(minutes=6)),
+        ("future", now + timedelta(minutes=2)),
     ]
-    for snapshot_id, stamp in rows:
-        store.record_solana_research_snapshot(
-            "owner", workspace["id"], snapshot_id, "solana.market.scan",
-            "A" * 40, "Pool111",
-            {"evidence": {"price_usd": 1.0, "liquidity_usd": 1000, "volume_h24_usd": 500}},
-            fetched_at=stamp,
+    with store._connection() as conn:
+        for snapshot_id, stamp in stamps:
+            conn.execute(
+                "INSERT INTO solana_research_snapshots "
+                "(id,owner_id,workspace_id,task_id,capability,mint,pool_address,schema_version,"
+                "payload_json,payload_sha256,fetched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (snapshot_id, "owner", workspace["id"], "task-" + snapshot_id,
+                 "solana.market.scan", "A" * 40, "Pool111", 1, payload, digest,
+                 stamp.isoformat().replace("+00:00", "Z")),
+            )
+        conn.execute(
+            "INSERT INTO solana_research_labels "
+            "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
+            "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("label-1", "owner", workspace["id"], "A" * 40, "Pool111",
+             "base-1", "target-1", 300, '{"sampled_price_return_pct":0}',
+             now.isoformat().replace("+00:00", "Z")),
         )
-    store.record_solana_research_label(
-        "owner", workspace["id"], "label-1", "A" * 40, "Pool111",
-        "base-1", "target-1", 300,
-        {"sampled_price_return_pct": 0.0},
-    )
     report = store.get_solana_research_dataset_report("owner", workspace["id"])
     coverage = report["forward_label_coverage"]
     horizon = coverage["by_horizon_seconds"]["300"]
-    assert horizon["eligible_baseline_count"] == 4
-    assert horizon["mature_baseline_count"] == 3
-    assert horizon["mature_with_future_target_count"] == 1
-    assert horizon["mature_without_future_target_count"] == 2
+    assert horizon["eligible_baseline_count"] == 5
+    assert horizon["mature_baseline_count"] == 4
+    assert horizon["not_yet_mature_count"] == 1
+    assert horizon["mature_with_future_target_count"] == 3
+    assert horizon["mature_without_future_target_count"] == 1
     assert horizon["label_record_count"] == 1
     assert coverage["training_authorized"] is False
