@@ -474,7 +474,7 @@ Validation-dependence counts are scoped to prepared validation rows whose baseli
 
 The fixed benchmark report includes an exploratory percentile bootstrap for the row-weighted mean sampled return. It resamples complete mint clusters (not individual labels), uses a deterministic seed and 1,000 replicates, and withholds the interval unless at least 20 distinct mint clusters are present. Rows without a usable mint are conservatively grouped into one shared missing-identity cluster rather than treated as independent observations.
 
-These intervals are descriptive sensitivity diagnostics, not significance tests or evidence of predictive performance. Mint clustering addresses within-mint dependence only; it does not account for common market shocks across different mints, regime drift, selection effects, provider sampling bias, overlapping cross-mint exposures, or executable trading constraints. No interval authorizes model training or live trading.
+These intervals are descriptive sensitivity diagnostics, not significance tests or evidence of predictive performance. Mint clustering addresses within-mint dependence only; it does not account for common market shocks across different mints, regime drift, selection effects, provider sampling bias, overlapping cross-mint exposures, or executable trading constraints. In the prepared walk-forward report, the mint-only interval is withheld when any cross-mint validation intervals overlap, because that bootstrap does not model shared time-window shocks. The report explicitly sets independent-observation proof and confidence-interval authorization to false. A withheld interval is not evidence of zero uncertainty. No interval authorizes model training or live trading.
 
 
 ### Baseline-proxy regime diagnostics
@@ -579,7 +579,7 @@ This is not a significance test, evidence of independent replication, proof of p
 
 The walk-forward `validation_dependence` report now separates same-mint overlapping baseline-to-target intervals from overlapping intervals across different mints. It also reports how many distinct mints recur in more than one validation fold. Cross-mint overlap is relevant because different tokens can still share market-wide shocks and time windows; mint identity alone does not make observations independent.
 
-These are descriptive pair counts over prepared validation rows with valid timezone-aware positive-duration intervals. They do not estimate an effective independent sample size, correct standard errors, remove overlapping labels, or establish independence. They must not be interpreted as a risk-adjusted performance measure or as authorization to train or execute.
+These are descriptive pair counts over prepared validation rows with valid timezone-aware positive-duration intervals. They do not estimate an effective independent sample size, correct standard errors, remove overlapping labels, or establish independence. If cross-mint overlap is observed, the prepared walk-forward report withholds the mint-only bootstrap interval and records the reason; this is a conservative limitation, not a substitute for a time-block or market-factor dependence model. The report always marks independent observations as unproven and confidence intervals as unauthorized. These diagnostics must not be interpreted as a risk-adjusted performance measure or as authorization to train or execute.
 
 ## Provider observation diagnostics
 
