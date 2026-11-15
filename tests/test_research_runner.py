@@ -182,5 +182,5 @@ def test_runner_rejects_modified_scan_quality_in_allocation():
 def test_signed_funding_number_is_accepted_without_relaxing_other_costs():
     from eti.research_runner import _number
     assert _number("funding", -3.25, allow_negative=True) == -3.25
-    with pytest.raises(ValueError, match="must be a finite number"):
+    with pytest.raises(ValueError, match="must be finite and non-negative"):
         _number("fee", -3.25)
