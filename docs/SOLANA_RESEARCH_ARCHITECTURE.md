@@ -655,3 +655,15 @@ The non-increasing entity-time diagnostic describes the supplied row order.
 It is not evidence of provider clock failure or a missing observation.
 Sampling gaps remain descriptive coverage information only: an absent sample
 does not establish why collection paused or whether the token/provider failed.
+
+
+### Sampling-interval summary interpretation
+
+The dataset coverage report calculates the conventional median (averaging the
+two middle observations for even-sized samples), a nearest-rank 90th-percentile
+interval, the maximum positive interval, and the count/fraction of positive
+intervals exceeding ten minutes. Equal consecutive timestamps are counted
+separately rather than treated as zero-duration sampling intervals. These are
+descriptive per-mint/pool observation intervals, not scheduled-cadence
+compliance, provider uptime, or proof of why a gap occurred. The report does
+not infer failure, inactivity, delisting, or training eligibility from gaps.
