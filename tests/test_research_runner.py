@@ -9,7 +9,7 @@ def cost_model():
     return {
         "schema_version": "eti.transaction_cost_model.v1",
         "instrument_identity": "kraken:spot:BTC/USD",
-        "quote_currency": "USD", "settlement_currency": "USD",
+        "quote_currency": "USD", "settlement_currency": "USD", "fee_basis": "taker",
         "fee_bps": 6, "spread_bps": 2, "slippage_bps": 1,
         "market_impact_bps": 1, "funding_bps_per_bar": 0,
         "borrow_bps_per_bar": 0, "contract_multiplier": 1,
@@ -22,7 +22,7 @@ def cost_model():
             "license_status": "open",
             "observed_at": "2026-01-01T00:00:00Z",
 
-            "covers": ["fee_bps", "spread_bps", "slippage_bps", "market_impact_bps", "funding_bps_per_bar", "borrow_bps_per_bar", "contract_multiplier"],
+            "covers": ["fee_bps", "spread_bps", "slippage_bps", "market_impact_bps", "funding_bps_per_bar", "borrow_bps_per_bar", "contract_multiplier", "fee_basis"],
         }],
     }
 
