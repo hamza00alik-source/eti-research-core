@@ -993,6 +993,7 @@ def test_multi_configuration_regime_robustness_orchestrates_predeclared_configs(
     assert set(report["persistence_by_configuration"]) == {"baseline", "wider_trend"}
     assert set(report["market_wide_shocks_by_configuration"]) == {"baseline", "wider_trend"}
     assert set(report["shock_recurrence_by_configuration"]) == {"baseline", "wider_trend"}
+    assert set(report["shock_period_stability_by_configuration"]) == {"baseline", "wider_trend"}
     assert all(item["training_authorized"] is False
                for item in report["shock_recurrence_by_configuration"].values())
     assert all(item["causality_established"] is False
