@@ -145,3 +145,10 @@ def test_runner_rejects_inactive_instrument():
         run_approved_multi_market_research(
             inactive_scan, inactive_allocation, approval(), hub=FakeHub()
         )
+
+
+def test_runner_rejects_modified_scan_quality_in_allocation():
+    altered = allocation()
+    altered["candidates"][0]["quality"]["last_candle_age_seconds"] = 0
+    with pytest.raises(ValueError, match="provenance/quality differs"):
+        run_approved_multi_market_research(scan(), altered, approval(), hub=FakeHub())
