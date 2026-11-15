@@ -63,3 +63,13 @@ def test_naive_timestamps_are_rejected():
             value, identity="kraken:spot:BTC/USD",
             now=datetime(2026, 11, 15, tzinfo=timezone.utc),
         )
+
+
+def test_evidence_must_cover_every_explicit_cost_assumption():
+    value = model()
+    value["evidence"][0]["covers"] = ["fee_bps", "spread_bps"]
+    with pytest.raises(ValueError, match="does not cover"):
+        validate_transaction_cost_model(
+            value, identity="kraken:spot:BTC/USD",
+            now=datetime(2026, 11, 15, tzinfo=timezone.utc),
+        )
