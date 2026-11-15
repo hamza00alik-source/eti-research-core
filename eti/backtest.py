@@ -18,8 +18,8 @@ def backtest_positions(
     costs_input = (fee_bps, slippage_bps, funding_bps_per_bar, initial_equity)
     if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in costs_input):
         raise ValueError("Costs and initial equity must be finite numbers")
-    if min(fee_bps, slippage_bps, funding_bps_per_bar) < 0 or initial_equity <= 0:
-        raise ValueError("Costs must be non-negative and initial equity positive")
+    if fee_bps < 0 or slippage_bps < 0 or initial_equity <= 0:
+        raise ValueError("Fee/slippage costs must be non-negative and initial equity positive")
     if not isinstance(allow_short, bool):
         raise ValueError("allow_short must be a boolean")
     if not close.index.equals(signals.index):
@@ -42,7 +42,8 @@ def backtest_positions(
     returns = data.close.pct_change().fillna(0)
     turnover = position.diff().abs().fillna(position.abs())
     trading_cost = (fee_bps + slippage_bps) / 10000 * turnover
-    funding_cost = position.abs() * funding_bps_per_bar / 10000
+    # Positive funding: longs pay shorts. Negative funding: shorts pay longs.
+    funding_cost = position * funding_bps_per_bar / 10000
     strategy_returns = position * returns - trading_cost - funding_cost
     if (strategy_returns <= -1).any():
         raise ValueError("A bar loss of 100% or more makes equity non-positive")

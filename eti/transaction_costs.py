@@ -45,7 +45,10 @@ def validate_transaction_cost_model(
         value = model.get(field)
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"{field} must be finite and explicitly supplied")
-        if value < 0 or (field == "contract_multiplier" and value <= 0):
+        # Funding is signed: positive means longs pay shorts; negative means shorts pay longs.
+        if (field != "funding_bps_per_bar" and value < 0) or (
+            field == "contract_multiplier" and value <= 0
+        ):
             raise ValueError(f"{field} is outside its permitted range")
         numeric[field] = float(value)
     retrieved = _timestamp("retrieved_at", model.get("retrieved_at"))

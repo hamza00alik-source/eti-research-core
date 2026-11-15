@@ -13,7 +13,7 @@ keys, and must include:
 - estimated run cost and daily/monthly spend-to-date,
 - an overall model-fit-call cap no greater than 32.
 
-The runner validates the scan and allocation schemas, rejects candidates that
+The funding assumption is a signed per-bar rate using the standard perpetual convention: positive values mean longs pay shorts; negative values mean shorts pay longs. The backtest applies the signed cash flow to signed position exposure. This is not a funding schedule reconstruction: a constant per-bar assumption is only a simplified research input, and actual venue funding timestamps, intervals, caps, and historical rates must be sourced and aligned separately.\n\nThe runner validates the scan and allocation schemas, rejects candidates that
 are not marked `economic_evaluation_eligible`, fetches fresh validated history
 through the market-data hub, and computes the total fit-call requirement for
 all approved instruments before starting any model fit. If the total exceeds
