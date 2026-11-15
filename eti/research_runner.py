@@ -35,8 +35,8 @@ def _instrument(record: dict[str, Any]) -> InstrumentSpec:
         quote_currency=item.get("quote_currency"),
         settlement_currency=item.get("settlement_currency"),
         contract_multiplier=item.get("contract_multiplier") or 1.0,
-        supports_short=bool(item.get("supports_short", False)),
-        supports_funding=bool(item.get("supports_funding", False)),
+        supports_short=item.get("supports_short", False),
+        supports_funding=item.get("supports_funding", False),
         active=True,
     )
 
