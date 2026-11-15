@@ -544,4 +544,5 @@ def test_worker_persists_solana_provider_telemetry_under_claimed_task_identity(t
     assert observations[0]["endpoint_id"] == "tokens_v1_solana"
     assert observations[0]["integrity_valid"] is True
     assert observations[0]["latency_ms"] == 42.5
-    assert store.list_solana_provider_observations("other-owner", workspace["id"]) == []
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.list_solana_provider_observations("other-owner", workspace["id"])
