@@ -881,11 +881,13 @@ def list_solana_provider_observations(
     try:
         items = _memory_store().list_solana_provider_observations(
             account["id"], workspace_id, provider=provider, limit=limit)
+        verified_items = [item for item in items if item["integrity_valid"]]
         report = evaluate_solana_provider_health(
             [{key: item[key] for key in ("provider", "observed_at", "status", "latency_ms", "error_code")}
-             for item in items], now=datetime.now(timezone.utc).isoformat())
+             for item in verified_items], now=datetime.now(timezone.utc).isoformat())
+        report["invalid_observation_count"] += len(items) - len(verified_items)
         return {"items": items, "health": report,
-                "scope": "submitted request observations for this owner/workspace only"}
+                "scope": "integrity-verified submitted request observations for this owner/workspace only"}
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
     except ValueError as exc:
