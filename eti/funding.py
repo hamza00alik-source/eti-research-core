@@ -14,7 +14,7 @@ def funding_cost_series(position: pd.Series, events: list[dict[str, Any]] | None
     Positions are already shifted by the caller to represent exposure held on each bar.
     """
     costs = pd.Series(0.0, index=position.index, dtype=float)
-    if events is None:
+    if events is None or events == []:
         return costs
     if not isinstance(events, list):
         raise ValueError("funding_events must be a list")
@@ -28,6 +28,8 @@ def funding_cost_series(position: pd.Series, events: list[dict[str, Any]] | None
     seen = set()
     values = costs.to_numpy(copy=True)
     positions = position.to_numpy(dtype=float)
+    if not math.isfinite(positions).all():
+        raise ValueError("funding positions must be finite")
     for i, event in enumerate(events):
         if not isinstance(event, dict):
             raise ValueError(f"funding_events[{i}] must be an object")
