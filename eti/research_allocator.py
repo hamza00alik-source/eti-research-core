@@ -70,12 +70,32 @@ def _candidate_score(candidate: dict[str, Any], *, max_age_seconds: float) -> tu
         missing_fraction = min(missing / max(rows - 1.0, 1.0), 1.0)
         continuity_score = 30.0 * (1.0 - missing_fraction)
     else:
-        # Session closures differ by venue and instrument. Without a verified
-        # exchange calendar, raw gaps cannot safely be called missing candles.
-        # Withhold continuity credit and block economic eligibility pending
-        # calendar-aware validation rather than misclassifying weekends as gaps.
-        continuity_score = 0.0
-        reasons.append("session_calendar_not_applied")
+        # Non-crypto bars are assessed against an explicitly registered
+        # venue/asset/market calendar. Never infer holidays or sessions.
+        if quality.get("session_calendar_applied") is not True:
+            continuity_score = 0.0
+            reasons.append("session_calendar_not_applied")
+        elif quality.get("session_coverage_validated") is not True:
+            continuity_score = 0.0
+            reasons.append("session_coverage_not_validated")
+        else:
+            expected = _finite_nonnegative(
+                "quality.expected_session_intervals",
+                quality.get("expected_session_intervals"),
+            )
+            missing_expected = _finite_nonnegative(
+                "quality.missing_expected_intervals",
+                quality.get("missing_expected_intervals"),
+            )
+            unexpected = _finite_nonnegative(
+                "quality.unexpected_session_timestamps",
+                quality.get("unexpected_session_timestamps"),
+            )
+            if expected <= 0 or missing_expected > expected or unexpected != 0:
+                continuity_score = 0.0
+                reasons.append("invalid_session_coverage_diagnostics")
+            else:
+                continuity_score = 30.0 * (1.0 - missing_expected / expected)
     score = history_score + freshness_score + continuity_score
     if any(reason != "session_calendar_not_applied" for reason in reasons):
         score = 0.0
