@@ -200,3 +200,25 @@ def test_derivative_research_fails_closed_without_timestamped_funding_schedule()
         run_approved_multi_market_research(
             candidate_scan, candidate_allocation, approved, hub=FakeHub()
         )
+
+
+
+def test_funding_event_alignment_preflight_rejects_off_bar_settlement():
+    from eti.research_runner import _validate_funding_event_alignment
+
+    bars = pd.date_range("2026-01-01T00:00:00Z", periods=4, freq="h")
+    with pytest.raises(ValueError, match="does not align.*before model fitting"):
+        _validate_funding_event_alignment(
+            [{"timestamp": "2026-01-01T02:30:00Z", "rate_bps": 2.0}],
+            pd.Series(bars), "kraken:swap:BTC/USD",
+        )
+
+
+def test_funding_event_alignment_preflight_accepts_exact_utc_bar():
+    from eti.research_runner import _validate_funding_event_alignment
+
+    bars = pd.date_range("2026-01-01T00:00:00Z", periods=4, freq="h")
+    _validate_funding_event_alignment(
+        [{"timestamp": "2026-01-01T02:00:00+00:00", "rate_bps": 2.0}],
+        pd.Series(bars), "kraken:swap:BTC/USD",
+    )
