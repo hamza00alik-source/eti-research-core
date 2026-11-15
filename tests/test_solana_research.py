@@ -161,3 +161,67 @@ def test_pumpportal_event_normalizer_accepts_only_known_event_shapes():
     assert normalize_pumpportal_event({**base, "txType": "buy"}) is None
     assert normalize_pumpportal_event({"mint": "short", "signature": "sig", "txType": "create"}) is None
     assert normalize_pumpportal_event({**base, "txType": "create"}) is not None
+
+
+def test_dexscreener_emits_minimal_measured_provider_observation(monkeypatch):
+    observations = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [_pair()]
+
+    def fake_get(url, timeout):
+        assert "Mint111" in url
+        assert timeout == 12.0
+        return Response()
+
+    monkeypatch.setattr("eti.solana_research.httpx.get", fake_get)
+    client = DexScreenerClient(observation_callback=observations.append)
+    assert client.fetch_pairs(["Mint111"])[0]["pairAddress"] == "Pool111"
+    assert len(observations) == 1
+    item = observations[0]
+    assert item["provider"] == "dexscreener"
+    assert item["endpoint_id"] == "tokens_v1_solana"
+    assert item["status"] == "success"
+    assert item["latency_ms"] >= 0
+    assert item["observed_at"].endswith("Z")
+    assert item["error_code"] is None
+    assert "url" not in item and "headers" not in item
+
+
+def test_dexscreener_records_http_failure_without_leaking_url(monkeypatch):
+    import httpx
+
+    observations = []
+
+    def fake_get(_url, timeout):
+        request = httpx.Request("GET", "https://api.example/?api_key=secret")
+        response = httpx.Response(429, request=request)
+        raise httpx.HTTPStatusError("rate limited", request=request, response=response)
+
+    monkeypatch.setattr("eti.solana_research.httpx.get", fake_get)
+    client = DexScreenerClient(observation_callback=observations.append)
+    with pytest.raises(Exception):
+        client.fetch_pairs(["Mint111"])
+    assert len(observations) == 1
+    assert observations[0]["status"] == "error"
+    assert observations[0]["error_code"] == "HTTP_429"
+    assert "secret" not in repr(observations[0])
+
+
+def test_provider_observation_callback_failure_does_not_break_request(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [_pair()]
+
+    monkeypatch.setattr("eti.solana_research.httpx.get", lambda *_args, **_kwargs: Response())
+    def broken_callback(_observation):
+        raise RuntimeError("telemetry storage unavailable")
+
+    assert DexScreenerClient(observation_callback=broken_callback).fetch_pairs(["Mint111"])[0]["pairAddress"] == "Pool111"
