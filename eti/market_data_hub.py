@@ -16,7 +16,7 @@ from .adapters import AdapterCapabilities, AdapterRegistry, MarketAdapter
 from .data import validate_ohlcv
 from .instruments import InstrumentCatalog, InstrumentSpec
 from .providers import CcxtPublicProvider, YahooFinanceProvider
-from .session_calendar import SessionCalendarRegistry, session_quality
+from .session_calendar import SessionCalendarRegistry, session_quality, timeframe_delta
 
 
 @dataclass(frozen=True)
@@ -353,6 +353,14 @@ class MarketDataHub:
             raise ValueError(
                 f"{instrument.venue} returned future-dated OHLCV candles; "
                 f"latest timestamp is {future.max().isoformat()}"
+            )
+        interval = pd.Timedelta(timeframe_delta(timeframe))
+        completed = clean["timestamp"] + interval <= now
+        clean = clean.loc[completed].reset_index(drop=True)
+        if len(clean) < min_rows:
+            raise ValueError(
+                f"{instrument.venue} returned {len(clean)} completed candles; "
+                f"{min_rows} required"
             )
         quality = self._quality(clean, timeframe, instrument)
         provenance = {
