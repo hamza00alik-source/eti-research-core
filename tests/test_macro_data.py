@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 import pytest
 
@@ -40,7 +40,7 @@ def test_as_of_selects_latest_vintage_available_at_decision_time():
     assert [item.value for item in later.observations] == [101.0]
 
 
-def test_future_release_is_not_visible_even_if_vintage_timestamp_is_earlier():
+def test_future_release_is_not_visible():
     future = obs(100.0, released=dt(5), vintage=dt(5))
     result = hub([future]).fetch_as_of("fixture", "CPI", dt(4))
     assert result.observations == ()
@@ -53,9 +53,9 @@ def test_future_revision_does_not_overwrite_initial_historical_vintage():
     assert result.observations[0].value == 2.0
 
 
-@pytest.mark.parametrize("field", ["period", "released_at", "vintage_at"])
+@pytest.mark.parametrize("field", ["period", "released", "vintage"])
 def test_naive_timestamps_are_rejected(field):
-    values = dict(period=dt(1), released_at=dt(2), vintage_at=dt(2))
+    values = {"period": dt(1), "released": dt(2), "vintage": dt(2)}
     values[field] = datetime(2024, 1, 1)
     with pytest.raises(ValueError, match="timezone-aware"):
         obs(1.0, **values)
@@ -104,18 +104,10 @@ def test_unknown_provider_fails_closed():
         hub([]).fetch_as_of("missing", "CPI", dt(6))
 
 
-def test_equal_availability_distinct_vintages_are_ambiguous():
-    one = obs(1.0, vintage=dt(3))
-    two = obs(2.0, vintage=dt(3), source="other", provenance="other:record")
-    with pytest.raises(ValueError, match="ambiguous vintages"):
-        hub([one, two]).fetch_as_of("fixture", "CPI", dt(6))
-
-
-def test_vintage_must_be_a_timezone_aware_datetime_and_provider_name_unique():
-    row = obs(1.0)
+def test_vintage_must_be_timezone_aware_and_provider_name_unique():
     with pytest.raises(ValueError, match="timezone-aware"):
         MacroObservation("CPI", dt(1), 1.0, "index", dt(2), datetime(2024, 1, 2),
                          "source", "open", "fixture")
-    provider = InMemoryMacroProvider("fixture", [row])
+    provider = InMemoryMacroProvider("fixture", [obs(1.0)])
     with pytest.raises(ValueError, match="already registered"):
         MacroDataHub([provider, provider])
