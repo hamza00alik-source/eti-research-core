@@ -66,6 +66,18 @@ def _cluster_bootstrap_mean_interval(
     whole mints preserves within-mint dependence, but does not correct selection,
     regime drift, overlapping cross-mint market shocks, or provider bias.
     """
+    if isinstance(replicates, bool) or not isinstance(replicates, int) or replicates < 1:
+        raise ValueError("replicates must be a positive integer")
+    if (
+        isinstance(confidence_level, bool)
+        or not isinstance(confidence_level, (int, float))
+        or not math.isfinite(confidence_level)
+        or not 0.0 < confidence_level < 1.0
+    ):
+        raise ValueError("confidence_level must be finite and strictly between 0 and 1")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ValueError("seed must be an integer")
+
     clusters = [values for _, values in sorted(cluster_returns.items()) if values]
     cluster_count = len(clusters)
     result: dict[str, Any] = {
@@ -86,7 +98,7 @@ def _cluster_bootstrap_mean_interval(
         "inferential_use_authorized": False,
         "coverage_claimed": False,
         "interpretation": (
-            "Exploratory cluster-resampling interval for the row-weighted mean; "
+            "Exploratory cluster-resampling percentile range for the row-weighted mean; "
             "not a significance test, predictive guarantee, portfolio return, "
             "or correction for shared market shocks."
         ),
