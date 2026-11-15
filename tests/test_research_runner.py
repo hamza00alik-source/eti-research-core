@@ -5,6 +5,26 @@ from eti.market_data_hub import MarketDataSnapshot
 from eti.research_runner import run_approved_multi_market_research
 
 
+def cost_model():
+    return {
+        "schema_version": "eti.transaction_cost_model.v1",
+        "instrument_identity": "kraken:spot:BTC/USD",
+        "quote_currency": "USD", "settlement_currency": "USD",
+        "fee_bps": 6, "spread_bps": 2, "slippage_bps": 1,
+        "market_impact_bps": 1, "funding_bps_per_bar": 0,
+        "borrow_bps_per_bar": 0, "contract_multiplier": 1,
+        "retrieved_at": "2026-01-01T00:00:00Z",
+        "valid_from": "2026-01-01T00:00:00Z",
+        "valid_until": "2030-01-01T00:00:00Z",
+        "evidence": [{
+            "source": "Published venue fee schedule",
+            "uri": "https://example.com/fees",
+            "license_status": "open",
+            "observed_at": "2026-01-01T00:00:00Z",
+        }],
+    }
+
+
 def approval(**overrides):
     value = {
         "schema_version": "eti.research_approval.v1",
@@ -22,8 +42,10 @@ def approval(**overrides):
             "test_size": 100, "step_size": 200,
         },
         "instruments": {"kraken:spot:BTC/USD": {
-            "fee_bps": 6.0, "slippage_bps": 2.0,
-            "funding_bps_per_bar": 0.0, "allow_short": False,
+            "fee_bps": 6.0, "slippage_bps": 1.0,
+            "spread_bps": 2.0, "market_impact_bps": 1.0,
+            "funding_bps_per_bar": 0.0, "borrow_bps_per_bar": 0.0,
+            "allow_short": False,
         }},
     }
     value.update(overrides)
@@ -43,6 +65,7 @@ def allocation(eligible=True):
             "provenance": {"requested_rows": 1000, "timeframe": "1h"},
             "quality": {"rows": 1000, "ohlcv_validated": True, "timestamp_order": "ascending", "last_candle_age_seconds": 100, "missing_interval_estimate": 0, "max_gap_seconds": 3600},
             "transaction_cost_model_status": "validated" if eligible else "unknown",
+            "transaction_cost_model": cost_model() if eligible else None,
             "training_authorized": False,
             "eligibility_reasons": [] if eligible else ["transaction_cost_model_not_validated"],
         }],
