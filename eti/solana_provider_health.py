@@ -65,9 +65,18 @@ def evaluate_solana_provider_health(
 
     reports = []
     for provider, rows in sorted(grouped.items()):
-        latest = max(rows, key=lambda item: item["observed_at"])
-        age = (current - latest["observed_at"]).total_seconds()
-        if age < 0:
+        latest_at = max(item["observed_at"] for item in rows)
+        latest_rows = [item for item in rows if item["observed_at"] == latest_at]
+        latest = latest_rows[0]
+        age = (current - latest_at).total_seconds()
+        latest_conflicts = len({
+            (item["status"], item["latency_ms"], item["error_code"])
+            for item in latest_rows
+        }) > 1
+        if latest_conflicts:
+            status = "UNKNOWN"
+            reason = "conflicting_observations_share_latest_timestamp"
+        elif age < 0:
             status = "UNKNOWN"
             reason = "latest_observation_is_in_the_future"
         elif age > stale_after_seconds:
@@ -90,11 +99,11 @@ def evaluate_solana_provider_health(
             "provider": provider,
             "status": status,
             "reason": reason,
-            "latest_observed_at": latest["observed_at"].isoformat().replace("+00:00", "Z"),
+            "latest_observed_at": latest_at.isoformat().replace("+00:00", "Z"),
             "latest_observation_age_seconds": round(age, 3),
-            "latest_request_status": latest["status"],
-            "latest_latency_ms": latest["latency_ms"],
-            "latest_error_code": latest["error_code"],
+            "latest_request_status": None if latest_conflicts else latest["status"],
+            "latest_latency_ms": None if latest_conflicts else latest["latency_ms"],
+            "latest_error_code": None if latest_conflicts else latest["error_code"],
             "supplied_observation_count": len(rows),
             "supplied_success_count": sum(item["status"] == "success" for item in rows),
             "supplied_error_count": sum(item["status"] == "error" for item in rows),
