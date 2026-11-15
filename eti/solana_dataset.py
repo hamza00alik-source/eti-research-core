@@ -39,12 +39,22 @@ def validate_snapshot_rows(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
         "non_finite_feature_values": 0, "negative_feature_values": 0,
         "zero_price_or_liquidity": 0, "invalid_timestamp": 0,
         "duplicate_entity_timestamp": 0, "non_increasing_entity_time": 0,
+        "duplicate_snapshot_id": 0,
     }
+    id_counts: dict[str, int] = {}
+    for row in snapshots:
+        if isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"]:
+            id_counts[row["id"]] = id_counts.get(row["id"], 0) + 1
+    duplicate_ids = {snapshot_id for snapshot_id, count in id_counts.items() if count > 1}
     seen: set[tuple[str, str, str]] = set()
     previous: dict[tuple[str, str], datetime] = {}
     invalid_rows: list[dict[str, Any]] = []
     for row in snapshots:
         problems: list[str] = []
+        snapshot_id = row.get("id")
+        if isinstance(snapshot_id, str) and snapshot_id in duplicate_ids:
+            issue_counts["duplicate_snapshot_id"] += 1
+            problems.append("duplicate_snapshot_id")
         schema_version = row.get("schema_version")
         if isinstance(schema_version, bool) or schema_version != 1:
             issue_counts["unsupported_schema_version"] += 1
