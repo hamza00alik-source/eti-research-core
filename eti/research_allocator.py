@@ -9,6 +9,8 @@ import math
 import re
 from typing import Any, Iterable
 
+from .transaction_costs import validate_transaction_cost_model
+
 MAX_DAILY_USD = 10.0
 MAX_MONTHLY_USD = 100.0
 
@@ -106,7 +108,7 @@ def allocate_research_budget(
     estimated_run_cost_usd: float | None = None,
     daily_spend_to_date_usd: float | None = None,
     monthly_spend_to_date_usd: float | None = None,
-    cost_model_status: dict[str, str] | None = None,
+    cost_models: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Rank data-ready candidates and reserve a bounded fit-call budget.
 
@@ -150,7 +152,9 @@ def allocate_research_budget(
         usd_authorized = False
         usd_reason = "usd_cost_or_spend_inputs_missing"
 
-    cost_status = cost_model_status or {}
+    if cost_models is not None and not isinstance(cost_models, dict):
+        raise ValueError("cost_models must be a JSON object keyed by venue:market_type:symbol")
+    cost_records = cost_models or {}
     ranked: list[dict[str, Any]] = []
     for source in scan_report["candidates"]:
         if not isinstance(source, dict) or not isinstance(source.get("instrument"), dict):
@@ -158,14 +162,20 @@ def allocate_research_budget(
         score, reasons = _candidate_score(source, max_age_seconds=max_age)
         instrument = source["instrument"]
         key = f"{instrument.get('venue', '')}:{instrument.get('market_type', '')}:{instrument.get('symbol', '')}"
-        transaction_cost_status = cost_status.get(key, "unknown")
-        if transaction_cost_status != "validated":
-            reasons.append("transaction_cost_model_not_validated")
+        raw_cost_model = cost_records.get(key)
+        validated_cost_model = None
+        try:
+            validated_cost_model = validate_transaction_cost_model(raw_cost_model, identity=key)
+            transaction_cost_status = "validated"
+        except ValueError as exc:
+            transaction_cost_status = "unknown"
+            reasons.append("transaction_cost_model_invalid:" + str(exc))
         ranked.append({
             "instrument": instrument,
             "data_readiness_score": score,
             "data_status": source.get("status", "unknown"),
             "transaction_cost_model_status": transaction_cost_status,
+            "transaction_cost_model": validated_cost_model,
             "economic_evaluation_eligible": (
                 source.get("status") == "data_ready" and not reasons
                 and transaction_cost_status == "validated"
@@ -282,7 +292,7 @@ def main() -> None:
         estimated_run_cost_usd=args.estimated_run_cost_usd,
         daily_spend_to_date_usd=args.daily_spend_to_date_usd,
         monthly_spend_to_date_usd=args.monthly_spend_to_date_usd,
-        cost_model_status=cost_models,
+        cost_models=cost_models,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2), encoding="utf-8")

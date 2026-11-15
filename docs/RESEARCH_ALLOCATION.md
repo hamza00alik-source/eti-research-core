@@ -37,20 +37,55 @@ python -m eti.research_allocator artifacts/market-universe.json \
   --output artifacts/research-allocation.json
 ```
 
-The cost-model JSON is a mapping from `venue:symbol` to the literal status
-`validated`, for example:
+The cost-model JSON is keyed by exact `venue:market_type:symbol` identity.
+Each value must be a complete `eti.transaction_cost_model.v1` object, not a
+status string. It must explicitly state fee, spread, slippage, market impact,
+funding and borrow costs, contract multiplier, quote/settlement currencies,
+retrieval time, validity window, and at least one evidence record with an HTTPS
+source URI, observation time, and declared `open` or `licensed` status.
+Unknown/restricted license declarations, missing values, expired/future-dated
+records, and identity mismatches fail closed.
+
+Example structure (illustrative values only; not a validated fee schedule):
 
 ```json
 {
-  "kraken:BTC/USD": "validated"
+  "kraken:spot:BTC/USD": {
+    "schema_version": "eti.transaction_cost_model.v1",
+    "instrument_identity": "kraken:spot:BTC/USD",
+    "quote_currency": "USD",
+    "settlement_currency": "USD",
+    "fee_bps": 6,
+    "spread_bps": 2,
+    "slippage_bps": 1,
+    "market_impact_bps": 1,
+    "funding_bps_per_bar": 0,
+    "borrow_bps_per_bar": 0,
+    "contract_multiplier": 1,
+    "retrieved_at": "2026-01-01T00:00:00Z",
+    "valid_from": "2026-01-01T00:00:00Z",
+    "valid_until": "2030-01-01T00:00:00Z",
+    "evidence": [{
+      "source": "Published venue fee schedule",
+      "uri": "https://example.com/fees",
+      "license_status": "open",
+      "observed_at": "2026-01-01T00:00:00Z"
+    }]
+  }
 }
 ```
 
-The cost-model file must be backed by measured or documented, instrument- and
-venue-specific fees, spread, slippage, funding/borrow where applicable, contract
-multipliers, and market-session assumptions. The allocator does not validate
-the underlying economics merely because the status string is supplied; that
-review is an upstream governance responsibility.
+The validator checks schema, exact identity, explicit numeric assumptions,
+currency fields, timestamps, validity window, HTTPS evidence references, and
+declared license status. The runner also requires approval assumptions to match
+the validated model. Half-spread, slippage, and market impact are included in
+the evaluator's slippage input. Nonzero borrow cost is rejected until the
+evaluator supports it.
+
+Important: ETI does not independently authenticate a URL, prove that a cited
+document contains the supplied values, determine whether a license actually
+covers this use, or measure live spread/slippage. Evidence must be reviewed by
+the operator; the schema is a fail-closed evidence record, not proof of truth.
 
 ## Hard limits and fail-closed behavior
 

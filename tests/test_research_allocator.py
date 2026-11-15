@@ -17,6 +17,26 @@ def candidate(symbol="BTC/USD", venue="kraken", age=300, missing=0, gap=3600,
     }
 
 
+def cost_model(identity="kraken:spot:BTC/USD"):
+    return {
+        "schema_version": "eti.transaction_cost_model.v1",
+        "instrument_identity": identity,
+        "quote_currency": "USD", "settlement_currency": "USD",
+        "fee_bps": 6, "spread_bps": 2, "slippage_bps": 1,
+        "market_impact_bps": 1, "funding_bps_per_bar": 0,
+        "borrow_bps_per_bar": 0, "contract_multiplier": 1,
+        "retrieved_at": "2026-01-01T00:00:00Z",
+        "valid_from": "2026-01-01T00:00:00Z",
+        "valid_until": "2030-01-01T00:00:00Z",
+        "evidence": [{
+            "source": "Published venue fee schedule",
+            "uri": "https://example.com/fees",
+            "license_status": "open",
+            "observed_at": "2026-01-01T00:00:00Z",
+        }],
+    }
+
+
 def scan(*items):
     return {"scan_only": True, "execution_enabled": False, "candidates": list(items)}
 
@@ -37,7 +57,7 @@ def test_allocator_ranks_data_readiness_without_claiming_profitability():
 def test_allocator_requires_validated_cost_model_for_economic_eligibility():
     item = candidate()
     result = allocate_research_budget(
-        scan(item), cost_model_status={"kraken:spot:BTC/USD": "validated"},
+        scan(item), cost_models={"kraken:spot:BTC/USD": cost_model()},
         estimated_run_cost_usd=2, daily_spend_to_date_usd=1,
         monthly_spend_to_date_usd=10,
     )
@@ -99,7 +119,7 @@ def test_allocator_cost_models_are_scoped_by_market_type():
     swap["instrument"]["market_type"] = "swap"
     result = allocate_research_budget(
         scan(spot, swap),
-        cost_model_status={"kraken:spot:BTC/USD": "validated"},
+        cost_models={"kraken:spot:BTC/USD": cost_model()},
         estimated_run_cost_usd=1, daily_spend_to_date_usd=0,
         monthly_spend_to_date_usd=0,
     )
@@ -114,7 +134,7 @@ def test_selected_candidate_identity_includes_market_type():
     swap["instrument"]["market_type"] = "swap"
     result = allocate_research_budget(
         scan(spot, swap), max_model_fit_calls=2, fits_per_candidate=2,
-        max_candidates=2, cost_model_status={},
+        max_candidates=2, cost_models={},
     )
     rows = {row["instrument"]["market_type"]: row for row in result["candidates"]}
     assert rows["spot"]["research_priority_rank"] == 1
