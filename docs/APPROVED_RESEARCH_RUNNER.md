@@ -9,7 +9,7 @@ artifact. Approval is explicit, scoped to exact `venue:market_type:symbol`
 keys, and must include:
 - `approved=true` and `authorize_research_fits=true`,
 - `execution_enabled=false`,
-- per-instrument fee, slippage, funding-per-bar, and short-capability assumptions,
+- per-instrument fee, spread, slippage, market-impact, funding, borrow, and short-capability assumptions that exactly match the evidence-backed cost model carried in the allocation artifact,
 - estimated run cost and daily/monthly spend-to-date,
 - an overall model-fit-call cap no greater than 32.
 
@@ -46,8 +46,11 @@ to authorize a run):
   "instruments": {
     "kraken:spot:BTC/USD": {
       "fee_bps": 6.0,
-      "slippage_bps": 2.0,
+      "spread_bps": 2.0,
+      "slippage_bps": 1.0,
+      "market_impact_bps": 1.0,
       "funding_bps_per_bar": 0.0,
+      "borrow_bps_per_bar": 0.0,
       "allow_short": false
     }
   }
