@@ -550,3 +550,40 @@ def test_dataset_validator_flags_every_occurrence_of_duplicate_snapshot_id():
     assert report["issue_counts"]["duplicate_snapshot_id"] == 2
     assert report["rows_with_issues"] == 2
     assert all("duplicate_snapshot_id" in row["issues"] for row in report["row_issues"])
+
+
+
+def test_dataset_report_uses_conventional_median_and_reports_sampling_gaps(tmp_path):
+    store = MemoryStore(tmp_path / "sampling-report.sqlite3")
+    workspace = store.create_workspace("owner", "sampling")
+    stamps = [
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:05:00Z",
+        "2026-01-01T00:15:00Z",
+        "2026-01-01T00:35:00Z",
+        "2026-01-01T01:05:00Z",
+        "2026-01-01T01:05:00Z",
+    ]
+    payload = '{"evidence":{"price_usd":1,"liquidity_usd":2,"volume_h24_usd":3,"txns_h1_buys":4,"txns_h1_sells":5}}'
+    import hashlib
+    digest = hashlib.sha256(payload.encode()).hexdigest()
+    with store._connection() as conn:
+        for index, stamp in enumerate(stamps):
+            conn.execute(
+                "INSERT INTO solana_research_snapshots "
+                "(id,owner_id,workspace_id,task_id,capability,mint,pool_address,schema_version,"
+                "payload_json,payload_sha256,fetched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (f"sample-{index}", "owner", workspace["id"], f"task-{index}",
+                 "solana.market.scan", "MintA", "PoolA", 1, payload, digest, stamp),
+            )
+
+    report = store.get_solana_research_dataset_report("owner", workspace["id"])
+    sampling = report["snapshots"]
+    assert sampling["sample_interval_count"] == 4
+    assert sampling["median_sample_interval_seconds"] == 900.0
+    assert sampling["p90_sample_interval_seconds"] == 1800.0
+    assert sampling["maximum_sample_interval_seconds"] == 1800.0
+    assert sampling["duplicate_timestamp_intervals"] == 1
+    assert sampling["sample_gaps_over_10_minutes"] == 2
+    assert sampling["sample_gap_fraction_over_10_minutes"] == 0.5
+    assert report["training_gate"]["ready"] is False
