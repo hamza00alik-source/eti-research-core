@@ -2,8 +2,6 @@ import asyncio
 import sys
 import types
 
-import pytest
-
 from eti.solana_ingest import PumpPortalIngestor
 from eti.solana_research import PumpPortalStream
 
@@ -34,8 +32,7 @@ class _FakeConnection:
         return False
 
 
-@pytest.mark.asyncio
-async def test_pumpportal_stream_records_successful_connection_without_payload_or_secret(monkeypatch):
+def test_pumpportal_stream_records_successful_connection_without_payload_or_secret(monkeypatch):
     stop = asyncio.Event()
     socket = _FakeSocket(stop)
     observations = []
@@ -44,7 +41,10 @@ async def test_pumpportal_stream_records_successful_connection_without_payload_o
     ))
     stream = PumpPortalStream(api_key="do-not-record-this", observation_callback=observations.append)
 
-    events = [event async for event in stream.events(stop=stop)]
+    async def collect():
+        return [event async for event in stream.events(stop=stop)]
+
+    events = asyncio.run(collect())
 
     assert len(events) == 1
     assert socket.sent == [
@@ -64,8 +64,7 @@ async def test_pumpportal_stream_records_successful_connection_without_payload_o
     assert "Signature111" not in repr(sample)
 
 
-@pytest.mark.asyncio
-async def test_pumpportal_stream_records_sanitized_connection_error(monkeypatch):
+def test_pumpportal_stream_records_sanitized_connection_error(monkeypatch):
     stop = asyncio.Event()
     observations = []
 
@@ -79,7 +78,10 @@ async def test_pumpportal_stream_records_sanitized_connection_error(monkeypatch)
     monkeypatch.setattr("eti.solana_research.asyncio.sleep", stop_after_retry)
     stream = PumpPortalStream(api_key="private-key", observation_callback=observations.append)
 
-    assert [event async for event in stream.events(stop=stop)] == []
+    async def collect():
+        return [event async for event in stream.events(stop=stop)]
+
+    assert asyncio.run(collect()) == []
     assert len(observations) == 1
     assert observations[0]["status"] == "error"
     assert observations[0]["error_code"] == "OSError"
@@ -87,8 +89,7 @@ async def test_pumpportal_stream_records_sanitized_connection_error(monkeypatch)
     assert "private-key" not in repr(observations)
 
 
-@pytest.mark.asyncio
-async def test_pumpportal_telemetry_callback_failure_does_not_stop_ingestion(monkeypatch):
+def test_pumpportal_telemetry_callback_failure_does_not_stop_ingestion(monkeypatch):
     stop = asyncio.Event()
     socket = _FakeSocket(stop)
     monkeypatch.setitem(sys.modules, "websockets", types.SimpleNamespace(
@@ -99,7 +100,10 @@ async def test_pumpportal_telemetry_callback_failure_does_not_stop_ingestion(mon
         raise RuntimeError("telemetry unavailable")
 
     stream = PumpPortalStream(observation_callback=broken_callback)
-    events = [event async for event in stream.events(stop=stop)]
+    async def collect():
+        return [event async for event in stream.events(stop=stop)]
+
+    events = asyncio.run(collect())
     assert len(events) == 1
 
 
