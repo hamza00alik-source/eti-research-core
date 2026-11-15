@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from .research_allocator import allocate_research_budget
 from .research_runner import run_approved_multi_market_research
+from .market_data_hub import build_public_market_hub
+from .session_calendars import WeeklySessionCalendar
 from .universe import scan_market_universe
 
 
@@ -34,6 +37,43 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def _register_calendar_config(hub: Any, path: Path | None) -> None:
+    if path is None:
+        return
+    config = _read_json(path)
+    entries = config.get("calendars")
+    if not isinstance(entries, list):
+        raise SystemExit("Calendar config must contain a 'calendars' list")
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise SystemExit("Each calendar entry must be an object")
+        try:
+            sessions = {
+                int(weekday): tuple(bounds)
+                for weekday, bounds in entry["sessions"].items()
+            }
+            holidays = frozenset(date.fromisoformat(value) for value in entry.get("holidays", []))
+            early_closes = {
+                date.fromisoformat(day): close
+                for day, close in entry.get("early_closes", {}).items()
+            }
+            calendar = WeeklySessionCalendar(
+                calendar_id=entry["calendar_id"],
+                timezone_name=entry["timezone_name"],
+                sessions=sessions,
+                holidays=holidays,
+                early_closes=early_closes,
+            )
+            hub.register_session_calendar(
+                venue=entry["venue"],
+                asset_class=entry["asset_class"],
+                market_type=entry["market_type"],
+                calendar=calendar,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SystemExit(f"Invalid calendar entry: {exc}") from exc
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m eti.research_cli",
@@ -50,6 +90,10 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--max-per-asset-class", type=int, default=5)
     scan.add_argument("--max-per-venue", type=int, default=2)
     scan.add_argument("--output", type=Path, default=Path("artifacts/market-universe.json"))
+    scan.add_argument(
+        "--calendar-config", type=Path,
+        help="optional JSON with explicit venue/asset/market weekly sessions, holidays and early closes",
+    )
 
     allocate = commands.add_parser("allocate", help="rank data readiness and produce a plan only")
     allocate.add_argument("scan_report", type=Path)
@@ -75,6 +119,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     if args.command == "scan":
+        hub = build_public_market_hub()
+        _register_calendar_config(hub, args.calendar_config)
         report = scan_market_universe(
             asset_classes=[x.strip() for x in args.asset_classes.split(",") if x.strip()],
             market_types=[x.strip() for x in args.market_types.split(",") if x.strip()],
@@ -83,6 +129,7 @@ def main() -> None:
             min_rows=args.min_rows,
             max_per_asset_class=args.max_per_asset_class,
             max_per_venue=args.max_per_venue,
+            hub=hub,
         )
     elif args.command == "allocate":
         cost_models = _read_json(args.cost_models)
