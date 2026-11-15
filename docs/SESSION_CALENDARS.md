@@ -40,7 +40,7 @@ closed for economic evaluation.
 ```python
 from datetime import time
 from eti.session_calendar import SessionCalendar, SessionCalendarRegistry
-from eti.market_data_hub import MarketDataHub, build_public_market_hub
+from eti.market_data_hub import build_public_market_hub
 
 calendars = SessionCalendarRegistry()
 calendars.register(
@@ -55,10 +55,7 @@ calendars.register(
         version="2026.1",
     ),
 )
-hub = MarketDataHub(
-    build_public_market_hub()._adapters.values(),
-    calendar_registry=calendars,
-)
+hub = build_public_market_hub(calendar_registry=calendars)
 ```
 
 A calendar registration is not proof of its correctness or licensing. It is
