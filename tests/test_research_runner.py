@@ -40,6 +40,7 @@ def allocation(eligible=True):
                 "supports_short": False, "supports_funding": False,
             },
             "economic_evaluation_eligible": eligible,
+            "transaction_cost_model_status": "validated" if eligible else "unknown",
             "training_authorized": False,
             "eligibility_reasons": [] if eligible else ["transaction_cost_model_not_validated"],
         }],
@@ -49,6 +50,10 @@ def allocation(eligible=True):
 def scan():
     return {
         "scan_only": True,
+        "candidates": [{
+            "status": "data_ready",
+            "instrument": {"venue": "kraken", "symbol": "BTC/USD"},
+        }],
         "config": {
             "timeframe": "1h", "requested_rows": 1000,
             "minimum_valid_rows": 662,
