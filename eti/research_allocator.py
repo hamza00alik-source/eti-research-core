@@ -70,14 +70,25 @@ def _candidate_score(candidate: dict[str, Any], *, max_age_seconds: float) -> tu
         missing_fraction = min(missing / max(rows - 1.0, 1.0), 1.0)
         continuity_score = 30.0 * (1.0 - missing_fraction)
     else:
-        # Session closures differ by venue and instrument. Without a verified
-        # exchange calendar, raw gaps cannot safely be called missing candles.
-        # Withhold continuity credit and block economic eligibility pending
-        # calendar-aware validation rather than misclassifying weekends as gaps.
-        continuity_score = 0.0
-        reasons.append("session_calendar_not_applied")
+        # Session closures differ by venue and instrument. Only an exact-key,
+        # explicitly registered calendar can distinguish closed hours from gaps.
+        if quality.get("session_calendar_applied") is True:
+            expected = _finite_nonnegative(
+                "quality.expected_session_bars", quality.get("expected_session_bars")
+            )
+            session_missing = _finite_nonnegative(
+                "quality.missing_interval_estimate", quality.get("missing_interval_estimate")
+            )
+            if expected <= 0 or session_missing > expected:
+                reasons.append("invalid_session_coverage")
+                continuity_score = 0.0
+            else:
+                continuity_score = 30.0 * (1.0 - session_missing / expected)
+        else:
+            continuity_score = 0.0
+            reasons.append("session_calendar_not_applied")
     score = history_score + freshness_score + continuity_score
-    if any(reason != "session_calendar_not_applied" for reason in reasons):
+    if reasons:
         score = 0.0
     return round(score, 4), reasons
 
