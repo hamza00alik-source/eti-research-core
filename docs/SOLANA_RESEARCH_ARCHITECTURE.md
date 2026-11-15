@@ -596,3 +596,9 @@ This helper does not perform provider probes, persist telemetry, establish
 provider-wide availability, estimate uptime, or infer failure from missing
 observations. Counts describe only the supplied rows. It does not validate the
 truthfulness of the source measurements and never authorizes trading.
+
+### Provider request instrumentation
+
+`SolanaRpcClient`, `DexScreenerClient` and `RugCheckClient` accept an optional `observation_callback`. Each completed HTTP/JSON request emits provider ID, a fixed endpoint identifier, UTC observation time, measured request latency, success/error status and a sanitized error code. URLs, query strings, headers, credentials, request bodies and response bodies are never passed to the callback. Telemetry callback exceptions are swallowed so a telemetry outage cannot change the research request result.
+
+The callback is an explicit integration seam, not an implicit global storage connection. A trusted application layer may bind it to `Storage.record_solana_provider_observation(owner_id, workspace_id, **sample)` only after it has authenticated the owner and verified workspace membership. Do not capture owner IDs from untrusted request payloads or share one callback across tenants. The adapters do not infer identity, create credentials, or persist observations by themselves. PumpPortal WebSocket events are not yet included in this HTTP request instrumentation.
