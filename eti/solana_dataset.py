@@ -189,9 +189,65 @@ def prepare_solana_training_rows(dataset_export: dict[str, Any]) -> dict[str, An
         if isinstance(horizon, bool) or not isinstance(horizon, int) or horizon <= 0:
             reject("invalid_horizon")
             continue
-        outcome = label["label"].get("sampled_price_return_pct")
+        label_body = label["label"]
+        outcome = label_body.get("sampled_price_return_pct")
         if isinstance(outcome, bool) or not isinstance(outcome, (int, float)) or not _is_finite_number(outcome):
             reject("invalid_outcome")
+            continue
+
+        # Bind label timing and sampled outcome to the exact referenced snapshots.
+        # These fields are optional only for compatibility with older hand-built exports.
+        baseline_stamp = _timestamp(baseline.get("fetched_at"))
+        target_stamp = _timestamp(target.get("fetched_at"))
+        if baseline_stamp is None or target_stamp is None or target_stamp <= baseline_stamp:
+            reject("invalid_snapshot_pair_timestamps")
+            continue
+        for label_key, snapshot_stamp in (
+            ("baseline_at", baseline_stamp), ("target_at", target_stamp),
+        ):
+            if label_key in label_body:
+                label_stamp = _timestamp(label_body.get(label_key))
+                if label_stamp is None or label_stamp != snapshot_stamp:
+                    reject("label_snapshot_timestamp_mismatch")
+                    break
+        else:
+            elapsed = (target_stamp - baseline_stamp).total_seconds()
+            if "actual_elapsed_seconds" in label_body:
+                reported_elapsed = label_body.get("actual_elapsed_seconds")
+                if (
+                    isinstance(reported_elapsed, bool)
+                    or not isinstance(reported_elapsed, (int, float))
+                    or not _is_finite_number(reported_elapsed)
+                    or abs(float(reported_elapsed) - elapsed) > 0.001
+                ):
+                    reject("label_elapsed_time_mismatch")
+                    continue
+            if elapsed < horizon:
+                reject("target_before_label_horizon")
+                continue
+            base_evidence = baseline.get("payload", {}).get("evidence")
+            target_evidence = target.get("payload", {}).get("evidence")
+            if isinstance(base_evidence, dict) and isinstance(target_evidence, dict):
+                base_price = base_evidence.get("price_usd")
+                target_price = target_evidence.get("price_usd")
+                if (
+                    isinstance(base_price, bool) or isinstance(target_price, bool)
+                    or not isinstance(base_price, (int, float))
+                    or not isinstance(target_price, (int, float))
+                    or not _is_finite_number(base_price)
+                    or not _is_finite_number(target_price)
+                    or base_price <= 0
+                ):
+                    reject("invalid_snapshot_prices")
+                    continue
+                recomputed_outcome = round((float(target_price) / float(base_price) - 1.0) * 100.0, 8)
+                if float(outcome) != recomputed_outcome:
+                    reject("label_outcome_snapshot_mismatch")
+                    continue
+        if label_key in label_body and (
+            _timestamp(label_body.get(label_key)) is None
+            or _timestamp(label_body.get(label_key)) != snapshot_stamp
+        ):
             continue
         evidence = baseline.get("payload", {}).get("evidence")
         if not isinstance(evidence, dict):
