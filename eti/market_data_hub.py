@@ -16,6 +16,7 @@ from .adapters import AdapterCapabilities, AdapterRegistry, MarketAdapter
 from .data import validate_ohlcv
 from .instruments import InstrumentCatalog, InstrumentSpec
 from .providers import CcxtPublicProvider, YahooFinanceProvider
+from .session_calendars import SessionCalendar
 
 
 @dataclass(frozen=True)
@@ -189,12 +190,29 @@ class MarketDataHub:
         self.registry = AdapterRegistry()
         self.catalog = InstrumentCatalog()
         self._adapters: dict[str, MarketAdapter] = {}
+        self._session_calendars: dict[tuple[str, str, str], SessionCalendar] = {}
         for adapter in adapters:
             self.register(adapter)
 
     def register(self, adapter: MarketAdapter) -> None:
         self.registry.register(adapter)
         self._adapters[adapter.capabilities.venue] = adapter
+
+    def register_session_calendar(
+        self, *, venue: str, asset_class: str, market_type: str,
+        calendar: SessionCalendar,
+    ) -> None:
+        """Register an explicit calendar for one venue/instrument domain."""
+        key = (venue.strip().lower(), asset_class.strip().lower(), market_type.strip().lower())
+        if not all(key):
+            raise ValueError("calendar venue, asset_class and market_type are required")
+        if not isinstance(getattr(calendar, "calendar_id", None), str) or not calendar.calendar_id.strip():
+            raise TypeError("calendar must expose a non-empty calendar_id")
+        if not callable(getattr(calendar, "expected_bar_timestamps", None)):
+            raise TypeError("calendar must implement expected_bar_timestamps")
+        if key in self._session_calendars:
+            raise ValueError(f"Session calendar already registered: {key}")
+        self._session_calendars[key] = calendar
 
     def available_sources(self) -> list[dict[str, object]]:
         return self.registry.available()
@@ -258,7 +276,10 @@ class MarketDataHub:
         }
 
     @staticmethod
-    def _quality(frame: pd.DataFrame, timeframe: str) -> dict[str, Any]:
+    def _quality(
+        frame: pd.DataFrame, timeframe: str, instrument: InstrumentSpec,
+        calendar: SessionCalendar | None = None,
+    ) -> dict[str, Any]:
         try:
             interval = pd.Timedelta(timeframe)
         except (TypeError, ValueError) as exc:
@@ -273,7 +294,7 @@ class MarketDataHub:
         now = datetime.now(timezone.utc)
         last = timestamps.iloc[-1].to_pydatetime()
         age = max(0.0, (now - last).total_seconds())
-        return {
+        quality = {
             "rows": int(len(frame)),
             "start": timestamps.iloc[0].isoformat(),
             "end": timestamps.iloc[-1].isoformat(),
@@ -282,11 +303,37 @@ class MarketDataHub:
             "last_candle_age_seconds": age,
             "timestamp_order": "ascending",
             "ohlcv_validated": True,
+            "session_calendar_applied": False,
         }
+        if calendar is not None:
+            start = timestamps.iloc[0].to_pydatetime()
+            end = timestamps.iloc[-1].to_pydatetime()
+            expected = calendar.expected_bar_timestamps(start, end, timeframe)
+            actual = {
+                value.to_pydatetime().astimezone(timezone.utc)
+                for value in timestamps
+            }
+            expected_set = set(expected)
+            missing_expected = len(expected_set - actual)
+            unexpected = len(actual - expected_set)
+            quality.update({
+                "session_calendar_applied": True,
+                "session_calendar_id": calendar.calendar_id,
+                "expected_session_intervals": len(expected_set),
+                "missing_expected_intervals": missing_expected,
+                "unexpected_session_timestamps": unexpected,
+                "session_coverage_validated": bool(expected_set) and unexpected == 0,
+                "missing_interval_estimate": missing_expected,
+            })
+            elapsed = getattr(calendar, "elapsed_trading_seconds", None)
+            if callable(elapsed):
+                age = max(0.0, elapsed(last + interval.to_pytimedelta(), now))
+                quality["last_candle_age_seconds"] = age
+        return quality
 
     def fetch(
         self, instrument: InstrumentSpec, timeframe: str, limit: int,
-        *, min_rows: int = 1,
+        *, min_rows: int = 1, calendar: SessionCalendar | None = None,
     ) -> MarketDataSnapshot:
         if isinstance(limit, bool) or limit < 1:
             raise ValueError("limit must be a positive integer")
@@ -304,7 +351,10 @@ class MarketDataHub:
             raise ValueError(
                 f"{instrument.venue} returned {len(clean)} valid candles; {min_rows} required"
             )
-        quality = self._quality(clean, timeframe)
+        calendar = calendar or self._session_calendars.get(
+            (instrument.venue, instrument.asset_class, instrument.market_type)
+        )
+        quality = self._quality(clean, timeframe, instrument, calendar)
         provenance = {
             "venue": instrument.venue, "symbol": instrument.symbol,
             "asset_class": instrument.asset_class, "market_type": instrument.market_type,
@@ -312,6 +362,7 @@ class MarketDataHub:
             "returned_rows": len(clean), "public_market_data": adapter.capabilities.public_market_data,
             "authenticated_market_data": adapter.capabilities.authenticated_market_data,
             "execution_capability": adapter.capabilities.order_execution,
+            "session_calendar_id": calendar.calendar_id if calendar else None,
         }
         return MarketDataSnapshot(instrument, timeframe, clean, provenance, quality)
 
