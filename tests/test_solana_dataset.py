@@ -534,3 +534,19 @@ def test_training_preparation_binds_label_times_and_outcome_to_snapshot_evidence
     result = prepare_solana_training_rows(corrupted_target)
     assert result["eligible_row_count"] == 0
     assert result["exclusion_counts"] == {"label_outcome_snapshot_mismatch": 1}
+
+
+
+def test_dataset_validator_flags_every_occurrence_of_duplicate_snapshot_id():
+    rows = [
+        {"id": "same-id", "capability": "solana.market.scan", "mint": "MintA",
+         "pool_address": "PoolA", "schema_version": 1, "fetched_at": "2026-01-01T00:00:00Z",
+         "payload": {"evidence": {}}},
+        {"id": "same-id", "capability": "solana.market.scan", "mint": "MintB",
+         "pool_address": "PoolB", "schema_version": 1, "fetched_at": "2026-01-01T00:01:00Z",
+         "payload": {"evidence": {}}},
+    ]
+    report = validate_snapshot_rows(rows)
+    assert report["issue_counts"]["duplicate_snapshot_id"] == 2
+    assert report["rows_with_issues"] == 2
+    assert all("duplicate_snapshot_id" in row["issues"] for row in report["row_issues"])
