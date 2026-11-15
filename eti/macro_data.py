@@ -150,12 +150,12 @@ class MacroDataHub:
             if identity in identities:
                 raise ValueError(f"duplicate macro observation identity: {identity}")
             identities.add(identity)
+            if row.available_at > decision_time:
+                continue
             if row.license_status not in self.allowed_license_statuses:
                 raise PermissionError(
                     f"macro observation license is not approved: {row.license_status}"
                 )
-            if row.available_at > decision_time:
-                continue
             current = eligible.get(row.period)
             if current is None or row.available_at > current.available_at:
                 eligible[row.period] = row
