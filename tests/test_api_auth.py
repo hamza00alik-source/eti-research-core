@@ -113,6 +113,11 @@ def test_solana_provider_observation_ledger_is_authenticated_scoped_and_minimal(
             f"/v1/workspaces/{workspace_id}/solana/provider-observations",
             headers=headers_a, json=unsafe_endpoint,
         ).status_code == 422
+        plain_url_endpoint = {**payload, "endpoint_id": "https://api.example/v1/token-pairs"}
+        assert client.post(
+            f"/v1/workspaces/{workspace_id}/solana/provider-observations",
+            headers=headers_a, json=plain_url_endpoint,
+        ).status_code == 422
         error_payload = {**payload, "status": "error", "error_code": "HTTP_429"}
         assert client.post(
             f"/v1/workspaces/{workspace_id}/solana/provider-observations",
