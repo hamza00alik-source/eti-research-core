@@ -149,3 +149,56 @@ def test_yahoo_discovery_is_scoped_and_keeps_partial_asset_class_results(monkeyp
     assert result["instruments"][0].asset_class == "forex"
     assert len(result["source_errors"]) == 1
     assert "equity reference endpoint unavailable" in result["source_errors"][0]["message"]
+
+
+
+def test_registered_session_calendar_excludes_weekends_from_missing_bar_count():
+    from datetime import date
+    from eti.session_calendars import WeeklySessionCalendar
+
+    calendar = WeeklySessionCalendar(
+        calendar_id="TEST-EQUITY",
+        timezone_name="America/New_York",
+        sessions={i: ("09:30", "16:00") for i in range(5)},
+        holidays=frozenset({date(2026, 1, 1)}),
+    )
+    expected = calendar.expected_bar_timestamps(
+        pd.Timestamp("2026-01-05T14:30:00Z").to_pydatetime(),
+        pd.Timestamp("2026-01-06T21:00:00Z").to_pydatetime(),
+        "1h",
+    )
+    frame = pd.DataFrame({
+        "timestamp": pd.to_datetime(expected),
+        "open": [100.0] * len(expected), "high": [102.0] * len(expected),
+        "low": [99.0] * len(expected), "close": [101.0] * len(expected),
+        "volume": [10.0] * len(expected),
+    })
+    adapter = FakeAdapter("equity-source", frame=frame, asset="equity")
+    hub = MarketDataHub([adapter])
+    instrument = InstrumentSpec("SPY", "equity-source", "equity", "spot")
+    hub.register_session_calendar(
+        venue="equity-source", asset_class="equity", market_type="spot",
+        calendar=calendar,
+    )
+    result = hub.fetch(instrument, "1h", len(frame), min_rows=len(frame))
+    assert result.quality["session_calendar_applied"] is True
+    assert result.quality["session_calendar_id"] == "TEST-EQUITY"
+    assert result.quality["session_coverage_validated"] is True
+    assert result.quality["missing_expected_intervals"] == 0
+    assert result.quality["unexpected_session_timestamps"] == 0
+
+
+def test_session_calendar_registration_is_scoped_and_duplicate_safe():
+    from eti.session_calendars import WeeklySessionCalendar
+
+    hub = MarketDataHub([FakeAdapter("equity-source", asset="equity")])
+    calendar = WeeklySessionCalendar(
+        calendar_id="TEST", timezone_name="UTC", sessions={i: ("09:00", "17:00") for i in range(5)}
+    )
+    kwargs = dict(
+        venue="equity-source", asset_class="equity", market_type="spot",
+        calendar=calendar,
+    )
+    hub.register_session_calendar(**kwargs)
+    with pytest.raises(ValueError, match="already registered"):
+        hub.register_session_calendar(**kwargs)
