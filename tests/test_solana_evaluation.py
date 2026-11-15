@@ -66,7 +66,7 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
             "horizon_seconds": 3600,
             "label": {
                 "baseline_at": stamp,
-                "target_at": f"2026-01-{1 + index * 2:02d}T01:00:00Z",
+                "target_at": f"2026-01-{1 + index * 2 if index < 7 else 13:02d}T01:00:00Z",
             },
         })
         prepared.append({
