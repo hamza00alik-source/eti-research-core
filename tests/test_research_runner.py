@@ -21,7 +21,7 @@ def approval(**overrides):
             "horizon": 6, "min_train": 400, "validation_size": 100,
             "test_size": 100, "step_size": 200,
         },
-        "instruments": {"kraken:BTC/USD": {
+        "instruments": {"kraken:spot:BTC/USD": {
             "fee_bps": 6.0, "slippage_bps": 2.0,
             "funding_bps_per_bar": 0.0, "allow_short": False,
         }},
@@ -36,7 +36,7 @@ def allocation(eligible=True):
         "candidates": [{
             "instrument": {
                 "venue": "kraken", "symbol": "BTC/USD",
-                "asset_class": "crypto", "market_type": "spot",
+                "asset_class": "crypto", "market_type": "spot", "contract_multiplier": 1.0, "active": True,
                 "supports_short": False, "supports_funding": False,
             },
             "economic_evaluation_eligible": eligible,
@@ -52,7 +52,7 @@ def scan():
         "scan_only": True,
         "candidates": [{
             "status": "data_ready",
-            "instrument": {"venue": "kraken", "symbol": "BTC/USD"},
+            "instrument": {"venue": "kraken", "symbol": "BTC/USD", "market_type": "spot", "contract_multiplier": 1.0, "active": True, "supports_short": False, "supports_funding": False, "asset_class": "crypto"},
         }],
         "config": {
             "timeframe": "1h", "requested_rows": 1000,
