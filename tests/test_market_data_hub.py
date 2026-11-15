@@ -200,3 +200,34 @@ def test_ccxt_spot_discovery_defaults_missing_contract_size_to_one(monkeypatch):
     assert result["count"] == 1
     assert result["instruments"][0].contract_multiplier == 1.0
     assert result["source_errors"] == []
+
+
+def test_ccxt_discovery_errors_are_scoped_to_each_market_type_request(monkeypatch):
+    import eti.market_data_hub as hub_module
+
+    class Provider:
+        def __init__(self, venue, market_type):
+            self.market_type = market_type
+
+        def discover_markets(self, limit=1000):
+            if self.market_type == "swap":
+                return [
+                    {"symbol": "BAD/USDT:USDT", "base": "BAD", "quote": "USDT",
+                     "settle": "USDT", "contract_size": None, "active": True}
+                ]
+            return [
+                {"symbol": "BTC/USDT", "base": "BTC", "quote": "USDT",
+                 "contract_size": None, "active": True}
+            ]
+
+    monkeypatch.setattr(hub_module, "CcxtPublicProvider", Provider)
+    adapter = hub_module.CcxtMarketAdapter("binance", ("spot", "swap"))
+
+    adapter.discover_instruments_for("swap")
+    assert len(adapter.discovery_errors) == 1
+    adapter.discover_instruments_for("spot")
+    assert adapter.discovery_errors == []
+
+    adapter.discover_instruments()
+    assert len(adapter.discovery_errors) == 1
+    assert adapter.discovery_errors[0]["market_type"] == "swap"

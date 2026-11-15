@@ -86,7 +86,8 @@ class CcxtMarketAdapter:
         return found
 
     def discover_instruments_for(self, market_type: str) -> list[InstrumentSpec]:
-        """Discover only one requested market type to avoid unnecessary venue calls."""
+        """Discover one market type and expose only errors from this request."""
+        self.discovery_errors = []
         try:
             provider = self._providers[market_type]
         except KeyError as exc:
@@ -97,15 +98,17 @@ class CcxtMarketAdapter:
 
     def discover_instruments(self) -> list[InstrumentSpec]:
         found: list[InstrumentSpec] = []
-        self.discovery_errors = []
+        errors: list[dict[str, str]] = []
         for market_type in self.market_types:
             try:
                 found.extend(self.discover_instruments_for(market_type))
+                errors.extend(self.discovery_errors)
             except Exception as exc:
-                self.discovery_errors.append({
+                errors.append({
                     "market_type": market_type, "error_type": type(exc).__name__,
                     "message": str(exc)[:500],
                 })
+        self.discovery_errors = errors
         return found
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
