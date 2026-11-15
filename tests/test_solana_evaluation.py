@@ -997,3 +997,50 @@ def test_multi_configuration_regime_robustness_orchestrates_predeclared_configs(
     with pytest.raises(ValueError):
         evaluate_solana_regime_robustness([], [], {"only_one": config},
                                           persistence_maximum_gap_seconds=3600)
+
+
+def test_market_wide_regime_shocks_detect_cooccurring_mint_transitions_without_bridging_conflicts():
+    from eti.solana_regime_shocks import evaluate_solana_market_wide_regime_shocks
+
+    observations = []
+    for mint in ("mint-a", "mint-b", "mint-c"):
+        observations.extend([
+            {"mint": mint, "pool_address": "pool-" + mint, "horizon_seconds": "60",
+             "baseline_at": "2026-01-01T00:00:00Z", "regime": "UP"},
+            {"mint": mint, "pool_address": "pool-" + mint, "horizon_seconds": "60",
+             "baseline_at": "2026-01-01T00:01:00Z", "regime": "DOWN"},
+        ])
+    # A conflicting timestamp breaks continuity; it must not create UP -> DOWN.
+    observations.extend([
+        {"mint": "mint-conflict", "pool_address": "pool-conflict", "horizon_seconds": "60",
+         "baseline_at": "2026-01-01T00:00:00Z", "regime": "UP"},
+        {"mint": "mint-conflict", "pool_address": "pool-conflict", "horizon_seconds": "60",
+         "baseline_at": "2026-01-01T00:00:30Z", "regime": "UP"},
+        {"mint": "mint-conflict", "pool_address": "pool-conflict", "horizon_seconds": "60",
+         "baseline_at": "2026-01-01T00:00:30Z", "regime": "RANGE"},
+        {"mint": "mint-conflict", "pool_address": "pool-conflict", "horizon_seconds": "60",
+         "baseline_at": "2026-01-01T00:01:00Z", "regime": "DOWN"},
+    ])
+    report = evaluate_solana_market_wide_regime_shocks(
+        observations, bucket_seconds=60, maximum_gap_seconds=90,
+        minimum_mints=3, minimum_transitions=3,
+    )
+    shock = next(item for item in report["shock_buckets"] if item["bucket_start"].endswith("00:01:00+00:00"))
+    assert shock["transition_mint_count"] == 3
+    assert shock["transition_count"] == 3
+    assert shock["transition_types"] == {"UP->DOWN": 3}
+    assert report["excluded_conflicting_timestamp_count"] == 1
+    assert report["training_authorized"] is False
+    assert report["causality_established"] is False
+
+
+def test_market_wide_regime_shocks_reject_invalid_controls_and_timezone_naive_rows():
+    from eti.solana_regime_shocks import evaluate_solana_market_wide_regime_shocks
+
+    report = evaluate_solana_market_wide_regime_shocks([
+        {"mint": "m", "pool_address": "p", "horizon_seconds": "60",
+         "baseline_at": "2026-01-01T00:00:00", "regime": "UP"},
+    ])
+    assert report["bucket_count"] == 0
+    with pytest.raises(ValueError):
+        evaluate_solana_market_wide_regime_shocks([], bucket_seconds=0)
