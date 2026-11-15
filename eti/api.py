@@ -1,5 +1,6 @@
 """Research API and PWA host. No live order placement routes exist."""
 from __future__ import annotations
+from datetime import datetime, timezone
 from pathlib import Path
 import math
 import os
@@ -30,6 +31,7 @@ from .solana_dataset import (
 from .solana_cost_evaluation import evaluate_stored_solana_walk_forward
 from .solana_research import ProviderError, SolanaRpcClient
 from .solana_tx_verification import verify_finalized_transaction_for_mint
+from .solana_provider_health import evaluate_solana_provider_health
 
 app = FastAPI(title=AppConfig().app_name, version=AppConfig().version, lifespan=runtime_lifespan)
 risk_engine = RiskEngine()
@@ -125,6 +127,18 @@ class SolanaCostEvidencePayload(BaseModel):
     mint: str = Field(min_length=32, max_length=64)
     pool_address: str = Field(min_length=1, max_length=128)
     evidence: dict[str, Any]
+
+
+class SolanaProviderObservationPayload(BaseModel):
+    provider: str = Field(min_length=1, max_length=80)
+    endpoint_id: str = Field(min_length=1, max_length=120)
+    observed_at: str = Field(min_length=20, max_length=40)
+    status: str = Field(regex="^(success|error)$")
+    latency_ms: float | None = Field(default=None, ge=0, le=3600000)
+    error_code: str | None = Field(default=None, min_length=1, max_length=80)
+
+    class Config:
+        extra = "forbid"
 
 
 class SolanaWalkForwardEvaluationPayload(BaseModel):
@@ -836,6 +850,42 @@ def list_solana_transaction_attestations(
             account["id"], workspace_id, label_id=label_id, limit=limit
         )
         return {"items": items}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/workspaces/{workspace_id}/solana/provider-observations", status_code=201)
+def record_solana_provider_observation(
+    workspace_id: str, payload: SolanaProviderObservationPayload,
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        return _memory_store().record_solana_provider_observation(
+            account["id"], workspace_id, payload.provider, payload.endpoint_id,
+            payload.observed_at, payload.status, payload.latency_ms, payload.error_code)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/v1/workspaces/{workspace_id}/solana/provider-observations")
+def list_solana_provider_observations(
+    workspace_id: str,
+    provider: str | None = Query(default=None, min_length=1, max_length=80),
+    limit: int = Query(default=500, ge=1, le=1000),
+    account: dict[str, str] = Depends(current_account),
+):
+    try:
+        items = _memory_store().list_solana_provider_observations(
+            account["id"], workspace_id, provider=provider, limit=limit)
+        report = evaluate_solana_provider_health(
+            [{key: item[key] for key in ("provider", "observed_at", "status", "latency_ms", "error_code")}
+             for item in items], now=datetime.now(timezone.utc).isoformat())
+        return {"items": items, "health": report,
+                "scope": "submitted request observations for this owner/workspace only"}
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
     except ValueError as exc:
