@@ -28,6 +28,28 @@ def _number(name: str, value: Any, *, positive: bool = False, allow_negative: bo
     return result
 
 
+def _validate_funding_event_alignment(events: list[dict[str, Any]],
+                                       candle_timestamps: pd.Series,
+                                       identity: str) -> None:
+    """Preflight exact funding/bar alignment before spending any model fits."""
+    bars = pd.DatetimeIndex(pd.to_datetime(candle_timestamps, utc=True))
+    if not bars.is_unique or not bars.is_monotonic_increasing:
+        raise ValueError(f"{identity} funding preflight requires unique chronological bars")
+    available = set(bars)
+    for index, event in enumerate(events):
+        try:
+            timestamp = pd.Timestamp(event["timestamp"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"{identity} funding event {index} has an invalid timestamp") from exc
+        if timestamp.tzinfo is None:
+            raise ValueError(f"{identity} funding event {index} timestamp must include a timezone")
+        if timestamp.tz_convert("UTC") not in available:
+            raise ValueError(
+                f"{identity} funding event {index} does not align to a fetched OHLCV bar; "
+                "preflight stopped before model fitting"
+            )
+
+
 def _instrument(record: dict[str, Any]) -> InstrumentSpec:
     item = record.get("instrument")
     if not isinstance(item, dict):
@@ -201,6 +223,7 @@ def run_approved_multi_market_research(
             coverage_end = pd.Timestamp(coverage["end"])
             if coverage_start > candle_times.min() or coverage_end < candle_times.max():
                 raise ValueError(f"{key} funding schedule does not cover the complete OHLCV research window")
+            _validate_funding_event_alignment(funding_schedule, candle_times, key)
         from .features import build_features, feature_columns_for_frame, make_labels
         frame = snapshot.frame
         feature_frame = build_features(frame)
