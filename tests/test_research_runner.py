@@ -122,3 +122,22 @@ def test_runner_rejects_execution_enabled_approval():
         run_approved_multi_market_research(
             scan(), allocation(), approval(execution_enabled=True), hub=FakeHub()
         )
+
+
+def test_runner_rejects_zero_contract_multiplier_instead_of_defaulting():
+    from eti.research_runner import _instrument
+    row = allocation()["candidates"][0]
+    row["instrument"]["contract_multiplier"] = 0
+    with pytest.raises(ValueError, match="contract_multiplier"):
+        _instrument(row)
+
+
+def test_runner_rejects_inactive_instrument():
+    inactive_scan = scan()
+    inactive_allocation = allocation()
+    inactive_scan["candidates"][0]["instrument"]["active"] = False
+    inactive_allocation["candidates"][0]["instrument"]["active"] = False
+    with pytest.raises(ValueError, match="inactive"):
+        run_approved_multi_market_research(
+            inactive_scan, inactive_allocation, approval(), hub=FakeHub()
+        )
