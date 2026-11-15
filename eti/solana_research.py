@@ -10,8 +10,9 @@ import hashlib
 import json
 import os
 import time
+from datetime import datetime, timezone
 from dataclasses import asdict, dataclass
-from typing import Any, AsyncIterator, Iterable
+from typing import Any, AsyncIterator, Callable, Iterable
 
 import httpx
 
@@ -50,24 +51,69 @@ def _number(value: Any) -> float | None:
     return result if result == result and abs(result) != float("inf") else None
 
 
+ProviderObservationCallback = Callable[[dict[str, Any]], None]
+
+
+def _observed_http_json(
+    request: Callable[[], httpx.Response],
+    *,
+    provider: str,
+    endpoint_id: str,
+    callback: ProviderObservationCallback | None,
+) -> Any:
+    """Measure one provider HTTP request and emit credential-free telemetry."""
+    started = time.monotonic()
+    observed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    status = "error"
+    error_code: str | None = None
+    try:
+        response = request()
+        response.raise_for_status()
+        payload = response.json()
+        status = "success"
+        return payload
+    except (httpx.HTTPError, ValueError) as exc:
+        response_obj = getattr(exc, "response", None)
+        status_code = getattr(response_obj, "status_code", None)
+        error_code = f"HTTP_{status_code}" if isinstance(status_code, int) else type(exc).__name__
+        raise
+    finally:
+        if callback is not None:
+            try:
+                callback({
+                    "provider": provider, "endpoint_id": endpoint_id,
+                    "observed_at": observed_at, "status": status,
+                    "latency_ms": round((time.monotonic() - started) * 1000.0, 3),
+                    "error_code": error_code,
+                })
+            except Exception:
+                pass
+
+
 class SolanaRpcClient:
     """Small JSON-RPC client; configure a dedicated endpoint for sustained workloads."""
 
-    def __init__(self, url: str | None = None, timeout: float = 15.0):
+    def __init__(
+        self, url: str | None = None, timeout: float = 15.0,
+        observation_callback: ProviderObservationCallback | None = None,
+    ):
         self.url = url or os.getenv("ETI_SOLANA_RPC_URL", "https://api.mainnet.solana.com")
         self.timeout = timeout
+        self.observation_callback = observation_callback
         self._next_id = int(time.time() * 1000)
 
     def call(self, method: str, params: list[Any]) -> Any:
         self._next_id += 1
         try:
-            response = httpx.post(
-                self.url,
-                json={"jsonrpc": "2.0", "id": self._next_id, "method": method, "params": params},
-                timeout=self.timeout,
+            payload = _observed_http_json(
+                lambda: httpx.post(
+                    self.url,
+                    json={"jsonrpc": "2.0", "id": self._next_id, "method": method, "params": params},
+                    timeout=self.timeout,
+                ),
+                provider="solana-rpc", endpoint_id=method,
+                callback=self.observation_callback,
             )
-            response.raise_for_status()
-            payload = response.json()
         except (httpx.HTTPError, ValueError) as exc:
             raise ProviderError(f"Solana RPC {method} request failed: {type(exc).__name__}") from exc
         if not isinstance(payload, dict) or payload.get("error"):
@@ -105,8 +151,12 @@ class SolanaRpcClient:
 class DexScreenerClient:
     """Public DexScreener token-pair lookup, respecting its 30-mint batch limit."""
 
-    def __init__(self, timeout: float = 12.0):
+    def __init__(
+        self, timeout: float = 12.0,
+        observation_callback: ProviderObservationCallback | None = None,
+    ):
         self.timeout = timeout
+        self.observation_callback = observation_callback
 
     def fetch_pairs(self, mints: Iterable[str]) -> list[dict[str, Any]]:
         values = list(dict.fromkeys(mints))
@@ -117,9 +167,11 @@ class DexScreenerClient:
             batch = values[offset:offset + 30]
             url = f"{DEX_BASE}/tokens/v1/solana/{','.join(batch)}"
             try:
-                response = httpx.get(url, timeout=self.timeout)
-                response.raise_for_status()
-                payload = response.json()
+                payload = _observed_http_json(
+                    lambda: httpx.get(url, timeout=self.timeout),
+                    provider="dexscreener", endpoint_id="tokens_v1_solana",
+                    callback=self.observation_callback,
+                )
             except (httpx.HTTPError, ValueError) as exc:
                 raise ProviderError(f"DexScreener token lookup failed: {type(exc).__name__}") from exc
             if not isinstance(payload, list):
@@ -143,14 +195,21 @@ class DexScreenerClient:
 class RugCheckClient:
     """Optional public risk-intelligence source; response fields are not trusted blindly."""
 
-    def __init__(self, timeout: float = 15.0):
+    def __init__(
+        self, timeout: float = 15.0,
+        observation_callback: ProviderObservationCallback | None = None,
+    ):
         self.timeout = timeout
+        self.observation_callback = observation_callback
 
     def _get(self, path: str) -> dict[str, Any]:
         try:
-            response = httpx.get(f"{RUGCHECK_BASE}{path}", timeout=self.timeout)
-            response.raise_for_status()
-            payload = response.json()
+            payload = _observed_http_json(
+                lambda: httpx.get(f"{RUGCHECK_BASE}{path}", timeout=self.timeout),
+                provider="rugcheck",
+                endpoint_id="token_report" if path.endswith("/report") else "insider_graph",
+                callback=self.observation_callback,
+            )
         except (httpx.HTTPError, ValueError) as exc:
             raise ProviderError(f"RugCheck request failed: {type(exc).__name__}") from exc
         if not isinstance(payload, dict):
