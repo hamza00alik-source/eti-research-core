@@ -8,6 +8,34 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 CLASSES = np.array([0, 1, 2])
 
 
+def _reliability_diagnostics(probabilities: np.ndarray, labels: np.ndarray,
+                             bin_count: int = 10) -> dict:
+    """Return top-label ECE and equal-width reliability bins for a fixed sample."""
+    confidence = probabilities.max(axis=1)
+    correct = probabilities.argmax(axis=1) == labels
+    edges = np.linspace(0.0, 1.0, bin_count + 1)
+    bins = []
+    ece = 0.0
+    sample_count = len(labels)
+    for index in range(bin_count):
+        lower, upper = float(edges[index]), float(edges[index + 1])
+        mask = ((confidence >= lower) &
+                ((confidence <= upper) if index == bin_count - 1 else (confidence < upper)))
+        count = int(mask.sum())
+        if count:
+            mean_confidence = float(confidence[mask].mean())
+            accuracy = float(correct[mask].mean())
+            ece += count / sample_count * abs(accuracy - mean_confidence)
+        else:
+            mean_confidence = None
+            accuracy = None
+        bins.append({
+            "lower": lower, "upper": upper, "count": count,
+            "mean_confidence": mean_confidence, "accuracy": accuracy,
+        })
+    return {"expected_calibration_error": float(ece), "bin_count": bin_count, "bins": bins}
+
+
 class BaselineModel:
     def __init__(self, random_state: int = 42):
         self.estimator = HistGradientBoostingClassifier(
@@ -114,6 +142,8 @@ class BaselineModel:
         brier_before = float(np.mean(np.sum((aligned - one_hot) ** 2, axis=1)))
         calibrated = probabilities(float(result.x))
         brier_after = float(np.mean(np.sum((calibrated - one_hot) ** 2, axis=1)))
+        reliability_before = _reliability_diagnostics(aligned, labels)
+        reliability_after = _reliability_diagnostics(calibrated, labels)
         passed = bool(
             result.success and np.isfinite(temperature) and temperature > 0
             and np.isfinite(after) and after <= before + 1e-9
@@ -125,6 +155,8 @@ class BaselineModel:
             "nll_after": after,
             "brier_before": brier_before,
             "brier_after": brier_after,
+            "reliability_before": reliability_before,
+            "reliability_after": reliability_after,
         })
         if passed:
             self.calibration_status = "calibrated"
