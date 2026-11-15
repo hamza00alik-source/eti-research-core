@@ -111,6 +111,7 @@ def evaluate_solana_market_wide_regime_shocks(
             "horizon_seconds": horizon,
             "bucket_start": datetime.fromtimestamp(bucket, tz=timezone.utc).isoformat(),
             "observed_mint_count": len(observed_mints),
+            "observed_mints": sorted(observed_mints),
             "transition_mint_count": len(changed_mints),
             "transition_mints": sorted(changed_mints),
             "transition_count": transition_count,
@@ -273,10 +274,12 @@ def evaluate_solana_shock_period_stability(
         shock_bucket_count = 0
         transition_count = 0
         for row in rows:
-            observed = row.get("observed_mint_count")
-            if isinstance(observed, int) and not isinstance(observed, bool) and observed >= 0:
-                # Only aggregate reported counts; identities are unavailable for all observed mints.
-                pass
+            row_observed_mints = row.get("observed_mints", [])
+            if isinstance(row_observed_mints, list):
+                observed_mints.update(
+                    mint.strip() for mint in row_observed_mints
+                    if isinstance(mint, str) and mint.strip()
+                )
             if row.get("meets_shock_threshold") is True:
                 shock_bucket_count += 1
                 mints = row.get("transition_mints", [])
@@ -288,18 +291,7 @@ def evaluate_solana_shock_period_stability(
             count = row.get("transition_count")
             if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
                 transition_count += count
-        # Shock buckets alone do not expose all observed mint identities. Use the
-        # per-bucket observed counts for a conservative minimum coverage proxy.
-        observed_mint_count_sum = sum(
-            row.get("observed_mint_count", 0)
-            for row in rows
-            if isinstance(row.get("observed_mint_count"), int)
-            and not isinstance(row.get("observed_mint_count"), bool)
-            and row.get("observed_mint_count", 0) >= 0
-        )
-        distinct_observed_mints = max(
-            observed_mints.__len__(), len(transition_mints)
-        )
+        distinct_observed_mints = len(observed_mints)
         eligible = (
             observed_bucket_count >= minimum_buckets_per_period
             and distinct_observed_mints >= minimum_observed_mints_per_period
@@ -312,8 +304,7 @@ def evaluate_solana_shock_period_stability(
             "shock_bucket_rate": shock_bucket_count / observed_bucket_count if observed_bucket_count else None,
             "transition_count": transition_count,
             "distinct_transition_mint_count": len(transition_mints),
-            "reported_observed_mint_bucket_count_sum": observed_mint_count_sum,
-            "minimum_coverage_proxy_mint_count": distinct_observed_mints,
+            "distinct_observed_mint_count": distinct_observed_mints,
             "eligible_for_descriptive_comparison": eligible,
             "insufficient_coverage": not eligible,
         })
@@ -329,5 +320,5 @@ def evaluate_solana_shock_period_stability(
         "independent_periods_established": False,
         "training_authorized": False,
         "realized_pnl_available": False,
-        "note": "Fixed UTC periods are descriptive partitions, not independent samples. The shock input contains observed mint counts but not identities for all observed mints, so coverage eligibility uses only the distinct transition-mint count as a lower bound; it cannot establish full mint-population coverage or absence of concentration.",
+        "note": "Fixed UTC periods are descriptive partitions, not independent samples. Observed mint identities are unioned across buckets within each period; mint recurrence across periods is still dependent and does not establish independent samples.",
     }
