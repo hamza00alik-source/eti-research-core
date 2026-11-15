@@ -18,11 +18,7 @@ def funding_cost_series(position: pd.Series, events: list[dict[str, Any]] | None
         return costs
     if not isinstance(events, list):
         raise ValueError("funding_events must be a list")
-    if not events:
-        return costs
     # An empty schedule is a true no-op; it must not impose timestamp requirements.
-    if not events:
-        return costs
     if not events:
         return costs
     index = position.index
@@ -35,8 +31,8 @@ def funding_cost_series(position: pd.Series, events: list[dict[str, Any]] | None
     seen = set()
     values = costs.to_numpy(copy=True)
     positions = position.to_numpy(dtype=float)
-    if not all(math.isfinite(value) for value in positions):
-        raise ValueError("funding positions must be finite")
+    if not all(math.isfinite(value) and -1.0 <= value <= 1.0 for value in positions):
+        raise ValueError("funding positions must be finite and within [-1, 1]")
     for i, event in enumerate(events):
         if not isinstance(event, dict):
             raise ValueError(f"funding_events[{i}] must be an object")
