@@ -142,7 +142,8 @@ def test_solana_provider_observation_ledger_is_authenticated_scoped_and_minimal(
             headers=headers_a,
         )
         assert after_tamper.status_code == 200
-        assert after_tamper.json()["items"][0]["integrity_valid"] is False
+        tampered = next(item for item in after_tamper.json()["items"] if item["provider"] == "dexscreener")
+        assert tampered["integrity_valid"] is False
         assert after_tamper.json()["health"]["provider_count"] == 1
         assert after_tamper.json()["health"]["providers"][0]["provider"] == "solana-rpc"
         assert after_tamper.json()["health"]["providers"][0]["status"] == "DEGRADED"
