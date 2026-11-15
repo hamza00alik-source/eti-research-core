@@ -1069,3 +1069,33 @@ def test_market_wide_regime_shocks_keep_horizons_separate():
     assert {item["horizon_seconds"] for item in transition_buckets} == {"60", "300"}
     assert all(item["transition_mint_count"] == 2 for item in transition_buckets)
     assert report["shock_bucket_count"] == 0
+
+
+def test_shock_recurrence_groups_nearby_buckets_and_reports_mint_concentration():
+    from eti.solana_regime_shocks import evaluate_solana_shock_recurrence
+
+    report = {
+        "shock_buckets": [
+            {"horizon_seconds": "60", "bucket_start": "2026-01-01T00:00:00+00:00",
+             "transition_mints": ["mint-a", "mint-b"]},
+            {"horizon_seconds": "60", "bucket_start": "2026-01-01T00:05:00+00:00",
+             "transition_mints": ["mint-a", "mint-c"]},
+            {"horizon_seconds": "60", "bucket_start": "2026-01-01T03:00:00+00:00",
+             "transition_mints": ["mint-a", "mint-d"]},
+            {"horizon_seconds": "300", "bucket_start": "2026-01-01T03:00:00+00:00",
+             "transition_mints": ["mint-z"]},
+        ]
+    }
+    result = evaluate_solana_shock_recurrence(
+        report, minimum_event_separation_seconds=3600, minimum_distinct_event_periods=2
+    )
+    short = result["by_horizon_seconds"]["60"]
+    assert short["qualifying_bucket_count"] == 3
+    assert short["distinct_event_period_count"] == 2
+    assert short["mints_reappearing_in_multiple_event_periods"] == {"mint-a": 2}
+    assert short["meets_recurrence_threshold"] is True
+    assert result["by_horizon_seconds"]["300"]["distinct_event_period_count"] == 1
+    assert result["training_authorized"] is False
+
+    with pytest.raises(ValueError):
+        evaluate_solana_shock_recurrence(report, minimum_event_separation_seconds=0)
