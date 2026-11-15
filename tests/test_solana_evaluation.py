@@ -1102,3 +1102,43 @@ def test_shock_recurrence_groups_nearby_buckets_and_reports_mint_concentration()
 
     with pytest.raises(ValueError):
         evaluate_solana_shock_recurrence(report, minimum_event_separation_seconds=0)
+
+
+def test_shock_period_stability_uses_chronological_periods_and_mint_identity_coverage():
+    from eti.solana_regime_shocks import evaluate_solana_shock_period_stability
+
+    rows = []
+    for minute in range(5):
+        rows.append({
+            "horizon_seconds": "60",
+            "bucket_start": f"2026-01-01T00:0{minute}:00+00:00",
+            "observed_mint_count": 3,
+            "observed_mints": ["mint-a", "mint-b", "mint-c"],
+            "transition_mints": ["mint-a"] if minute in (1, 3) else [],
+            "transition_count": 1 if minute in (1, 3) else 0,
+            "meets_shock_threshold": minute in (1, 3),
+        })
+    rows.append({
+        "horizon_seconds": "60",
+        "bucket_start": "2026-01-08T00:00:00+00:00",
+        "observed_mint_count": 2,
+        "observed_mints": ["mint-a", "mint-b"],
+        "transition_mints": [],
+        "transition_count": 0,
+        "meets_shock_threshold": False,
+    })
+    result = evaluate_solana_shock_period_stability(
+        {"buckets": rows}, period_seconds=604800,
+        minimum_buckets_per_period=5, minimum_observed_mints_per_period=3,
+    )
+    periods = result["by_horizon_seconds"]["60"]
+    assert len(periods) == 2
+    assert periods[0]["shock_bucket_count"] == 2
+    assert periods[0]["shock_bucket_rate"] == 0.4
+    assert periods[0]["distinct_observed_mint_count"] == 3
+    assert periods[0]["eligible_for_descriptive_comparison"] is True
+    assert periods[1]["insufficient_coverage"] is True
+    assert result["training_authorized"] is False
+
+    with pytest.raises(ValueError):
+        evaluate_solana_shock_period_stability({"buckets": []}, period_seconds=0)
