@@ -169,16 +169,20 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
                           timeframe: str = "1h", allow_short: bool = False,
                           funding_bps_per_bar: float = 0.0,
                           fee_bps: float = 6.0, slippage_bps: float = 2.0,
-                          max_model_fits: int | None = None) -> dict:
+                          max_model_fits: int | None = None,
+                          funding_events: list[dict] | None = None) -> dict:
     """Train candidates inside purged folds; configure long/short and explicit derivative cost assumptions."""
     from sklearn.dummy import DummyClassifier
     from .evaluation import run_nested_walk_forward, walk_forward_folds
     frame = validate_ohlcv(frame)
+    if funding_events and funding_bps_per_bar != 0:
+        raise ValueError("Use either event-timed funding or legacy per-bar funding, not both")
     features = build_features(frame)
     feature_columns = feature_columns_for_frame(frame)
     labels = make_labels(frame, horizon=horizon)
     dataset = features.join(labels.rename("label")).dropna(subset=feature_columns + ["label"])
     dataset["close"] = frame.loc[dataset.index, "close"].astype(float)
+    dataset["timestamp"] = frame.loc[dataset.index, "timestamp"].to_numpy()
     if len(dataset) < min_train + validation_size + test_size + 2 * horizon:
         raise ValueError("Insufficient completed data for nested walk-forward training")
     planned_folds = walk_forward_folds(
@@ -218,9 +222,12 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
             "counts": {str(name): int(count) for name, count in regime_counts.items()},
             "fractions": {str(name): float(count / regime_total) for name, count in regime_counts.items()},
         }
-        close_test = dataset["close"].iloc[start:end].reset_index(drop=True)
-        actual_test = pd.Series(fold["test_actual"], dtype=int)
-        prediction_test = pd.Series(fold["test_predictions"], dtype=int)
+        test_timestamps = pd.DatetimeIndex(pd.to_datetime(dataset["timestamp"].iloc[start:end], utc=True))
+        close_test = pd.Series(dataset["close"].iloc[start:end].to_numpy(), index=test_timestamps, dtype=float)
+        actual_test = pd.Series(fold["test_actual"], index=test_timestamps, dtype=int)
+        prediction_test = pd.Series(fold["test_predictions"], index=test_timestamps, dtype=int)
+        fold_funding_events = [event for event in (funding_events or [])
+                               if test_timestamps[0] <= pd.Timestamp(event["timestamp"]) <= test_timestamps[-1]]
         performance_folds.append({
             "fold": fold["fold"],
             "selected_candidate": fold["selected_candidate"],
@@ -229,6 +236,7 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
                 close_test, actual_test, prediction_test,
                 fee_bps=fee_bps, slippage_bps=slippage_bps,
                 funding_bps_per_bar=funding_bps_per_bar,
+                funding_events=fold_funding_events,
                 allow_short=allow_short, bars_per_year=bars_per_year,
             ),
         })
@@ -240,14 +248,19 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
         for fold in report["folds"]:
             start = fold["boundaries"]["test_start"]
             end = fold["boundaries"]["test_end"]
-            close_test = dataset["close"].iloc[start:end].reset_index(drop=True)
-            actual_test = pd.Series(fold["test_actual"], dtype=int)
-            prediction_test = pd.Series(fold["test_predictions"], dtype=int)
+            test_timestamps = pd.DatetimeIndex(pd.to_datetime(dataset["timestamp"].iloc[start:end], utc=True))
+            close_test = pd.Series(dataset["close"].iloc[start:end].to_numpy(), index=test_timestamps, dtype=float)
+            actual_test = pd.Series(fold["test_actual"], index=test_timestamps, dtype=int)
+            prediction_test = pd.Series(fold["test_predictions"], index=test_timestamps, dtype=int)
+            fold_funding_events = [dict(event, rate_bps=float(event["rate_bps"]) * multiplier)
+                                   for event in (funding_events or [])
+                                   if test_timestamps[0] <= pd.Timestamp(event["timestamp"]) <= test_timestamps[-1]]
             scenario = evaluate_predictions(
                 close_test, actual_test, prediction_test,
                 fee_bps=fee_bps * multiplier,
                 slippage_bps=slippage_bps * multiplier,
                 funding_bps_per_bar=funding_bps_per_bar * multiplier,
+                funding_events=fold_funding_events,
                 allow_short=allow_short, bars_per_year=bars_per_year,
             )
             scenario_folds.append(scenario["trading"])
@@ -306,6 +319,8 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
     report.update({"rows": len(dataset), "horizon": horizon, "timeframe": timeframe,
                    "cost_assumptions": {"fee_bps": float(fee_bps), "slippage_bps": float(slippage_bps),
                                         "funding_bps_per_bar": float(funding_bps_per_bar),
+                                        "funding_event_count": len(funding_events or []),
+                                        "funding_model": "timestamped_settlement_events" if funding_events else "none_or_legacy_per_bar",
                                         "allow_short": bool(allow_short)},
                    "training_performed": True,
                    "compute_budget": {

@@ -184,3 +184,19 @@ def test_signed_funding_number_is_accepted_without_relaxing_other_costs():
     assert _number("funding", -3.25, allow_negative=True) == -3.25
     with pytest.raises(ValueError, match="must be finite and non-negative"):
         _number("fee", -3.25)
+
+
+def test_derivative_research_fails_closed_without_timestamped_funding_schedule():
+    candidate_scan = scan()
+    candidate_allocation = allocation()
+    for report in (candidate_scan, candidate_allocation):
+        instrument = report["candidates"][0]["instrument"]
+        instrument["market_type"] = "swap"
+        instrument["supports_funding"] = True
+    candidate_allocation["candidates"][0]["transaction_cost_model"]["instrument_identity"] = "kraken:swap:BTC/USD"
+    approved = approval()
+    approved["instruments"]["kraken:swap:BTC/USD"] = approved["instruments"].pop("kraken:spot:BTC/USD")
+    with pytest.raises(ValueError, match="settlement schedule is missing"):
+        run_approved_multi_market_research(
+            candidate_scan, candidate_allocation, approved, hub=FakeHub()
+        )

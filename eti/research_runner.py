@@ -9,6 +9,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+import pandas as pd
+
 from .instruments import InstrumentSpec
 from .market_data_hub import MarketDataHub, build_public_market_hub
 from .pipeline import estimate_nested_model_fits_from_rows, run_nested_experiment
@@ -183,9 +185,22 @@ def run_approved_multi_market_research(
             raise ValueError(f"{key} scan provenance/quality differs from allocation evidence")
         if allow_short and not instrument.supports_short:
             raise ValueError(f"{key} does not declare short capability")
-        if instrument.supports_funding is False and funding != 0:
-            raise ValueError(f"{key} cannot apply funding costs to this instrument")
+        funding_schedule = validated_model.get("funding_schedule", [])
+        if instrument.supports_funding:
+            if funding != 0:
+                raise ValueError(f"{key} derivative funding must use timestamped settlement events, not funding_bps_per_bar")
+            if not funding_schedule:
+                raise ValueError(f"{key} derivative research is blocked: validated funding settlement schedule is missing")
+        elif funding != 0 or funding_schedule:
+            raise ValueError(f"{key} does not support funding; funding assumptions must be zero and schedule empty")
         snapshot = data_hub.fetch(instrument, timeframe, limit, min_rows=min_rows)
+        if instrument.supports_funding:
+            coverage = validated_model.get("funding_schedule_coverage") or {}
+            candle_times = pd.to_datetime(snapshot.frame["timestamp"], utc=True)
+            coverage_start = pd.Timestamp(coverage["start"])
+            coverage_end = pd.Timestamp(coverage["end"])
+            if coverage_start > candle_times.min() or coverage_end < candle_times.max():
+                raise ValueError(f"{key} funding schedule does not cover the complete OHLCV research window")
         from .features import build_features, feature_columns_for_frame, make_labels
         frame = snapshot.frame
         feature_frame = build_features(frame)
@@ -200,7 +215,8 @@ def run_approved_multi_market_research(
             "provenance": snapshot.provenance, "quality": snapshot.quality,
             "fit_calls": fit_calls, "fee_bps": fee,
             "slippage_bps": slippage_component + spread / 2.0 + market_impact,
-            "funding_bps_per_bar": funding, "allow_short": allow_short,
+            "funding_bps_per_bar": funding, "funding_events": funding_schedule,
+            "allow_short": allow_short,
             "transaction_cost_model": validated_model,
         })
 
@@ -220,6 +236,7 @@ def run_approved_multi_market_research(
                 step_size=step_size, timeframe=timeframe,
                 allow_short=item["allow_short"],
                 funding_bps_per_bar=item["funding_bps_per_bar"],
+                funding_events=item["funding_events"],
                 fee_bps=item["fee_bps"], slippage_bps=item["slippage_bps"],
                 max_model_fits=item["fit_calls"],
             )

@@ -101,12 +101,64 @@ def validate_transaction_cost_model(
     missing_coverage = sorted(allowed_coverage - covered_fields)
     if missing_coverage:
         raise ValueError("transaction-cost evidence does not cover: " + ", ".join(missing_coverage))
+    schedule = model.get("funding_schedule", [])
+    if not isinstance(schedule, list):
+        raise ValueError("funding_schedule must be a list when supplied")
+    normalized_schedule = []
+    seen_events: set[str] = set()
+    for index, event in enumerate(schedule):
+        if not isinstance(event, dict):
+            raise ValueError(f"funding_schedule[{index}] must be an object")
+        event_at = _timestamp(f"funding_schedule[{index}].timestamp", event.get("timestamp"))
+        event_rate = event.get("rate_bps")
+        if isinstance(event_rate, bool) or not isinstance(event_rate, (int, float)) or not math.isfinite(event_rate):
+            raise ValueError(f"funding_schedule[{index}].rate_bps must be finite and signed")
+        event_key = event_at.isoformat()
+        if event_key in seen_events:
+            raise ValueError("funding_schedule contains duplicate settlement timestamps")
+        seen_events.add(event_key)
+        if event_at < valid_from or event_at > valid_until or event_at > current:
+            raise ValueError("funding settlement is outside its evidence validity window")
+        source = event.get("source")
+        uri = event.get("uri")
+        license_status = event.get("license_status")
+        observed_at = _timestamp(f"funding_schedule[{index}].observed_at", event.get("observed_at"))
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError(f"funding_schedule[{index}].source is required")
+        if not isinstance(uri, str) or not uri.startswith("https://"):
+            raise ValueError(f"funding_schedule[{index}].uri must be HTTPS")
+        if license_status not in ("open", "licensed") or observed_at > current:
+            raise ValueError(f"funding_schedule[{index}] has invalid evidence or license")
+        normalized_schedule.append({
+            "timestamp": event_at.isoformat(), "rate_bps": float(event_rate),
+            "source": source.strip(), "uri": uri, "license_status": license_status,
+            "observed_at": observed_at.isoformat(),
+        })
+    normalized_schedule.sort(key=lambda item: item["timestamp"])
+    coverage = model.get("funding_schedule_coverage")
+    normalized_coverage = None
+    if normalized_schedule:
+        if not isinstance(coverage, dict):
+            raise ValueError("funding_schedule_coverage is required when funding events are supplied")
+        coverage_start = _timestamp("funding_schedule_coverage.start", coverage.get("start"))
+        coverage_end = _timestamp("funding_schedule_coverage.end", coverage.get("end"))
+        if coverage_start > coverage_end or coverage_start < valid_from or coverage_end > valid_until or coverage_end > current:
+            raise ValueError("funding schedule coverage is invalid or outside its evidence window")
+        if normalized_schedule[0]["timestamp"] < coverage_start.isoformat() or normalized_schedule[-1]["timestamp"] > coverage_end.isoformat():
+            raise ValueError("funding events fall outside declared schedule coverage")
+        normalized_coverage = {"start": coverage_start.isoformat(), "end": coverage_end.isoformat()}
+    elif coverage is not None:
+        raise ValueError("funding schedule coverage cannot be supplied without funding events")
+    if numeric["funding_bps_per_bar"] != 0 and normalized_schedule:
+        raise ValueError("per-bar funding and event-timed funding cannot both be specified")
     return {
         "schema_version": SCHEMA_VERSION,
         "instrument_identity": identity,
         "quote_currency": model["quote_currency"].strip().upper(),
         "settlement_currency": model["settlement_currency"].strip().upper(),
         **numeric,
+        "funding_schedule": normalized_schedule,
+        "funding_schedule_coverage": normalized_coverage,
         "retrieved_at": retrieved.isoformat(),
         "valid_from": valid_from.isoformat(),
         "valid_until": valid_until.isoformat(),

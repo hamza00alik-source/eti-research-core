@@ -106,3 +106,68 @@ def test_signed_funding_rate_is_allowed_but_other_costs_stay_nonnegative():
             value, identity="kraken:spot:BTC/USD",
             now=datetime(2026, 11, 15, tzinfo=timezone.utc),
         )
+
+
+def test_funding_schedule_is_validated_and_normalized_as_events():
+    value = model()
+    value["funding_schedule_coverage"] = {
+        "start": "2026-11-15T00:00:00Z", "end": "2026-11-15T10:00:00Z",
+    }
+    value["funding_schedule"] = [{
+        "timestamp": "2026-11-15T08:00:00Z",
+        "rate_bps": 3.25,
+        "source": "Venue historical funding history",
+        "uri": "https://example.com/funding",
+        "license_status": "open",
+        "observed_at": "2026-11-15T09:00:00Z",
+    }]
+    result = validate_transaction_cost_model(
+        value, identity="kraken:spot:BTC/USD",
+        now=datetime(2026, 11, 15, 10, tzinfo=timezone.utc),
+    )
+    assert result["funding_schedule"][0]["rate_bps"] == 3.25
+    assert result["funding_schedule"][0]["timestamp"] == "2026-11-15T08:00:00+00:00"
+
+
+@pytest.mark.parametrize("change", [
+    {"timestamp": "2026-11-15T08:00:00"},
+    {"rate_bps": True},
+    {"rate_bps": float("nan")},
+    {"uri": "http://example.com/funding"},
+    {"license_status": "unknown"},
+])
+def test_invalid_funding_schedule_evidence_fails_closed(change):
+    value = model()
+    event = {
+        "timestamp": "2026-11-15T08:00:00Z", "rate_bps": 2.0,
+        "source": "Venue funding history", "uri": "https://example.com/funding",
+        "license_status": "open", "observed_at": "2026-11-15T09:00:00Z",
+    }
+    event.update(change)
+    value["funding_schedule_coverage"] = {
+        "start": "2026-11-15T00:00:00Z", "end": "2026-11-15T10:00:00Z",
+    }
+    value["funding_schedule"] = [event]
+    with pytest.raises(ValueError):
+        validate_transaction_cost_model(
+            value, identity="kraken:spot:BTC/USD",
+            now=datetime(2026, 11, 15, 10, tzinfo=timezone.utc),
+        )
+
+
+def test_duplicate_funding_settlement_times_are_rejected():
+    value = model()
+    event = {
+        "timestamp": "2026-11-15T08:00:00Z", "rate_bps": 2.0,
+        "source": "Venue funding history", "uri": "https://example.com/funding",
+        "license_status": "open", "observed_at": "2026-11-15T09:00:00Z",
+    }
+    value["funding_schedule_coverage"] = {
+        "start": "2026-11-15T00:00:00Z", "end": "2026-11-15T10:00:00Z",
+    }
+    value["funding_schedule"] = [event, dict(event)]
+    with pytest.raises(ValueError, match="duplicate"):
+        validate_transaction_cost_model(
+            value, identity="kraken:spot:BTC/USD",
+            now=datetime(2026, 11, 15, 10, tzinfo=timezone.utc),
+        )

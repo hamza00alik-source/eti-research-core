@@ -5,6 +5,8 @@ import math
 import numpy as np
 import pandas as pd
 
+from .funding import funding_cost_series
+
 
 def backtest_positions(
     close: pd.Series,
@@ -14,6 +16,7 @@ def backtest_positions(
     funding_bps_per_bar: float = 0.0,
     allow_short: bool = False,
     initial_equity: float = 1.0,
+    funding_events: list[dict] | None = None,
 ) -> dict:
     costs_input = (fee_bps, slippage_bps, funding_bps_per_bar, initial_equity)
     if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in costs_input):
@@ -43,7 +46,10 @@ def backtest_positions(
     turnover = position.diff().abs().fillna(position.abs())
     trading_cost = (fee_bps + slippage_bps) / 10000 * turnover
     # Positive funding: longs pay shorts. Negative funding: shorts pay longs.
+    if funding_events and funding_bps_per_bar != 0:
+        raise ValueError("Use either event-timed funding or legacy per-bar funding, not both")
     funding_cost = position * funding_bps_per_bar / 10000
+    funding_cost = funding_cost + funding_cost_series(position, funding_events)
     strategy_returns = position * returns - trading_cost - funding_cost
     if (strategy_returns <= -1).any():
         raise ValueError("A bar loss of 100% or more makes equity non-positive")
