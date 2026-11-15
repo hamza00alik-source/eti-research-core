@@ -63,7 +63,7 @@ def _strategy_metrics(close: pd.Series, signals: pd.Series, fee_bps: float,
     returns = close.astype(float).pct_change().fillna(0.0)
     turnover = position.diff().abs().fillna(position.abs())
     cost = (fee_bps + slippage_bps) / 10000.0
-    bar_returns = position * returns - turnover * cost - position.abs() * funding_bps_per_bar / 10000.0
+    bar_returns = position * returns - turnover * cost - position * funding_bps_per_bar / 10000.0
     std = float(bar_returns.std(ddof=1))
     result["sharpe_annualized"] = float(bar_returns.mean() / std * math.sqrt(bars_per_year)) if std > 0 else 0.0
     result["sortino_annualized"] = float(
@@ -95,7 +95,11 @@ def evaluate_predictions(
     """
     fee_bps = _finite_nonnegative(fee_bps, "fee_bps")
     slippage_bps = _finite_nonnegative(slippage_bps, "slippage_bps")
-    funding_bps_per_bar = _finite_nonnegative(funding_bps_per_bar, "funding_bps_per_bar")
+    if (isinstance(funding_bps_per_bar, bool)
+            or not isinstance(funding_bps_per_bar, (int, float))
+            or not math.isfinite(funding_bps_per_bar)):
+        raise ValueError("funding_bps_per_bar must be a finite signed number")
+    funding_bps_per_bar = float(funding_bps_per_bar)
     if isinstance(bars_per_year, bool) or not isinstance(bars_per_year, (int, float)) or not math.isfinite(bars_per_year) or bars_per_year <= 0:
         raise ValueError("bars_per_year must be finite and positive")
     if not isinstance(allow_short, bool):
