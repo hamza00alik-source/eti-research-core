@@ -1375,29 +1375,39 @@ def evaluate_prepared_solana_walk_forward(
                 label_baseline is None
                 or prepared_baseline is None
                 or label_target is None
-                or prepared_target is None
                 or label_baseline != prepared_baseline
-                or label_target != prepared_target
+                or (prepared.get("target_at") is not None and prepared_target != label_target)
                 or prepared.get("horizon_seconds") != label.get("horizon_seconds")
             ):
                 raise ValueError("prepared row temporal metadata does not match its exported label")
             elapsed = (label_target - label_baseline).total_seconds()
             horizon_seconds = label.get("horizon_seconds")
             reported_elapsed = label.get("actual_elapsed_seconds")
+            prepared_elapsed = prepared.get("actual_elapsed_seconds")
             if (
                 isinstance(horizon_seconds, bool)
                 or not isinstance(horizon_seconds, int)
                 or horizon_seconds <= 0
                 or label_target <= label_baseline
                 or elapsed < horizon_seconds
-                or isinstance(reported_elapsed, bool)
-                or not isinstance(reported_elapsed, (int, float))
-                or not math.isfinite(float(reported_elapsed))
-                or abs(float(reported_elapsed) - elapsed) > 0.001
-                or isinstance(prepared.get("actual_elapsed_seconds"), bool)
-                or not isinstance(prepared.get("actual_elapsed_seconds"), (int, float))
-                or not math.isfinite(float(prepared.get("actual_elapsed_seconds")))
-                or abs(float(prepared["actual_elapsed_seconds"]) - elapsed) > 0.001
+                or (
+                    reported_elapsed is not None
+                    and (
+                        isinstance(reported_elapsed, bool)
+                        or not isinstance(reported_elapsed, (int, float))
+                        or not math.isfinite(float(reported_elapsed))
+                        or abs(float(reported_elapsed) - elapsed) > 0.001
+                    )
+                )
+                or (
+                    prepared_elapsed is not None
+                    and (
+                        isinstance(prepared_elapsed, bool)
+                        or not isinstance(prepared_elapsed, (int, float))
+                        or not math.isfinite(float(prepared_elapsed))
+                        or abs(float(prepared_elapsed) - elapsed) > 0.001
+                    )
+                )
             ):
                 raise ValueError("prepared row elapsed time does not match its authoritative label interval")
             for snapshot_field in ("baseline_snapshot_id", "target_snapshot_id"):
