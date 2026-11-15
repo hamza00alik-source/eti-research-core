@@ -274,22 +274,23 @@ def test_forward_label_coverage_separates_immature_and_mature_without_target():
     rows = [
         _snapshot("base-1", "2026-01-01T00:00:00Z", 1.0),
         _snapshot("target-1", "2026-01-01T00:06:00Z", 1.1),
-        _snapshot("base-2", "2026-01-01T00:10:00Z", 1.0),
-        _snapshot("base-3", "2026-01-01T00:14:00Z", 1.0),
+        _snapshot("base-2", "2026-01-01T00:12:00Z", 1.0),
+        _snapshot("base-3", "2026-01-01T00:18:00Z", 1.0),
+        _snapshot("base-4", "2026-01-01T00:28:00Z", 1.0),
     ]
-    now = datetime(2026, 1, 1, 0, 20, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc)
     labels = [{"baseline_snapshot_id": "base-1", "target_snapshot_id": "target-1", "horizon_seconds": 300}]
     report = evaluate_forward_label_coverage(
         rows, labels, now=now, horizons_seconds=(300,)
     )
     coverage = report["by_horizon_seconds"]["300"]
-    assert coverage["eligible_baseline_count"] == 4
+    assert coverage["eligible_baseline_count"] == 5
     assert coverage["mature_baseline_count"] == 4
-    assert coverage["not_yet_mature_count"] == 0
-    assert coverage["mature_with_future_target_count"] == 2
-    assert coverage["mature_without_future_target_count"] == 2
+    assert coverage["not_yet_mature_count"] == 1
+    assert coverage["mature_with_future_target_count"] == 3
+    assert coverage["mature_without_future_target_count"] == 1
     assert coverage["label_record_count"] == 1
-    assert coverage["target_coverage_rate_among_mature"] == pytest.approx(0.5)
+    assert coverage["target_coverage_rate_among_mature"] == pytest.approx(0.75)
     assert report["provider_gap_confirmed"] is False
     assert report["token_inactivity_inferred"] is False
     assert report["training_authorized"] is False
