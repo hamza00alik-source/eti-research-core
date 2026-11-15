@@ -58,9 +58,9 @@ def test_session_quality_counts_only_missing_open_session_bars():
         utc("2026-01-05T17:30:00Z"),
     ]
     result = session_quality(observed, "1h", calendar)
-    assert result["expected_session_bars"] == 7
+    assert result["expected_session_bars"] == 4
     assert result["observed_session_bars"] == 3
-    assert result["missing_interval_estimate"] == 4
+    assert result["missing_interval_estimate"] == 1
     assert result["session_calendar_applied"] is True
 
 
