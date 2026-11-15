@@ -257,3 +257,32 @@ def test_worker_auto_approves_only_quality_passed_calibrated_artifact(tmp_path, 
     assert model["approved_by"] == "eti.quality_gate"
     assert registered["registry"]["approval_required"] is False
     assert registered["registry"]["promotion_authority"] == "eti.quality_gate"
+
+
+def test_owner_scoped_worker_cannot_claim_another_workspace_task(tmp_path):
+    store = MemoryStore(tmp_path / "scoped-worker.sqlite3")
+    own = store.create_workspace("owner-a", "own workspace")
+    other = store.create_workspace("owner-b", "other workspace")
+    own_task = store.create_agent_task(
+        "owner-a", own["id"], "test", "test.echo", {"value": "own"}
+    )
+    other_task = store.create_agent_task(
+        "owner-b", other["id"], "test", "test.echo", {"value": "other"}
+    )
+    registry = AgentCapabilityRegistry()
+    registry.register("test.echo", lambda payload: {"echo": payload["value"]})
+    worker = AgentWorker(
+        store, registry=registry, owner_id="owner-a", workspace_id=own["id"]
+    )
+
+    result = worker.run_once()
+
+    assert result["id"] == own_task["id"]
+    assert result["status"] == "completed"
+    assert store.get_agent_task("owner-b", other["id"], other_task["id"])["status"] == "queued"
+
+
+def test_worker_requires_owner_and_workspace_scope_together(tmp_path):
+    store = MemoryStore(tmp_path / "scoped-pair.sqlite3")
+    with pytest.raises(ValueError, match="supplied together"):
+        AgentWorker(store, owner_id="owner-a")

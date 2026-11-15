@@ -874,9 +874,19 @@ class MemoryStore:
         ]
 
     def claim_next_agent_task(
-        self, lease_seconds: int = 120, now: int | None = None
+        self, lease_seconds: int = 120, now: int | None = None,
+        owner_id: str | None = None, workspace_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Atomically lease the oldest queued task and recover expired worker leases."""
+        """Atomically lease the oldest queued task, optionally within one owner/workspace.
+
+        Owner and workspace filters must be supplied together. Expired leases are
+        recovered globally, but a scoped claimant can only claim its own queue.
+        """
+        if (owner_id is None) != (workspace_id is None):
+            raise ValueError("owner_id and workspace_id must be supplied together")
+        if owner_id is not None:
+            owner_id = _required_text(owner_id, "owner_id")
+            workspace_id = _required_text(workspace_id, "workspace_id")
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be an integer from 5 to 3600")
         current = datetime.now(timezone.utc) if now is None else datetime.fromtimestamp(now, timezone.utc)
@@ -915,10 +925,18 @@ class MemoryStore:
                      }), now_text),
                 )
 
-            row = conn.execute(
-                "SELECT * FROM agent_tasks WHERE status = 'queued' "
-                "ORDER BY created_at, id LIMIT 1"
-            ).fetchone()
+            if owner_id is None:
+                row = conn.execute(
+                    "SELECT * FROM agent_tasks WHERE status = 'queued' "
+                    "ORDER BY created_at, id LIMIT 1"
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM agent_tasks WHERE status = 'queued' "
+                    "AND owner_id = ? AND workspace_id = ? "
+                    "ORDER BY created_at, id LIMIT 1",
+                    (owner_id, workspace_id),
+                ).fetchone()
             if row is None:
                 conn.commit()
                 return None

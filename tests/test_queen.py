@@ -73,3 +73,26 @@ def test_queen_reconcile_starts_bounded_worker_slots(tmp_path):
         assert status["active_workers"] <= 3
     finally:
         queen.stop()
+
+
+def test_queen_default_workers_are_scoped_to_owner_workspace(tmp_path):
+    from eti.storage import MemoryStore
+
+    store = MemoryStore(tmp_path / "queen-scoped.sqlite3")
+    workspace = store.create_workspace("owner-a", "queen workspace")
+    other = store.create_workspace("owner-b", "other workspace")
+    own = store.create_agent_task(
+        "owner-a", workspace["id"], "test", "unsupported.own", {}
+    )
+    foreign = store.create_agent_task(
+        "owner-b", other["id"], "test", "unsupported.foreign", {}
+    )
+    queen = QueenOrchestrator(
+        "owner-a", workspace["id"], store=store,
+        config=ColonyConfig(max_workers=1, backlog_per_worker=1, poll_seconds=0.1),
+    )
+    worker = queen.worker_factory()
+    result = worker.run_once()
+    assert result["id"] == own["id"]
+    assert result["status"] == "failed"
+    assert store.get_agent_task("owner-b", other["id"], foreign["id"])["status"] == "queued"

@@ -27,6 +27,8 @@ class AgentWorker:
         store: MemoryStore | None = None,
         registry: AgentCapabilityRegistry | None = None,
         lease_seconds: int = 120,
+        owner_id: str | None = None,
+        workspace_id: str | None = None,
     ):
         self.store = store or MemoryStore()
         self.registry = registry or default_capabilities()
@@ -36,6 +38,10 @@ class AgentWorker:
             self.registry.register("live.tick", lambda payload: run_live_tick(payload, self.store))
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be an integer from 5 to 3600")
+        if (owner_id is None) != (workspace_id is None):
+            raise ValueError("owner_id and workspace_id must be supplied together")
+        self.owner_id = owner_id
+        self.workspace_id = workspace_id
         self.lease_seconds = lease_seconds
         self.worker_id = str(uuid4())
 
@@ -218,7 +224,11 @@ class AgentWorker:
                               "live_tasks": live_scheduled},
                              separators=(",", ":")), flush=True)
         self.store.record_agent_worker_heartbeat(self.worker_id, self.registry.capabilities())
-        task = self.store.claim_next_agent_task(lease_seconds=self.lease_seconds)
+        task = self.store.claim_next_agent_task(
+            lease_seconds=self.lease_seconds,
+            owner_id=self.owner_id,
+            workspace_id=self.workspace_id,
+        )
         if task is None:
             return None
         lease_token = task["lease_token"]

@@ -93,7 +93,12 @@ class QueenOrchestrator:
         self.store = store or MemoryStore()
         self.config = config or ColonyConfig()
         self.worker_factory = worker_factory or (
-            lambda: AgentWorker(self.store, lease_seconds=self.config.lease_seconds)
+            lambda: AgentWorker(
+                self.store,
+                lease_seconds=self.config.lease_seconds,
+                owner_id=self.owner_id,
+                workspace_id=self.workspace_id,
+            )
         )
         self._slots: dict[int, _WorkerSlot] = {}
         self._next_slot_id = 1
