@@ -57,7 +57,7 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
     exported = []
     prepared = []
     for index in range(8):
-        stamp = f"2026-01-{1 + index * 2:02d}T00:00:00Z"
+        stamp = f"2026-01-{1 + index * 2 if index < 7 else 13:02d}T00:00:00Z"
         label_id = f"label-{index}"
         exported.append({
             "id": label_id,
@@ -100,27 +100,6 @@ def test_walk_forward_runner_joins_only_validation_labels_by_id():
         "target_sampled_price_return_pct": 4.0,
     })
 
-    # A distinct mint observed over the same interval is still dependent on
-    # the shared market shock, even though it is not a same-mint duplicate.
-    exported.append({
-        "id": "label-cross-mint-overlap",
-        "mint": "mint-cross",
-        "pool_address": "pool-cross",
-        "horizon_seconds": 3600,
-        "label": {
-            "baseline_at": "2026-01-13T00:00:00Z",
-            "target_at": "2026-01-13T01:00:00Z",
-        },
-    })
-    prepared.append({
-        "label_id": "label-cross-mint-overlap",
-        "mint": "mint-cross",
-        "pool_address": "pool-cross",
-        "baseline_at": "2026-01-13T00:00:00Z",
-        "horizon_seconds": 3600,
-        "features": {"txns_h1_buys": 8, "txns_h1_sells": 2},
-        "target_sampled_price_return_pct": 1.5,
-    })
 
     report = evaluate_prepared_solana_walk_forward(
         exported,
