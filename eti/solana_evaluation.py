@@ -989,7 +989,10 @@ def evaluate_solana_regime_robustness(
     """
     if not isinstance(configurations, dict) or len(configurations) < 2:
         raise ValueError("at least two named configurations are required")
-    from eti.solana_regime_shocks import evaluate_solana_market_wide_regime_shocks
+    from eti.solana_regime_shocks import (
+        evaluate_solana_market_wide_regime_shocks,
+        evaluate_solana_shock_recurrence,
+    )
 
     reports: dict[str, dict[str, Any]] = {}
     persistence: dict[str, dict[str, Any]] = {}
@@ -1008,6 +1011,10 @@ def evaluate_solana_regime_robustness(
         market_wide_shocks[name] = evaluate_solana_market_wide_regime_shocks(
             report["classified_observations"],
         )
+    shock_recurrence = {
+        name: evaluate_solana_shock_recurrence(shock_report)
+        for name, shock_report in market_wide_shocks.items()
+    }
     sensitivity = evaluate_solana_regime_sampling_sensitivity(reports)
     return {
         "status": "MULTI_CONFIGURATION_REGIME_ROBUSTNESS_DIAGNOSTICS_ONLY",
@@ -1016,6 +1023,7 @@ def evaluate_solana_regime_robustness(
         "sampling_sensitivity": sensitivity,
         "persistence_by_configuration": persistence,
         "market_wide_shocks_by_configuration": market_wide_shocks,
+        "shock_recurrence_by_configuration": shock_recurrence,
         "training_authorized": False,
         "model_fitting_performed": False,
         "limitations": [
