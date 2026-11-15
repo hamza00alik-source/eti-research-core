@@ -38,13 +38,19 @@ class AgentCapabilityRegistry:
             raise ValueError(f"capability already registered: {name}")
         self._handlers[name] = handler
 
-    def execute(self, name: str, payload: Any) -> dict[str, Any]:
+    def execute(
+        self, name: str, payload: Any, *,
+        observation_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
         handler = self._handlers.get(name)
         if handler is None:
             raise LookupError(f"unsupported agent capability: {name}")
         if not isinstance(payload, dict):
             raise ValueError("agent task input must be a JSON object")
-        result = handler(payload)
+        if name in {"solana.market.scan", "solana.token.audit"}:
+            result = handler(payload, observation_callback=observation_callback)
+        else:
+            result = handler(payload)
         if not isinstance(result, dict):
             raise TypeError("agent capability must return a JSON object")
         # Reuse strict JSON encoding rules to reject NaN, infinity and oversized results.
@@ -503,7 +509,10 @@ def derivatives_market_context(payload: dict[str, Any]) -> dict[str, Any]:
     context["timeframe"] = timeframe
     return context
 
-def solana_market_scan(payload: dict[str, Any]) -> dict[str, Any]:
+def solana_market_scan(
+    payload: dict[str, Any], *,
+    observation_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
     """Fetch one Solana mint's current DexScreener pair and apply explicit market filters."""
     mint = payload.get("mint")
     if not isinstance(mint, str) or not 32 <= len(mint) <= 48:
@@ -516,27 +525,33 @@ def solana_market_scan(payload: dict[str, Any]) -> dict[str, Any]:
                         ("max_h1_change_pct", chase_ceiling)):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value) or value < 0:
             raise ValueError(f"{name} must be a finite non-negative number")
-    pairs = DexScreenerClient().fetch_pairs([mint])
-    pair = DexScreenerClient.select_pair(mint, pairs)
+    dex = DexScreenerClient(observation_callback=observation_callback)
+    pairs = dex.fetch_pairs([mint])
+    pair = dex.select_pair(mint, pairs)
     return scan_pair(mint, pair, min_liquidity_usd=float(liquidity_floor),
                      min_pool_age_minutes=float(age_floor),
                      max_h1_change_pct=float(chase_ceiling))
 
 
-def solana_token_audit(payload: dict[str, Any]) -> dict[str, Any]:
+def solana_token_audit(
+    payload: dict[str, Any], *,
+    observation_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
     """Run the read-only Solana evidence audit; incomplete critical evidence blocks."""
     mint = payload.get("mint")
     if not isinstance(mint, str) or not 32 <= len(mint) <= 48:
         raise ValueError("mint must be a valid-length Solana address")
-    pairs = DexScreenerClient().fetch_pairs([mint])
-    pair = DexScreenerClient.select_pair(mint, pairs)
+    dex = DexScreenerClient(observation_callback=observation_callback)
+    pairs = dex.fetch_pairs([mint])
+    pair = dex.select_pair(mint, pairs)
     created_at = pair.get("pairCreatedAt") if pair else None
     created_at = int(created_at) if isinstance(created_at, (int, float)) else None
     excluded = payload.get("excluded_token_accounts", [])
     if not isinstance(excluded, list) or len(excluded) > 100:
         raise ValueError("excluded_token_accounts must be a list of at most 100 addresses")
     return audit_mint(
-        mint, rpc=SolanaRpcClient(), rugcheck=RugCheckClient(),
+        mint, rpc=SolanaRpcClient(observation_callback=observation_callback),
+        rugcheck=RugCheckClient(observation_callback=observation_callback),
         pool_created_at_ms=created_at,
         pool_address=pair.get("pairAddress") if pair else None,
         creator_address=payload.get("creator_hint"),
