@@ -603,7 +603,7 @@ def test_dataset_report_includes_full_workspace_forward_label_coverage(tmp_path)
         ("base-1", now - timedelta(minutes=20)),
         ("target-1", now - timedelta(minutes=14)),
         ("base-2", now - timedelta(minutes=10)),
-        ("base-3", now - timedelta(minutes=6)),
+        ("base-3", now - timedelta(minutes=4)),
         ("future", now + timedelta(minutes=2)),
     ]
     with store._connection() as conn:
