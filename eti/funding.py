@@ -14,10 +14,12 @@ def funding_cost_series(position: pd.Series, events: list[dict[str, Any]] | None
     Positions are already shifted by the caller to represent exposure held on each bar.
     """
     costs = pd.Series(0.0, index=position.index, dtype=float)
-    if events is None or events == []:
+    if events is None:
         return costs
     if not isinstance(events, list):
         raise ValueError("funding_events must be a list")
+    if not events:
+        return costs
     index = position.index
     if not isinstance(index, pd.DatetimeIndex) or index.tz is None:
         raise ValueError("event-timed funding requires a timezone-aware DatetimeIndex")
