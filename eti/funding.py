@@ -30,7 +30,7 @@ def funding_cost_series(position: pd.Series, events: list[dict[str, Any]] | None
     seen = set()
     values = costs.to_numpy(copy=True)
     positions = position.to_numpy(dtype=float)
-    if not math.isfinite(positions).all():
+    if not all(math.isfinite(value) for value in positions):
         raise ValueError("funding positions must be finite")
     for i, event in enumerate(events):
         if not isinstance(event, dict):
