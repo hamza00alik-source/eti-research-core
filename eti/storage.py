@@ -2526,7 +2526,7 @@ class MemoryStore:
             if not self._owns_workspace(conn, owner_id, workspace_id):
                 raise LookupError("workspace not found")
             snapshot_rows = conn.execute(
-                "SELECT capability,mint,pool_address,fetched_at,payload_json "
+                "SELECT id,capability,mint,pool_address,fetched_at,payload_json "
                 "FROM solana_research_snapshots WHERE owner_id=? AND workspace_id=? "
                 "ORDER BY fetched_at,id", (owner_id, workspace_id)
             )
