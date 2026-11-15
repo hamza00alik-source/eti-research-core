@@ -265,3 +265,74 @@ def test_market_data_hub_rejects_future_dated_candles():
     )
     with pytest.raises(ValueError, match="future-dated OHLCV"):
         hub.fetch(instrument, "1h", 2, min_rows=2)
+
+
+def test_market_data_hub_drops_current_incomplete_candle():
+    import pandas as pd
+    from eti.instruments import InstrumentSpec
+    from eti.market_data_hub import MarketDataHub
+
+    class Adapter:
+        capabilities = AdapterCapabilities(
+            venue="fixture", asset_classes=("crypto",), market_types=("spot",),
+            public_market_data=True, authenticated_market_data=False,
+            order_execution=False,
+        )
+
+        def discover_instruments(self):
+            return []
+
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            current_open = pd.Timestamp.now(tz="UTC").floor("h")
+            starts = [current_open - pd.Timedelta(hours=1), current_open]
+            return pd.DataFrame({
+                "timestamp": starts,
+                "open": [100.0, 101.0], "high": [101.0, 102.0],
+                "low": [99.0, 100.0], "close": [100.5, 101.5],
+                "volume": [10.0, 11.0],
+            })
+
+    hub = MarketDataHub([Adapter()])
+    instrument = InstrumentSpec(
+        symbol="BTC/USD", venue="fixture", asset_class="crypto",
+        market_type="spot", base_currency="BTC", quote_currency="USD",
+    )
+    snapshot = hub.fetch(instrument, "1h", 2, min_rows=1)
+    assert len(snapshot.frame) == 1
+    assert snapshot.frame["timestamp"].iloc[-1] < pd.Timestamp.now(tz="UTC").floor("h")
+    assert snapshot.provenance["returned_rows"] == 1
+
+
+def test_market_data_hub_requires_minimum_completed_candles():
+    import pandas as pd
+    import pytest
+    from eti.instruments import InstrumentSpec
+    from eti.market_data_hub import MarketDataHub
+
+    class Adapter:
+        capabilities = AdapterCapabilities(
+            venue="fixture", asset_classes=("crypto",), market_types=("spot",),
+            public_market_data=True, authenticated_market_data=False,
+            order_execution=False,
+        )
+
+        def discover_instruments(self):
+            return []
+
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            current_open = pd.Timestamp.now(tz="UTC").floor("h")
+            starts = [current_open - pd.Timedelta(hours=1), current_open]
+            return pd.DataFrame({
+                "timestamp": starts,
+                "open": [100.0, 101.0], "high": [101.0, 102.0],
+                "low": [99.0, 100.0], "close": [100.5, 101.5],
+                "volume": [10.0, 11.0],
+            })
+
+    hub = MarketDataHub([Adapter()])
+    instrument = InstrumentSpec(
+        symbol="BTC/USD", venue="fixture", asset_class="crypto",
+        market_type="spot", base_currency="BTC", quote_currency="USD",
+    )
+    with pytest.raises(ValueError, match="completed candles"):
+        hub.fetch(instrument, "1h", 2, min_rows=2)
