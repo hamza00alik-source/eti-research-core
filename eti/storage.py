@@ -2531,6 +2531,7 @@ class MemoryStore:
                 "ORDER BY fetched_at,id", (owner_id, workspace_id)
             )
             snapshot_count = market_count = audit_count = 0
+            coverage_snapshots: list[dict[str, Any]] = []
             mints: set[str] = set()
             pools: set[tuple[str, str]] = set()
             groups: dict[tuple[str, str], list[datetime]] = {}
@@ -2543,6 +2544,16 @@ class MemoryStore:
             malformed_payloads = 0
             for row in snapshot_rows:
                 snapshot_count += 1
+                if row["capability"] == "solana.market.scan":
+                    try:
+                        coverage_payload = json.loads(row["payload_json"])
+                    except (TypeError, ValueError):
+                        coverage_payload = None
+                    coverage_snapshots.append({
+                        "id": row["id"], "capability": row["capability"],
+                        "mint": row["mint"], "pool_address": row["pool_address"],
+                        "fetched_at": row["fetched_at"], "payload": coverage_payload,
+                    })
                 if row["capability"] == "solana.token.audit":
                     audit_count += 1
                     continue
@@ -2576,11 +2587,12 @@ class MemoryStore:
                     if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
                         feature_counts[key] += 1
             label_rows = conn.execute(
-                "SELECT horizon_seconds,label_json FROM solana_research_labels "
+                "SELECT id,baseline_snapshot_id,horizon_seconds,label_json FROM solana_research_labels "
                 "WHERE owner_id=? AND workspace_id=? ORDER BY horizon_seconds",
                 (owner_id, workspace_id),
             )
             label_counts: dict[str, dict[str, int]] = {}
+            coverage_labels: list[dict[str, Any]] = []
             for row in label_rows:
                 key = str(row["horizon_seconds"])
                 stats = label_counts.setdefault(key, {"labels": 0, "distinct_mints": 0, "price_returns_available": 0})
@@ -2590,6 +2602,10 @@ class MemoryStore:
                 except (TypeError, ValueError):
                     continue
                 if isinstance(label, dict):
+                    coverage_labels.append({
+                        **label, "baseline_snapshot_id": row["baseline_snapshot_id"],
+                        "horizon_seconds": row["horizon_seconds"],
+                    })
                     if (
                         isinstance(label.get("sampled_price_return_pct"), (int, float))
                         and not isinstance(label.get("sampled_price_return_pct"), bool)
@@ -2629,6 +2645,10 @@ class MemoryStore:
             key: round(count / market_count, 6) if market_count else 0.0
             for key, count in feature_counts.items()
         }
+        from .solana_labels import evaluate_forward_label_coverage
+        forward_label_coverage = evaluate_forward_label_coverage(
+            coverage_snapshots, coverage_labels,
+        )
         return {
             "scope": {"owner_id": owner_id, "workspace_id": workspace_id},
             "snapshots": {
@@ -2652,6 +2672,7 @@ class MemoryStore:
                 for key in feature_counts
             },
             "labels_by_horizon_seconds": label_counts,
+            "forward_label_coverage": forward_label_coverage,
             "training_gate": {
                 "ready": False,
                 "status": "RESEARCH_DATA_COLLECTION",
