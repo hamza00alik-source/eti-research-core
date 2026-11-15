@@ -1,7 +1,7 @@
 # Approved multi-market research runner
 
 The research allocator remains plan-only. It ranks data readiness and marks
-candidates eligible for economic evaluation only when a venue:symbol cost-model
+candidates eligible for economic evaluation only when a venue:market_type:symbol cost-model
 status is explicitly validated. It never authorizes training.
 
 The separate runner in `eti.research_runner` requires a reviewed local approval
