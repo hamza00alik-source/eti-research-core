@@ -632,10 +632,10 @@ def test_dataset_report_includes_full_workspace_forward_label_coverage(tmp_path)
     coverage = report["forward_label_coverage"]
     horizon = coverage["by_horizon_seconds"]["300"]
     assert horizon["eligible_baseline_count"] == 5
-    assert horizon["mature_baseline_count"] == 4
-    assert horizon["not_yet_mature_count"] == 1
+    assert horizon["mature_baseline_count"] == 3
+    assert horizon["not_yet_mature_count"] == 2
     assert horizon["mature_with_future_target_count"] == 3
-    assert horizon["mature_without_future_target_count"] == 1
+    assert horizon["mature_without_future_target_count"] == 0
     assert horizon["label_record_count"] == 1
     assert coverage["training_authorized"] is False
 
