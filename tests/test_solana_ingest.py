@@ -2,6 +2,8 @@ import asyncio
 import sys
 import types
 
+import pytest
+
 from eti.solana_ingest import PumpPortalIngestor
 from eti.solana_research import PumpPortalStream
 from eti.storage import MemoryStore
@@ -151,4 +153,5 @@ def test_ingestor_persists_pumpportal_connection_observation_in_real_workspace(t
     assert own[0]["endpoint_id"] == "stream_connect"
     assert own[0]["integrity_valid"] is True
     assert own[0]["status"] == "success"
-    assert store.list_solana_provider_observations("owner-b", workspace["id"]) == []
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.list_solana_provider_observations("owner-b", workspace["id"])
