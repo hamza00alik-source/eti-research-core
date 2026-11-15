@@ -177,3 +177,10 @@ def test_runner_rejects_modified_scan_quality_in_allocation():
     altered["candidates"][0]["quality"]["last_candle_age_seconds"] = 0
     with pytest.raises(ValueError, match="provenance/quality differs"):
         run_approved_multi_market_research(scan(), altered, approval(), hub=FakeHub())
+
+
+def test_signed_funding_number_is_accepted_without_relaxing_other_costs():
+    from eti.research_runner import _number
+    assert _number("funding", -3.25, allow_negative=True) == -3.25
+    with pytest.raises(ValueError, match="must be a finite number"):
+        _number("fee", -3.25)
