@@ -168,9 +168,9 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
                           test_size: int = 100, step_size: int = 100,
                           timeframe: str = "1h", allow_short: bool = False,
                           funding_bps_per_bar: float = 0.0,
-                          funding_events: list[dict] | None = None,
                           fee_bps: float = 6.0, slippage_bps: float = 2.0,
-                          max_model_fits: int | None = None) -> dict:
+                          max_model_fits: int | None = None,
+                          funding_events: list[dict] | None = None) -> dict:
     """Train candidates inside purged folds; configure long/short and explicit derivative cost assumptions."""
     from sklearn.dummy import DummyClassifier
     from .evaluation import run_nested_walk_forward, walk_forward_folds
