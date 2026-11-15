@@ -55,7 +55,8 @@ and SHA-256 checked when read.
 The health summary describes only submitted observations in that workspace.
 It does not probe providers, establish provider-wide uptime, or treat absent
 records as failures. A successful observation without latency, stale evidence,
-or future-dated evidence remains UNKNOWN. This ledger is not automatically
+future-dated evidence, or conflicting outcomes at the same latest timestamp
+remains UNKNOWN. This ledger is not automatically
 populated by provider clients yet; it is an authenticated evidence-ingestion
 surface, not a live monitoring guarantee. It does not authorize trading.
 
