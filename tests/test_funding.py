@@ -68,3 +68,34 @@ def test_performance_report_uses_event_funding_not_every_bar():
     model = report["trading"]["model"]
     assert model["funding_cost_total"] == pytest.approx(0.001)
     assert model["total_return"] == pytest.approx(-0.001)
+
+
+def test_empty_funding_schedule_is_a_noop_even_without_datetime_index():
+    position = pd.Series([0.0, 1.0, -1.0], index=[0, 1, 2])
+    result = funding_cost_series(position, [])
+    assert result.tolist() == [0.0, 0.0, 0.0]
+
+
+def test_nonfinite_position_is_rejected_when_funding_event_is_present():
+    index = _times()
+    position = pd.Series([0.0, float("nan"), 1.0, 1.0], index=index)
+    with pytest.raises(ValueError, match="positions must be finite"):
+        funding_cost_series(
+            position, [{"timestamp": index[1].isoformat(), "rate_bps": 10}]
+        )
+
+
+
+
+@pytest.mark.parametrize("positions", [
+    [0.0, float("nan"), 0.0],
+    [0.0, float("inf"), 0.0],
+    [0.0, 1.1, 0.0],
+])
+def test_funding_positions_must_be_finite_and_bounded(positions):
+    index = _times()[:3]
+    position = pd.Series(positions, index=index)
+    with pytest.raises(ValueError, match="positions must be finite"):
+        funding_cost_series(
+            position, [{"timestamp": index[1].isoformat(), "rate_bps": 5}]
+        )
