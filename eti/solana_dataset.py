@@ -315,8 +315,10 @@ def evaluate_solana_discovery_cohort_coverage(
         ]
         if scan_snapshots:
             coverage_status = "SCAN_SNAPSHOT_RECORDED"
-        elif any(status in {"failed", "dead", "cancelled", "canceled"} for status in task_statuses):
+        elif "failed" in task_statuses:
             coverage_status = "SCAN_TASK_FAILED_NO_SNAPSHOT"
+        elif any(status in {"cancelled", "canceled"} for status in task_statuses):
+            coverage_status = "SCAN_TASK_CANCELLED_NO_SNAPSHOT"
         elif linked_tasks:
             coverage_status = "SCAN_TASK_PENDING_OR_NO_RESULT"
         else:
@@ -325,6 +327,7 @@ def evaluate_solana_discovery_cohort_coverage(
             "event_count": 0, "distinct_mint_count": 0,
             "scan_snapshot_recorded_event_count": 0,
             "failed_task_without_snapshot_event_count": 0,
+            "cancelled_task_without_snapshot_event_count": 0,
             "pending_or_unresolved_event_count": 0,
             "no_linked_task_event_count": 0,
         })
@@ -333,6 +336,8 @@ def evaluate_solana_discovery_cohort_coverage(
             bucket["scan_snapshot_recorded_event_count"] += 1
         elif coverage_status == "SCAN_TASK_FAILED_NO_SNAPSHOT":
             bucket["failed_task_without_snapshot_event_count"] += 1
+        elif coverage_status == "SCAN_TASK_CANCELLED_NO_SNAPSHOT":
+            bucket["cancelled_task_without_snapshot_event_count"] += 1
         elif coverage_status == "SCAN_TASK_PENDING_OR_NO_RESULT":
             bucket["pending_or_unresolved_event_count"] += 1
         else:
