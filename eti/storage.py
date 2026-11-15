@@ -945,7 +945,7 @@ class MemoryStore:
         workspace_id = _required_text(workspace_id, "workspace_id")
         if status is not None and status not in {"queued", "running", "completed", "failed", "cancelled"}:
             raise ValueError("invalid task status filter")
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 501:
             raise ValueError("limit must be an integer from 1 to 500")
         query = ("SELECT * FROM agent_tasks WHERE owner_id = ? AND workspace_id = ?")
         params: list[Any] = [owner_id, workspace_id]
@@ -3070,7 +3070,7 @@ class MemoryStore:
     ) -> list[dict[str, Any]]:
         owner_id = _required_text(owner_id, "owner_id")
         workspace_id = _required_text(workspace_id, "workspace_id")
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 501:
             raise ValueError("limit must be an integer from 1 to 500")
         query = ("SELECT * FROM solana_research_snapshots "
                  "WHERE owner_id=? AND workspace_id=?")
@@ -3101,7 +3101,7 @@ class MemoryStore:
     ) -> list[dict[str, Any]]:
         owner_id = _required_text(owner_id, "owner_id")
         workspace_id = _required_text(workspace_id, "workspace_id")
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 501:
             raise ValueError("limit must be an integer from 1 to 500")
         query = ("SELECT * FROM solana_research_events "
                  "WHERE owner_id=? AND workspace_id=?")
