@@ -13,7 +13,7 @@ def _times():
 def test_funding_event_is_charged_once_at_exact_settlement_bar():
     index = _times()
     close = pd.Series([100.0] * 4, index=index)
-    signals = pd.Series([2.0, 2.0, 2.0, 2.0], index=index)
+    signals = pd.Series([1.0, 1.0, 1.0, 1.0], index=index)
     result = backtest_positions(
         close, signals, fee_bps=0, slippage_bps=0, allow_short=True,
         funding_events=[{"timestamp": index[2].isoformat(), "rate_bps": 10.0}],
