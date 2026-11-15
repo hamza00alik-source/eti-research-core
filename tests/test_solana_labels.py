@@ -197,3 +197,31 @@ def test_all_pools_for_one_mint_stay_in_the_same_validation_fold():
         for item in rows if item["mint"] == "Mint0"
     ]
     assert len(set(mint_zero_folds)) == 1
+
+
+def test_group_split_purges_entire_mint_when_one_pool_label_crosses_boundary():
+    from eti.solana_labels import chronological_group_split
+
+    rows = [
+        {"mint": "Mint0", "pool_address": "PoolA",
+         "baseline_at": "2026-01-01T00:00:00Z", "target_at": "2026-01-01T00:05:00Z"},
+        # This second pool belongs to the same mint but its forward outcome
+        # crosses the validation boundary, so neither pool may enter training.
+        {"mint": "Mint0", "pool_address": "PoolB",
+         "baseline_at": "2026-01-01T00:00:00Z", "target_at": "2026-01-05T00:00:00Z"},
+        {"mint": "Mint1", "pool_address": "PoolC",
+         "baseline_at": "2026-01-02T00:00:00Z", "target_at": "2026-01-02T00:05:00Z"},
+        {"mint": "Mint2", "pool_address": "PoolD",
+         "baseline_at": "2026-01-03T00:00:00Z", "target_at": "2026-01-03T00:05:00Z"},
+        {"mint": "Mint3", "pool_address": "PoolE",
+         "baseline_at": "2026-01-04T00:00:00Z", "target_at": "2026-01-04T00:05:00Z"},
+        {"mint": "Mint4", "pool_address": "PoolF",
+         "baseline_at": "2026-01-05T00:00:00Z", "target_at": "2026-01-05T00:05:00Z"},
+    ]
+
+    split = chronological_group_split(rows, train_fraction=0.5, embargo_seconds=0)
+    assert "Mint0" not in {row["mint"] for row in split["train"]}
+    assert "Mint0" not in {row["mint"] for row in split["validation"]}
+    assert split["purged_group_count"] >= 1
+    assert all(row["target_at"] < split["boundary_at"] for row in split["train"])
+    assert all(row["baseline_at"] >= split["validation_start_at"] for row in split["validation"])
