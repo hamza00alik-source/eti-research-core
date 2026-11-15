@@ -560,3 +560,19 @@ This is not a significance test, evidence of independent replication, proof of p
 The walk-forward `validation_dependence` report now separates same-mint overlapping baseline-to-target intervals from overlapping intervals across different mints. It also reports how many distinct mints recur in more than one validation fold. Cross-mint overlap is relevant because different tokens can still share market-wide shocks and time windows; mint identity alone does not make observations independent.
 
 These are descriptive pair counts over prepared validation rows with valid timezone-aware positive-duration intervals. They do not estimate an effective independent sample size, correct standard errors, remove overlapping labels, or establish independence. They must not be interpreted as a risk-adjusted performance measure or as authorization to train or execute.
+
+## Provider observation diagnostics
+
+The pure helper `eti.solana_provider_health.evaluate_solana_provider_health`
+summarizes explicitly supplied provider request observations. Each observation
+must identify a provider, a timezone-aware observation timestamp, and a
+`success` or `error` outcome. Successful observations need a measured
+non-negative latency to be classified healthy. The latest supplied observation
+determines the current descriptive status; stale or future observations and
+missing latency remain `UNKNOWN`. A latest error or latency above the
+configured threshold is `DEGRADED`.
+
+This helper does not perform provider probes, persist telemetry, establish
+provider-wide availability, estimate uptime, or infer failure from missing
+observations. Counts describe only the supplied rows. It does not validate the
+truthfulness of the source measurements and never authorizes trading.
