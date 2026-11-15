@@ -9,7 +9,7 @@ artifact. Approval is explicit, scoped to exact `venue:market_type:symbol`
 keys, and must include:
 - `approved=true` and `authorize_research_fits=true`,
 - `execution_enabled=false`,
-- per-instrument fee, spread, slippage, market-impact, funding, borrow, and short-capability assumptions that exactly match the evidence-backed cost model carried in the allocation artifact,
+- per-instrument fee, spread, slippage, market-impact, funding, borrow, and short-capability assumptions that exactly match the evidence-backed cost model carried in the allocation artifact; each evidence record must list the numeric assumptions it supports, and every cost field must be covered,
 - estimated run cost and daily/monthly spend-to-date,
 - an overall model-fit-call cap no greater than 32.
 
