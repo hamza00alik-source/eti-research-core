@@ -40,6 +40,25 @@ The five article roles map to ETI capabilities, not independent unbounded LLMs:
 - Executor: renamed **Paper Sizer**; creates a hypothetical paper intent only.
 - Risk: portfolio-aware paper position monitor and exit simulation.
 
+## Provider request-observation ledger
+
+Authenticated workspace APIs accept minimal request observations at
+POST /v1/workspaces/{workspace_id}/solana/provider-observations and expose
+the bounded ledger plus evidence-only health summaries at the matching GET
+route. Records contain only a normalized provider identifier, a safe endpoint
+identifier, timezone-aware observation time, success/error status, optional
+measured latency, and a constrained error code. Arbitrary extra fields,
+request headers, response bodies, credential-bearing URLs, and API keys are
+rejected or never accepted. Records are append-only, workspace/owner scoped,
+and SHA-256 checked when read.
+
+The health summary describes only submitted observations in that workspace.
+It does not probe providers, establish provider-wide uptime, or treat absent
+records as failures. A successful observation without latency, stale evidence,
+or future-dated evidence remains UNKNOWN. This ledger is not automatically
+populated by provider clients yet; it is an authenticated evidence-ingestion
+surface, not a live monitoring guarantee. It does not authorize trading.
+
 ## Provider contracts
 
 ### PumpPortal
