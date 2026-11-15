@@ -89,3 +89,24 @@ def test_empty_funding_schedule_is_noop_for_non_datetime_indexes():
     position = pd.Series([0.0, 1.0, -1.0], index=[0, 1, 2])
     costs = funding_cost_series(position, [])
     pd.testing.assert_series_equal(costs, pd.Series([0.0, 0.0, 0.0], index=position.index))
+
+
+def test_empty_funding_schedule_is_noop_for_naive_indexes():
+    index = pd.date_range("2026-01-01", periods=3, freq="h")
+    position = pd.Series([0.0, 1.0, -1.0], index=index)
+    result = funding_cost_series(position, [])
+    assert result.tolist() == [0.0, 0.0, 0.0]
+
+
+@pytest.mark.parametrize("positions", [
+    [0.0, float("nan"), 0.0],
+    [0.0, float("inf"), 0.0],
+    [0.0, 1.1, 0.0],
+])
+def test_funding_positions_must_be_finite_and_bounded(positions):
+    index = _times()[:3]
+    position = pd.Series(positions, index=index)
+    with pytest.raises(ValueError, match="positions must be finite"):
+        funding_cost_series(
+            position, [{"timestamp": index[1].isoformat(), "rate_bps": 5}]
+        )
