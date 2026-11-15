@@ -156,7 +156,7 @@ def evaluate_predictions(
     )
     no_trade = _strategy_metrics(
         close_series, pd.Series(0.0, index=close_series.index), fee_bps,
-        slippage_bps, 0.0, False, float(bars_per_year),
+        slippage_bps, 0.0, None, False, float(bars_per_year),
     )
     actual_oracle = _strategy_metrics(
         close_series, actual_positions, fee_bps, slippage_bps,
