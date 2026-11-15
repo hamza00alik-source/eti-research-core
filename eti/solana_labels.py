@@ -60,8 +60,22 @@ def build_forward_labels(
     if any(isinstance(h, bool) or not isinstance(h, int) or h <= 0 for h in horizons_seconds):
         raise ValueError("horizons_seconds must contain positive integers")
     grouped: dict[tuple[str, str], list[tuple[datetime, dict[str, Any]]]] = {}
+    eligible_snapshots = [
+        item for item in snapshots
+        if isinstance(item, dict) and item.get("capability") == "solana.market.scan"
+    ]
+    id_counts: dict[str, int] = {}
+    for item in eligible_snapshots:
+        snapshot_id = item.get("id")
+        if isinstance(snapshot_id, str) and snapshot_id:
+            id_counts[snapshot_id] = id_counts.get(snapshot_id, 0) + 1
+    # Ambiguous IDs cannot safely serve as persisted label references. Exclude
+    # every occurrence rather than letting ordering choose one silently.
+    ambiguous_ids = {snapshot_id for snapshot_id, count in id_counts.items() if count > 1}
     for item in snapshots:
         if not isinstance(item, dict) or item.get("capability") != "solana.market.scan":
+            continue
+        if isinstance(item.get("id"), str) and item["id"] in ambiguous_ids:
             continue
         mint, pool = item.get("mint"), item.get("pool_address")
         observed = _timestamp(item.get("fetched_at"))
