@@ -120,3 +120,42 @@ def test_selected_candidate_identity_includes_market_type():
     assert rows["spot"]["research_priority_rank"] == 1
     assert rows["swap"]["research_priority_rank"] is None
     assert rows["swap"]["training_block_reason"] == "not_selected_within_research_budget"
+
+
+
+def test_equity_candidate_uses_calendar_session_coverage_for_continuity():
+    equity = candidate("SPY", venue="yahoo", age=300, gap=86400, asset_class="equity")
+    equity["quality"].update({
+        "session_calendar_applied": True,
+        "session_calendar_id": "NYSE-fixture",
+        "session_coverage_validated": True,
+        "expected_session_intervals": 100,
+        "missing_expected_intervals": 2,
+        "unexpected_session_timestamps": 0,
+    })
+    result = allocate_research_budget(
+        scan(equity),
+        cost_model_status={"yahoo:spot:SPY": "validated"},
+        estimated_run_cost_usd=1, daily_spend_to_date_usd=0,
+        monthly_spend_to_date_usd=0,
+    )
+    row = result["candidates"][0]
+    assert row["data_readiness_score"] > 0
+    assert row["economic_evaluation_eligible"] is True
+    assert "session_calendar_not_applied" not in row["eligibility_reasons"]
+
+
+def test_equity_candidate_rejects_unexpected_timestamps_in_calendar_window():
+    equity = candidate("SPY", venue="yahoo", asset_class="equity")
+    equity["quality"].update({
+        "session_calendar_applied": True,
+        "session_calendar_id": "NYSE-fixture",
+        "session_coverage_validated": False,
+        "expected_session_intervals": 100,
+        "missing_expected_intervals": 0,
+        "unexpected_session_timestamps": 1,
+    })
+    result = allocate_research_budget(scan(equity))
+    row = result["candidates"][0]
+    assert row["data_readiness_score"] == 0
+    assert "session_coverage_not_validated" in row["eligibility_reasons"]
