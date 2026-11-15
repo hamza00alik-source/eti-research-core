@@ -144,9 +144,28 @@ def validate_transaction_cost_model(
         coverage_end = _timestamp("funding_schedule_coverage.end", coverage.get("end"))
         if coverage_start > coverage_end or coverage_start < valid_from or coverage_end > valid_until or coverage_end > current:
             raise ValueError("funding schedule coverage is invalid or outside its evidence window")
-        if normalized_schedule[0]["timestamp"] < coverage_start.isoformat() or normalized_schedule[-1]["timestamp"] > coverage_end.isoformat():
-            raise ValueError("funding events fall outside declared schedule coverage")
-        normalized_coverage = {"start": coverage_start.isoformat(), "end": coverage_end.isoformat()}
+        expected_timestamps = coverage.get("expected_timestamps")
+        if not isinstance(expected_timestamps, list) or not expected_timestamps:
+            raise ValueError("funding schedule coverage must enumerate expected_timestamps")
+        expected = [_timestamp(f"funding_schedule_coverage.expected_timestamps[{i}]", value)
+                    for i, value in enumerate(expected_timestamps)]
+        if expected != sorted(expected) or len(set(expected)) != len(expected):
+            raise ValueError("expected funding timestamps must be unique and chronological")
+        if any(value < coverage_start or value > coverage_end for value in expected):
+            raise ValueError("expected funding timestamps fall outside declared coverage")
+        actual = [_timestamp("funding_schedule.timestamp", item["timestamp"])
+                  for item in normalized_schedule]
+        if actual != expected:
+            missing = sorted(value.isoformat() for value in set(expected) - set(actual))
+            unexpected = sorted(value.isoformat() for value in set(actual) - set(expected))
+            raise ValueError(
+                "funding schedule does not match enumerated expected settlements; "
+                f"missing={missing}, unexpected={unexpected}"
+            )
+        normalized_coverage = {
+            "start": coverage_start.isoformat(), "end": coverage_end.isoformat(),
+            "expected_timestamps": [value.isoformat() for value in expected],
+        }
     elif coverage is not None:
         raise ValueError("funding schedule coverage cannot be supplied without funding events")
     if numeric["funding_bps_per_bar"] != 0 and normalized_schedule:

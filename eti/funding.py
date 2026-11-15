@@ -8,10 +8,18 @@ import pandas as pd
 
 
 def funding_cost_series(position: pd.Series, events: list[dict[str, Any]] | None) -> pd.Series:
-    """Return per-bar funding costs for events exactly aligned to UTC bar timestamps.
+    """Return funding costs for settlements exactly aligned to UTC bar timestamps.
+
+    Contract: each index timestamp denotes the OPEN of its OHLCV bar. A signal
+    produced from bar t is shifted by the backtester and first exposed from the
+    next bar's open. A settlement at bar t's open is charged to the position
+    active at that timestamp (the already-shifted position[t]), not to a signal
+    generated from bar t's close. Providers with close-stamped or otherwise
+    different candle conventions must normalize timestamps before evaluation.
 
     A positive rate means longs pay shorts; a negative rate means shorts pay longs.
-    Positions are already shifted by the caller to represent exposure held on each bar.
+    This is normalized-notional accounting only; it is not contract-, margin-,
+    leverage-, mark-price-, or settlement-currency-aware.
     """
     costs = pd.Series(0.0, index=position.index, dtype=float)
     if events is None:
