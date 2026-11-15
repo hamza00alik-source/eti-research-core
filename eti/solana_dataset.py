@@ -513,9 +513,13 @@ def evaluate_solana_token_lifecycle_coverage(
             "audit_snapshot_count": sum(
                 row.get("capability") == "solana.token.audit" for row in mint_snapshots
             ),
-            "latest_snapshot_at": max(
-                (row.get("fetched_at") for row in mint_snapshots if parse_time(row.get("fetched_at")) is not None),
-                default=None,
+            "latest_snapshot_at": (
+                max(
+                    (row for row in mint_snapshots if parse_time(row.get("fetched_at")) is not None),
+                    key=lambda row: parse_time(row.get("fetched_at")),
+                ).get("fetched_at")
+                if any(parse_time(row.get("fetched_at")) is not None for row in mint_snapshots)
+                else None
             ),
             "refresh_jobs": job_rows,
             "lifecycle_evidence_status": lifecycle_status,
