@@ -120,6 +120,7 @@ class WeeklySessionCalendar:
         if end < start:
             raise ValueError("end must not precede start")
         duration = self._duration(timeframe)
+        utc_start, utc_end = start.astimezone(timezone.utc), end.astimezone(timezone.utc)
         local_start, local_end = start.astimezone(self.zone), end.astimezone(self.zone)
         expected: list[datetime] = []
         day = local_start.date() - timedelta(days=1)
@@ -128,10 +129,11 @@ class WeeklySessionCalendar:
             bounds = self._session_bounds(day)
             if bounds:
                 session_open, session_close = bounds
-                cursor = session_open
-                while cursor + duration <= session_close:
-                    if local_start <= cursor <= local_end:
-                        expected.append(cursor.astimezone(timezone.utc))
+                cursor = session_open.astimezone(timezone.utc)
+                close_utc = session_close.astimezone(timezone.utc)
+                while cursor + duration <= close_utc:
+                    if utc_start <= cursor <= utc_end:
+                        expected.append(cursor)
                     cursor += duration
             day += timedelta(days=1)
         return expected
@@ -152,6 +154,8 @@ class WeeklySessionCalendar:
                 left = max(local_start, session_open)
                 right = min(local_end, session_close)
                 if right > left:
-                    total += (right - left).total_seconds()
+                    total += (
+                        right.astimezone(timezone.utc) - left.astimezone(timezone.utc)
+                    ).total_seconds()
             day += timedelta(days=1)
         return total
