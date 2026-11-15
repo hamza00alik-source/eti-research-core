@@ -9,6 +9,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+import pandas as pd
+
 from .instruments import InstrumentSpec
 from .market_data_hub import MarketDataHub, build_public_market_hub
 from .pipeline import estimate_nested_model_fits_from_rows, run_nested_experiment
