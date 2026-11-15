@@ -16,11 +16,12 @@ from .research_allocator import MAX_DAILY_USD, MAX_MONTHLY_USD
 from .transaction_costs import validate_transaction_cost_model
 
 
-def _number(name: str, value: Any, *, positive: bool = False) -> float:
+def _number(name: str, value: Any, *, positive: bool = False, allow_negative: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be a finite number")
     result = float(value)
-    if not math.isfinite(result) or result < 0 or (positive and result <= 0):
+    if (not math.isfinite(result) or (result < 0 and not allow_negative)
+            or (positive and result <= 0)):
         raise ValueError(f"{name} must be finite and {'positive' if positive else 'non-negative'}")
     return result
 
@@ -154,7 +155,10 @@ def run_approved_multi_market_research(
         slippage_component = _number(f"{key}.slippage_bps", cost.get("slippage_bps"))
         spread = _number(f"{key}.spread_bps", cost.get("spread_bps"))
         market_impact = _number(f"{key}.market_impact_bps", cost.get("market_impact_bps"))
-        funding = _number(f"{key}.funding_bps_per_bar", cost.get("funding_bps_per_bar"))
+        funding = _number(
+            f"{key}.funding_bps_per_bar", cost.get("funding_bps_per_bar"),
+            allow_negative=True,
+        )
         if _number(f"{key}.borrow_bps_per_bar", cost.get("borrow_bps_per_bar")) != 0:
             raise ValueError(f"{key} borrow cost is not yet supported by the evaluator")
         expected = {
