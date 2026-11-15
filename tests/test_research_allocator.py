@@ -91,3 +91,18 @@ def test_session_based_assets_are_not_misclassified_without_calendar():
     assert row["data_readiness_score"] > 0
     assert "session_calendar_not_applied" in row["eligibility_reasons"]
     assert row["economic_evaluation_eligible"] is False
+
+
+def test_allocator_cost_models_are_scoped_by_market_type():
+    spot = candidate("BTC/USD", venue="kraken")
+    swap = candidate("BTC/USD", venue="kraken")
+    swap["instrument"]["market_type"] = "swap"
+    result = allocate_research_budget(
+        scan(spot, swap),
+        cost_model_status={"kraken:spot:BTC/USD": "validated"},
+        estimated_run_cost_usd=1, daily_spend_to_date_usd=0,
+        monthly_spend_to_date_usd=0,
+    )
+    rows = {row["instrument"]["market_type"]: row for row in result["candidates"]}
+    assert rows["spot"]["economic_evaluation_eligible"] is True
+    assert rows["swap"]["economic_evaluation_eligible"] is False
