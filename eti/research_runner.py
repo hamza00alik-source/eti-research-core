@@ -106,6 +106,14 @@ def run_approved_multi_market_research(
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ValueError(f"evaluation.{name} must be a positive integer")
 
+    scan_rows = {}
+    for source in scan_report.get("candidates", []):
+        if not isinstance(source, dict) or not isinstance(source.get("instrument"), dict):
+            continue
+        source_instrument = source["instrument"]
+        source_key = f"{source_instrument.get('venue')}:{source_instrument.get('symbol')}"
+        scan_rows[source_key] = source
+
     rows_by_key = {}
     for row in allocation_plan.get("candidates", []):
         if not isinstance(row, dict) or not isinstance(row.get("instrument"), dict):
@@ -123,8 +131,13 @@ def run_approved_multi_market_research(
         allocated = rows_by_key.get(key)
         if allocated is None:
             raise ValueError(f"{key} is not present in the allocation plan")
+        source = scan_rows.get(key)
+        if source is None or source.get("status") != "data_ready":
+            raise ValueError(f"{key} is not backed by a data_ready row in the supplied scan")
         if allocated.get("economic_evaluation_eligible") is not True:
             raise ValueError(f"{key} is not eligible: {allocated.get('eligibility_reasons')}")
+        if allocated.get("transaction_cost_model_status") != "validated":
+            raise ValueError(f"{key} does not have a validated transaction-cost status")
         if allocated.get("training_authorized") is not False:
             raise ValueError(f"{key} has an unexpected allocator authorization state")
         if not isinstance(cost, dict):
