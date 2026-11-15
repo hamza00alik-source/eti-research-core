@@ -5,7 +5,7 @@ candidates eligible for economic evaluation only when a venue:symbol cost-model
 status is explicitly validated. It never authorizes training.
 
 The separate runner in `eti.research_runner` requires a reviewed local approval
-artifact. Approval is explicit, scoped to exact `venue:symbol` keys, and must
+artifact. Approval is explicit, scoped to exact `venue:market_type:symbol` keys, and must
 include:
 - `approved=true` and `authorize_research_fits=true`,
 - `execution_enabled=false`,
@@ -44,7 +44,7 @@ to authorize a run):
     "step_size": 200
   },
   "instruments": {
-    "kraken:BTC/USD": {
+    "kraken:spot:BTC/USD": {
       "fee_bps": 6.0,
       "slippage_bps": 2.0,
       "funding_bps_per_bar": 0.0,
@@ -54,7 +54,7 @@ to authorize a run):
 }
 ```
 
-This artifact is an operator governance input, not a cryptographic signature
+Instrument identity includes venue, market type, and symbol to prevent spot/derivative collisions. Duplicate identities and scan/allocation metadata mismatches are rejected. Contract multipliers are validated rather than silently replacing falsey values.\n\nThis artifact is an operator governance input, not a cryptographic signature
 or proof of independent review. USD figures are operator estimates, not
 measured Kaggle billing. Fit-call limits are compute proxies, not dollar costs.
 The runner does not submit orders and cannot enable execution.
