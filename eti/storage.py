@@ -179,6 +179,16 @@ class MemoryStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_solana_labels_owner_mint
                     ON solana_research_labels(owner_id, workspace_id, mint, horizon_seconds);
+                CREATE TABLE IF NOT EXISTS solana_provider_observations (
+                    id TEXT PRIMARY KEY, owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL, endpoint_id TEXT NOT NULL, observed_at TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('success','error')),
+                    latency_ms REAL, error_code TEXT, observation_sha256 TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_solana_provider_observations_time
+                    ON solana_provider_observations(owner_id, workspace_id, provider, observed_at);
                 CREATE TABLE IF NOT EXISTS solana_execution_cost_evidence (
                     id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
@@ -2643,6 +2653,97 @@ class MemoryStore:
                 "A dataset report is descriptive and does not establish predictive performance.",
             ],
         }
+
+    def record_solana_provider_observation(
+        self, owner_id: str, workspace_id: str, provider: str, endpoint_id: str,
+        observed_at: str, status: str, latency_ms: float | None = None,
+        error_code: str | None = None,
+    ) -> dict[str, Any]:
+        """Append a minimal, credential-free provider request observation."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        provider = _required_text(provider, "provider", 80).lower()
+        endpoint_id = _required_text(endpoint_id, "endpoint_id", 120)
+        observed_at = _required_text(observed_at, "observed_at", 40)
+        try:
+            parsed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("observed_at must be a timezone-aware ISO timestamp") from exc
+        if parsed.tzinfo is None:
+            raise ValueError("observed_at must be a timezone-aware ISO timestamp")
+        observed_at = parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        if status not in {"success", "error"}:
+            raise ValueError("status must be success or error")
+        if latency_ms is not None and (
+            isinstance(latency_ms, bool) or not isinstance(latency_ms, (int, float))
+            or not math.isfinite(latency_ms) or latency_ms < 0
+        ):
+            raise ValueError("latency_ms must be finite and non-negative")
+        if error_code is not None:
+            error_code = _required_text(error_code, "error_code", 80)
+            if not all(ch.isalnum() or ch in "._-" for ch in error_code):
+                raise ValueError("error_code may contain only letters, numbers, dot, underscore and hyphen")
+        if status == "success" and error_code is not None:
+            raise ValueError("successful observations cannot include error_code")
+        if status == "error" and error_code is None:
+            raise ValueError("error observations require a safe error_code")
+        envelope = {"provider": provider, "endpoint_id": endpoint_id,
+                    "observed_at": observed_at, "status": status,
+                    "latency_ms": float(latency_ms) if latency_ms is not None else None,
+                    "error_code": error_code}
+        digest = hashlib.sha256(_encode_json(envelope).encode("utf-8")).hexdigest()
+        now, record_id = _utc_now(), str(uuid4())
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            conn.execute(
+                "INSERT INTO solana_provider_observations "
+                "(id,owner_id,workspace_id,provider,endpoint_id,observed_at,status,latency_ms,error_code,observation_sha256,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (record_id, owner_id, workspace_id, provider, endpoint_id, observed_at,
+                 status, latency_ms, error_code, digest, now))
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (str(uuid4()), owner_id, workspace_id, "solana.provider_observation.recorded",
+                 _encode_json({"observation_id": record_id, "provider": provider,
+                               "endpoint_id": endpoint_id, "status": status,
+                               "observation_sha256": digest}), now))
+            row = conn.execute("SELECT * FROM solana_provider_observations WHERE id=?",
+                               (record_id,)).fetchone()
+        return self._solana_provider_observation_dict(row)
+
+    @staticmethod
+    def _solana_provider_observation_dict(row: sqlite3.Row) -> dict[str, Any]:
+        envelope = {"provider": row["provider"], "endpoint_id": row["endpoint_id"],
+                    "observed_at": row["observed_at"], "status": row["status"],
+                    "latency_ms": row["latency_ms"], "error_code": row["error_code"]}
+        digest = hashlib.sha256(_encode_json(envelope).encode("utf-8")).hexdigest()
+        return {"id": row["id"], **envelope,
+                "observation_sha256": row["observation_sha256"],
+                "integrity_valid": digest == row["observation_sha256"],
+                "created_at": row["created_at"]}
+
+    def list_solana_provider_observations(
+        self, owner_id: str, workspace_id: str, provider: str | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("limit must be from 1 to 1000")
+        query = "SELECT * FROM solana_provider_observations WHERE owner_id=? AND workspace_id=?"
+        params: list[Any] = [owner_id, workspace_id]
+        if provider is not None:
+            query += " AND provider=?"
+            params.append(_required_text(provider, "provider", 80).lower())
+        query += " ORDER BY observed_at DESC,id DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            rows = conn.execute(query, params).fetchall()
+        return [self._solana_provider_observation_dict(row) for row in rows]
 
     def record_solana_execution_cost_evidence(
         self, owner_id: str, workspace_id: str, label_id: str,
