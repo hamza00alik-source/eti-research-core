@@ -624,3 +624,16 @@ exported evidence, not proof that provider marks are executable prices or that
 the requested horizon was sampled exactly. Older hand-built exports without
 the optional label timing fields retain compatibility, but still undergo
 snapshot-time, horizon and outcome checks.
+
+
+### Requested horizon versus observed sampling time
+
+A forward label's requested horizon is a minimum elapsed-time threshold. The
+label builder selects the first later observation at or beyond that threshold;
+it does not interpolate a price at the exact due time. Therefore, a nominal
+one-hour label may represent a target sampled materially later than one hour.
+Prepared rows retain both target_at and actual_elapsed_seconds, and
+walk-forward evaluation reports minimum, median, maximum and median overshoot
+by nominal horizon. Comparisons across nominal horizons must account for these
+actual sampling intervals. These diagnostics do not reconstruct the price
+path between observations or turn sampled marks into executable returns.
