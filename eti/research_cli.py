@@ -95,7 +95,7 @@ def main() -> None:
             estimated_run_cost_usd=args.estimated_run_cost_usd,
             daily_spend_to_date_usd=args.daily_spend_to_date_usd,
             monthly_spend_to_date_usd=args.monthly_spend_to_date_usd,
-            cost_model_status=cost_models,
+            cost_models=cost_models,
         )
     else:
         report = run_approved_multi_market_research(
