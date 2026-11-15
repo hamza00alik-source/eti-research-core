@@ -60,6 +60,7 @@ def _observed_http_json(
     provider: str,
     endpoint_id: str,
     callback: ProviderObservationCallback | None,
+    validate: Callable[[Any], None] | None = None,
 ) -> Any:
     """Measure one provider HTTP request and emit credential-free telemetry."""
     started = time.monotonic()
@@ -70,9 +71,11 @@ def _observed_http_json(
         response = request()
         response.raise_for_status()
         payload = response.json()
+        if validate is not None:
+            validate(payload)
         status = "success"
         return payload
-    except (httpx.HTTPError, ValueError) as exc:
+    except Exception as exc:
         response_obj = getattr(exc, "response", None)
         status_code = getattr(response_obj, "status_code", None)
         error_code = f"HTTP_{status_code}" if isinstance(status_code, int) else type(exc).__name__
@@ -113,6 +116,10 @@ class SolanaRpcClient:
                 ),
                 provider="solana-rpc", endpoint_id=method,
                 callback=self.observation_callback,
+                validate=lambda item: (
+                    None if isinstance(item, dict) and not item.get("error") and "result" in item
+                    else (_ for _ in ()).throw(ProviderError("Solana RPC returned an invalid JSON-RPC response"))
+                ),
             )
         except (httpx.HTTPError, ValueError) as exc:
             raise ProviderError(f"Solana RPC {method} request failed: {type(exc).__name__}") from exc
