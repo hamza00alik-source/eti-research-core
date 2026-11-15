@@ -140,7 +140,25 @@ def test_allocator_uses_session_coverage_when_calendar_evidence_exists():
     }
     result = allocate_research_budget(
         {"scan_only": True, "execution_enabled": False, "candidates": [item]},
-        cost_model_status={"yahoo:spot:SPY": "validated"},
+        cost_models={
+            "yahoo:spot:SPY": {
+                "schema_version": "eti.transaction_cost_model.v1",
+                "instrument_identity": "yahoo:spot:SPY",
+                "quote_currency": "USD", "settlement_currency": "USD",
+                "fee_bps": 0, "spread_bps": 1, "slippage_bps": 1,
+                "market_impact_bps": 0, "funding_bps_per_bar": 0,
+                "borrow_bps_per_bar": 0, "contract_multiplier": 1,
+                "retrieved_at": "2026-01-01T00:00:00Z",
+                "valid_from": "2026-01-01T00:00:00Z",
+                "valid_until": "2030-01-01T00:00:00Z",
+                "evidence": [{
+                    "source": "Documented broker fee schedule",
+                    "uri": "https://example.com/fees",
+                    "license_status": "open",
+                    "observed_at": "2026-01-01T00:00:00Z",
+                }],
+            }
+        },
         estimated_run_cost_usd=1, daily_spend_to_date_usd=0,
         monthly_spend_to_date_usd=0,
     )
