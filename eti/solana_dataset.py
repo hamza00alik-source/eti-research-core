@@ -239,3 +239,134 @@ def prepare_solana_training_rows(dataset_export: dict[str, Any]) -> dict[str, An
             "Sampled price returns are not executable returns or net P&L.",
         ],
     }
+
+
+
+def evaluate_solana_discovery_cohort_coverage(
+    events: list[dict[str, Any]],
+    snapshots: list[dict[str, Any]],
+    tasks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Measure discovery-to-research coverage without treating missing data as failure.
+
+    Event/task/snapshot linkage is point-in-time and owner scoping must be applied
+    by the caller before invoking this pure diagnostic.
+    """
+    if not all(isinstance(value, list) for value in (events, snapshots, tasks)):
+        raise ValueError("events, snapshots and tasks must be lists")
+
+    def parse_time(value: Any) -> datetime | None:
+        return _timestamp(value)
+
+    task_by_event: dict[str, list[dict[str, Any]]] = {}
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        payload = task.get("input")
+        if not isinstance(payload, dict):
+            payload = task.get("input_json")
+        if isinstance(payload, str):
+            try:
+                import json
+                payload = json.loads(payload)
+            except (TypeError, ValueError):
+                payload = None
+        if isinstance(payload, dict) and isinstance(payload.get("source_event_id"), str):
+            task_by_event.setdefault(payload["source_event_id"], []).append(task)
+
+    snapshots_by_mint: dict[str, list[dict[str, Any]]] = {}
+    for snapshot in snapshots:
+        if isinstance(snapshot, dict) and isinstance(snapshot.get("mint"), str):
+            snapshots_by_mint.setdefault(snapshot["mint"], []).append(snapshot)
+
+    counts: dict[str, dict[str, int]] = {}
+    event_rows: list[dict[str, Any]] = []
+    seen_event_ids: set[str] = set()
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        event_id = event.get("id")
+        mint = event.get("mint")
+        event_type = event.get("event_type")
+        if not isinstance(event_id, str) or not isinstance(mint, str) or event_type not in {"new_token", "migration"}:
+            continue
+        if event_id in seen_event_ids:
+            continue
+        seen_event_ids.add(event_id)
+        received = parse_time(event.get("received_at"))
+        linked_tasks = task_by_event.get(event_id, [])
+        task_statuses = sorted({
+            str(task.get("status", "UNKNOWN")).lower() for task in linked_tasks
+        })
+        later_snapshots = []
+        for snapshot in snapshots_by_mint.get(mint, []):
+            stamp = parse_time(snapshot.get("fetched_at"))
+            if received is not None and stamp is not None and stamp >= received:
+                later_snapshots.append(snapshot)
+        scan_snapshots = [
+            row for row in later_snapshots
+            if row.get("capability") == "solana.market.scan"
+        ]
+        if scan_snapshots:
+            coverage_status = "SCAN_SNAPSHOT_RECORDED"
+        elif any(status in {"failed", "dead", "cancelled", "canceled"} for status in task_statuses):
+            coverage_status = "SCAN_TASK_FAILED_NO_SNAPSHOT"
+        elif linked_tasks:
+            coverage_status = "SCAN_TASK_PENDING_OR_NO_RESULT"
+        else:
+            coverage_status = "NO_LINKED_SCAN_TASK"
+        bucket = counts.setdefault(event_type, {
+            "event_count": 0, "distinct_mint_count": 0,
+            "scan_snapshot_recorded_event_count": 0,
+            "failed_task_without_snapshot_event_count": 0,
+            "pending_or_unresolved_event_count": 0,
+            "no_linked_task_event_count": 0,
+        })
+        bucket["event_count"] += 1
+        if scan_snapshots:
+            bucket["scan_snapshot_recorded_event_count"] += 1
+        elif coverage_status == "SCAN_TASK_FAILED_NO_SNAPSHOT":
+            bucket["failed_task_without_snapshot_event_count"] += 1
+        elif coverage_status == "SCAN_TASK_PENDING_OR_NO_RESULT":
+            bucket["pending_or_unresolved_event_count"] += 1
+        else:
+            bucket["no_linked_task_event_count"] += 1
+        event_rows.append({
+            "event_id": event_id,
+            "event_type": event_type,
+            "mint": mint,
+            "received_at": event.get("received_at"),
+            "linked_task_count": len(linked_tasks),
+            "task_statuses": task_statuses,
+            "later_market_scan_snapshot_count": len(scan_snapshots),
+            "later_audit_snapshot_count": sum(
+                row.get("capability") == "solana.token.audit" for row in later_snapshots
+            ),
+            "coverage_status": coverage_status,
+        })
+
+    for event_type, bucket in counts.items():
+        bucket["distinct_mint_count"] = len({
+            row["mint"] for row in event_rows if row["event_type"] == event_type
+        })
+        bucket["scan_snapshot_event_coverage_rate"] = (
+            bucket["scan_snapshot_recorded_event_count"] / bucket["event_count"]
+            if bucket["event_count"] else None
+        )
+
+    return {
+        "status": "DISCOVERY_COHORT_COVERAGE_DIAGNOSTICS",
+        "by_event_type": counts,
+        "event_rows": event_rows[:1000],
+        "event_rows_truncated": len(event_rows) > 1000,
+        "unresolved_outcomes_are_not_failures": True,
+        "disappearance_or_rug_pull_inferred": False,
+        "survivorship_bias_ruled_out": False,
+        "training_authorized": False,
+        "note": (
+            "Only explicit event-to-task linkage and later persisted snapshots are counted. "
+            "A missing snapshot does not establish token failure, disappearance, inactivity, "
+            "rug pull or delisting. Task failure is reported only from an explicit terminal "
+            "task status. This diagnostic cannot rule out survivorship bias or provider gaps."
+        ),
+    }
