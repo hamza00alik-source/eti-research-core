@@ -287,10 +287,10 @@ def test_forward_label_coverage_separates_immature_and_mature_without_target():
     assert coverage["eligible_baseline_count"] == 5
     assert coverage["mature_baseline_count"] == 4
     assert coverage["not_yet_mature_count"] == 1
-    assert coverage["mature_with_future_target_count"] == 3
-    assert coverage["mature_without_future_target_count"] == 1
+    assert coverage["mature_with_future_target_count"] == 4
+    assert coverage["mature_without_future_target_count"] == 0
     assert coverage["label_record_count"] == 1
-    assert coverage["target_coverage_rate_among_mature"] == pytest.approx(0.75)
+    assert coverage["target_coverage_rate_among_mature"] == pytest.approx(1.0)
     assert report["provider_gap_confirmed"] is False
     assert report["token_inactivity_inferred"] is False
     assert report["training_authorized"] is False
@@ -329,6 +329,7 @@ def test_forward_label_coverage_does_not_count_stale_persisted_target():
         horizons_seconds=(300,),
     )
     coverage = report["by_horizon_seconds"]["300"]
-    assert coverage["mature_with_future_target_count"] == 2
-    assert coverage["label_record_count"] == 1
+    assert coverage["mature_with_future_target_count"] == 1
+    assert coverage["mature_without_future_target_count"] == 2
+    assert coverage["label_record_count"] == 0
     assert coverage["stale_label_target_conflict_count"] == 1
