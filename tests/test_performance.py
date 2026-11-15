@@ -69,3 +69,43 @@ def test_performance_rejects_invalid_costs_and_time_scaling():
         evaluate_predictions(close, labels, labels, fee_bps=-1)
     with pytest.raises(ValueError, match="bars_per_year"):
         evaluate_predictions(close, labels, labels, bars_per_year=0)
+
+
+def test_signed_funding_charges_long_and_credits_short_for_positive_rate():
+    close = _series([100, 100, 100, 100])
+    long_labels = pd.Series([2, 2, 2, 2])
+    short_labels = pd.Series([0, 0, 0, 0])
+    long_report = evaluate_predictions(
+        close, long_labels, long_labels, funding_bps_per_bar=10
+    )
+    short_report = evaluate_predictions(
+        close, short_labels, short_labels, funding_bps_per_bar=10
+    )
+    assert long_report["trading"]["model"]["funding_cost_total"] > 0
+    assert short_report["trading"]["model"]["funding_cost_total"] < 0
+    assert long_report["trading"]["model"]["total_return"] < 0
+    assert short_report["trading"]["model"]["total_return"] > 0
+
+
+def test_negative_funding_rate_reverses_payer_and_receiver():
+    close = _series([100, 100, 100, 100])
+    long_labels = pd.Series([2, 2, 2, 2])
+    short_labels = pd.Series([0, 0, 0, 0])
+    long_report = evaluate_predictions(
+        close, long_labels, long_labels, funding_bps_per_bar=-10
+    )
+    short_report = evaluate_predictions(
+        close, short_labels, short_labels, funding_bps_per_bar=-10
+    )
+    assert long_report["trading"]["model"]["funding_cost_total"] < 0
+    assert short_report["trading"]["model"]["funding_cost_total"] > 0
+    assert long_report["trading"]["model"]["total_return"] > 0
+    assert short_report["trading"]["model"]["total_return"] < 0
+
+
+def test_funding_rate_rejects_boolean_and_non_finite_values():
+    close = _series([100, 101, 102])
+    labels = pd.Series([2, 2, 2])
+    for value in (True, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="funding_bps_per_bar"):
+            evaluate_predictions(close, labels, labels, funding_bps_per_bar=value)
