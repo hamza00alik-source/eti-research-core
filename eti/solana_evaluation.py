@@ -1336,6 +1336,7 @@ def evaluate_prepared_solana_walk_forward(
     fold_metadata: list[dict[str, Any]] = []
     horizon_folds: dict[int, list[dict[str, Any]]] = {}
     validation_intervals: list[tuple[str, datetime, datetime, int]] = []
+    elapsed_by_horizon: dict[int, list[float]] = {}
     validation_cost_evidence: list[dict[str, Any]] = []
     validation_transaction_attestations: list[dict[str, Any]] = []
     for index, fold in enumerate(folds, start=1):
@@ -1381,10 +1382,14 @@ def evaluate_prepared_solana_walk_forward(
             ):
                 raise ValueError("prepared row temporal metadata does not match its exported label")
             elapsed = (label_target - label_baseline).total_seconds()
+            horizon_seconds = label.get("horizon_seconds")
             reported_elapsed = label.get("actual_elapsed_seconds")
             if (
-                label_target <= label_baseline
-                or elapsed < label.get("horizon_seconds", 0)
+                isinstance(horizon_seconds, bool)
+                or not isinstance(horizon_seconds, int)
+                or horizon_seconds <= 0
+                or label_target <= label_baseline
+                or elapsed < horizon_seconds
                 or isinstance(reported_elapsed, bool)
                 or not isinstance(reported_elapsed, (int, float))
                 or not math.isfinite(float(reported_elapsed))
@@ -1408,6 +1413,7 @@ def evaluate_prepared_solana_walk_forward(
                 ):
                     raise ValueError("prepared row outcome does not match its exported label")
             validation_rows.append(prepared)
+            elapsed_by_horizon.setdefault(horizon_seconds, []).append(elapsed)
             if transaction_attestations_by_label_id is not None:
                 import hashlib
                 import json
@@ -1543,10 +1549,24 @@ def evaluate_prepared_solana_walk_forward(
              for fold_number, rows in sorted(grouped_folds.items())],
             buy_pressure_threshold=buy_pressure_threshold,
         )
+        elapsed_values = sorted(elapsed_by_horizon.get(horizon, []))
+        median_elapsed = (
+            elapsed_values[len(elapsed_values) // 2]
+            if len(elapsed_values) % 2
+            else (elapsed_values[len(elapsed_values) // 2 - 1] + elapsed_values[len(elapsed_values) // 2]) / 2
+        ) if elapsed_values else None
         by_horizon[str(horizon)] = {
             "folds": horizon_report["folds"],
             "aggregate": horizon_report["aggregate"],
             "excluded_validation_rows": horizon_report["excluded_validation_rows"],
+            "observed_elapsed_seconds": {
+                "count": len(elapsed_values),
+                "minimum": elapsed_values[0] if elapsed_values else None,
+                "median": median_elapsed,
+                "maximum": elapsed_values[-1] if elapsed_values else None,
+                "median_overshoot_seconds": median_elapsed - horizon if median_elapsed is not None else None,
+                "interpretation": "Actual sampled baseline-to-target elapsed time; requested horizon is a minimum threshold, not an exact observation time.",
+            },
         }
 
     overlap_comparisons = 0
