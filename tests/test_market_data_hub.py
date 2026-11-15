@@ -200,3 +200,38 @@ def test_ccxt_spot_discovery_defaults_missing_contract_size_to_one(monkeypatch):
     assert result["count"] == 1
     assert result["instruments"][0].contract_multiplier == 1.0
     assert result["source_errors"] == []
+
+
+def test_market_data_hub_rejects_future_dated_candles():
+    from datetime import timedelta
+    import pandas as pd
+    import pytest
+    from eti.instruments import InstrumentSpec
+    from eti.market_data_hub import MarketDataHub
+
+    class Adapter:
+        capabilities = AdapterCapabilities(
+            venue="fixture", asset_classes=("crypto",), market_types=("spot",),
+            public_market_data=True, authenticated_market_data=False,
+            order_execution=False,
+        )
+
+        def discover_instruments(self):
+            return []
+
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            start = pd.Timestamp.now(tz="UTC").floor("h") + pd.Timedelta(hours=2)
+            return pd.DataFrame({
+                "timestamp": [start, start + pd.Timedelta(hours=1)],
+                "open": [100.0, 101.0], "high": [101.0, 102.0],
+                "low": [99.0, 100.0], "close": [100.5, 101.5],
+                "volume": [10.0, 11.0],
+            })
+
+    hub = MarketDataHub([Adapter()])
+    instrument = InstrumentSpec(
+        symbol="BTC/USD", venue="fixture", asset_class="crypto",
+        market_type="spot", base_currency="BTC", quote_currency="USD",
+    )
+    with pytest.raises(ValueError, match="future-dated OHLCV"):
+        hub.fetch(instrument, "1h", 2, min_rows=2)
