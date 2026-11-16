@@ -92,6 +92,7 @@ The Queen's allowlisted worker registry exposes bounded specialist handlers:
 |---|---|---|
 | Market intelligence | `market.regime` | Causal volatility/trend regime diagnostics |
 | Strategy | `strategy.select` | Fixed strategy candidate selection on a caller-supplied validation window |
+| Strategy | `portfolio.allocate` | Evidence-gated, capped long-only paper allocation proposals |
 | Risk | `risk.assess` | Independent deterministic risk gate |
 | Macro | `macro.as_of` | Point-in-time macro vintage selection with release/license checks |
 | Execution | `execution.cost_estimate` | Evidence-validated fee/spread/slippage/impact/funding estimate; no orders |
