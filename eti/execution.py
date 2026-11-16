@@ -22,6 +22,12 @@ from .portfolio import PortfolioLimits, assess_portfolio
 from .risk import RiskEngine, RiskRequest
 
 
+# Hard code-level kill switch. Do not replace with an environment variable or
+# user setting: live orders remain blocked until independent research, fill,
+# risk, operational and security gates have been reviewed and approved.
+LIVE_ORDER_EXECUTION_ENABLED = False
+
+
 def _total_balance(balance: dict[str, Any], currency: str) -> float:
     total = balance.get("total") or {}
     if currency in total and total[currency] is not None:
@@ -145,6 +151,12 @@ def run_live_tick(payload: dict[str, Any], store) -> dict[str, Any]:
     if (not profile or not profile["enabled"] or profile["venue"] != venue
             or symbol not in profile["symbols"] or profile["timeframe"] != timeframe):
         return {"status": "disabled", "processed": False, "live_execution": False}
+    if not LIVE_ORDER_EXECUTION_ENABLED:
+        return {
+            "status": "blocked", "processed": False,
+            "reason": "live_order_execution_globally_disabled",
+            "live_execution": False,
+        }
     metadata = _approved_model(store, venue, symbol, timeframe)
     if metadata is None:
         return {"status": "no_approved_model", "processed": False, "live_execution": False}
