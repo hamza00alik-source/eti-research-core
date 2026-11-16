@@ -3,7 +3,7 @@ import pandas as pd
 
 from eti.model import BaselineModel
 from eti.features import FEATURE_COLUMNS
-from eti.pipeline import export_deployable_model, fit_deployable_model
+from eti.pipeline import export_deployable_model, fit_deployable_model, _reserve_final_export_holdout
 
 
 def test_deployable_fit_uses_exact_feature_schema_and_only_completed_rows(monkeypatch):
@@ -61,6 +61,7 @@ def test_deployable_fit_uses_exact_feature_schema_and_only_completed_rows(monkey
     assert schema["training_end"] < schema["calibration_start"]
     assert schema["calibration_end"] < schema["independent_validation_start"]
     assert schema["independent_probability_validation"]["passed"] is True
+    assert schema["independent_probability_validation"]["reserved_from_prior_research_evaluation"] is False
     assert schema["calibration_report"]["independent_validation"]["calibration_applied_to_export"] is True
     assert schema["label_horizon_bars"] == 6
 
@@ -197,3 +198,23 @@ def test_calibration_is_rejected_when_independent_holdout_nll_worsens(monkeypatc
     assert schema["calibration_report"]["reason"] == "temperature_scaling_failed_independent_holdout_nll"
     assert schema["independent_probability_validation"]["passed"] is False
     assert schema["independent_probability_validation"]["calibration_applied_to_export"] is False
+
+
+
+def test_final_export_holdout_is_excluded_from_prior_research_evaluation():
+    frame = pd.DataFrame({"close": np.arange(1000, dtype=float)})
+    evaluation, protocol = _reserve_final_export_holdout(frame, save_model=True)
+    assert len(evaluation) == 800
+    assert len(frame) - len(evaluation) == 200
+    assert evaluation.index.max() < frame.index.max()
+    assert protocol["enabled"] is True
+    assert protocol["reserved_rows"] == 200
+    assert protocol["reserved_fraction"] == 0.2
+
+
+def test_research_evaluation_uses_full_data_when_not_exporting_model():
+    frame = pd.DataFrame({"close": np.arange(1000, dtype=float)})
+    evaluation, protocol = _reserve_final_export_holdout(frame, save_model=False)
+    assert len(evaluation) == len(frame)
+    assert protocol["enabled"] is False
+    assert protocol["reserved_rows"] == 0
