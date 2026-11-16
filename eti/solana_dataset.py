@@ -59,6 +59,10 @@ def validate_snapshot_rows(
     invalid_rows: list[dict[str, Any]] = []
     for row in snapshots:
         problems: list[str] = []
+        if not isinstance(row, dict):
+            issue_counts["malformed_snapshot_row"] += 1
+            invalid_rows.append({"snapshot_id": None, "issues": ["malformed_snapshot_row"]})
+            continue
         snapshot_id = row.get("id")
         if isinstance(snapshot_id, str) and snapshot_id in duplicate_ids:
             issue_counts["duplicate_snapshot_id"] += 1
