@@ -76,7 +76,7 @@ def strategy_selection_specialist(payload: dict[str, Any]) -> dict[str, Any]:
         "validation_selection_score": float(selected["selection_score"]),
         "validation_return": float(selected["total_return"]),
         "validation_max_drawdown": float(selected["max_drawdown"]),
-        "validation_trade_count": int(selected["trade_count"]),
+        "validation_position_changes": int(selected["position_changes"]),
         "observations": len(close),
         "fee_bps": fee_bps,
         "slippage_bps": slippage_bps,
