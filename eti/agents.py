@@ -213,6 +213,7 @@ def strategy_walk_forward(payload: dict[str, Any]) -> dict[str, Any]:
         "requested_candles": limit, "available_candles": len(frame),
         "provider_diagnostics": provider_diagnostics,
         "data_start": timestamps.iloc[0].isoformat(), "data_end": timestamps.iloc[-1].isoformat(),
+        "latest_price": float(close.iloc[-1]),
         **report,
         "limitations": [
             "Fixed rule-based moving-average and momentum candidates; not a trained AI model.",

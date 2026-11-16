@@ -8,6 +8,9 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from .config import RiskConfig
+from .risk import RiskEngine, RiskRequest
+
 
 def _number(value: Any, field: str, *, minimum: float | None = None,
             maximum: float | None = None) -> float:
@@ -119,13 +122,41 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
                for value in fold_counts):
             rejected.append({"symbol": symbol, "reason": "outer_test_fold_evidence_incomplete"})
             continue
+        # Bind the evidence to the exact instrument and completed candle used by
+        # the strategy evaluator; a candidate cannot borrow another symbol's report.
+        identity = ("venue", "asset_class", "market_type", "symbol", "timeframe")
+        if any(not isinstance(research_report.get(key), str) or not research_report.get(key)
+               for key in identity) or research_report.get("symbol") != symbol:
+            rejected.append({"symbol": symbol, "reason": "research_instrument_identity_mismatch"})
+            continue
+        risk_evidence = item.get("risk_evidence")
+        if not isinstance(risk_evidence, dict):
+            rejected.append({"symbol": symbol, "reason": "missing_stop_risk_provenance"})
+            continue
+        if (risk_evidence.get("symbol") != symbol
+                or risk_evidence.get("venue") != research_report.get("venue")
+                or risk_evidence.get("timeframe") != research_report.get("timeframe")
+                or risk_evidence.get("price_as_of") != research_report.get("data_end")
+                or risk_evidence.get("source") != "owner_defined_stop"):
+            rejected.append({"symbol": symbol, "reason": "stop_risk_provenance_mismatch"})
+            continue
         try:
             base_return = _number(assessment.get("mean_net_return"), "mean_net_return")
             stressed_return = _number(assessment.get("two_x_mean_net_return"), "two_x_mean_net_return")
-            drawdown = _number(item.get("mean_max_drawdown"), "mean_max_drawdown",
+            drawdown = _number(assessment.get("mean_max_drawdown"), "mean_max_drawdown",
                                minimum=0, maximum=1)
-            stop_distance = _number(item.get("stop_distance_fraction"),
-                                    "stop_distance_fraction", minimum=0.0001, maximum=0.99)
+            entry_price = _number(research_report.get("latest_price"), "latest_price", minimum=0.0000001)
+            risk_entry = _number(risk_evidence.get("entry_price"), "risk_evidence.entry_price",
+                                 minimum=0.0000001)
+            stop_price = _number(risk_evidence.get("stop_price"), "risk_evidence.stop_price",
+                                 minimum=0.0000001)
+            if not math.isclose(entry_price, risk_entry, rel_tol=1e-10, abs_tol=1e-10):
+                raise ValueError("risk entry price differs from the research snapshot")
+            if stop_price >= entry_price:
+                raise ValueError("long-only paper allocation requires a stop below entry")
+            stop_distance = (entry_price - stop_price) / entry_price
+            if not 0.0001 <= stop_distance <= 0.99:
+                raise ValueError("stop distance is outside supported limits")
         except ValueError:
             rejected.append({"symbol": symbol, "reason": "invalid_allocation_evidence"})
             continue
@@ -139,6 +170,7 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
         eligible.append({
             "symbol": symbol, "strategy": strategy, "group": group,
             "score": score, "stop_distance": stop_distance,
+            "entry_price": entry_price, "stop_price": stop_price,
             "fold_count": folds, "base_return": base_return,
             "stressed_return": stressed_return, "mean_max_drawdown": drawdown,
         })
@@ -176,6 +208,26 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
         group_room = max(0.0, equity * max_group - group_exposure.get(row["group"], 0.0)
                          - planned_by_group.get(row["group"], 0.0))
         raw_notional = max(0.0, min(target, risk_cap, single_room, group_room))
+        # A second, independent deterministic gate checks the proposed amount
+        # against the same account equity, stop and cumulative gross exposure.
+        gate = RiskEngine(RiskConfig(
+            max_risk_per_trade=risk_per_trade,
+            max_position_fraction=max_single,
+            max_gross_exposure=max_gross,
+            allow_short=False,
+            allow_live_orders=False,
+        ))
+        decision = gate.assess(RiskRequest(
+            equity=equity, entry_price=row["entry_price"],
+            stop_price=row["stop_price"], requested_notional=raw_notional,
+            gross_exposure=existing_gross + planned_total,
+            leverage=1.0, side="long",
+        ))
+        if not decision.approved:
+            rejected.append({"symbol": row["symbol"],
+                             "reason": "independent_risk_gate_rejected:" + ",".join(decision.reasons)})
+            continue
+        raw_notional = min(raw_notional, decision.approved_notional)
         # Round down, never to nearest: the serialized plan must not exceed a cap.
         notional = math.floor(raw_notional * 100_000_000) / 100_000_000
         if notional <= 0:
