@@ -86,7 +86,7 @@ def test_exported_model_is_explicitly_marked_uncalibrated(monkeypatch):
         },
     )
     exported = export_deployable_model(
-        pd.DataFrame(), "eti-test", "0.1.0", "dataset:test"
+        pd.DataFrame(), "eti-test", "0.1.0", "dataset:test", timeframe="1h"
     )
     assert exported["calibration_status"] == "uncalibrated"
     assert exported["supported_classes"] == ["crypto_spot"]
@@ -95,6 +95,8 @@ def test_exported_model_is_explicitly_marked_uncalibrated(monkeypatch):
     assert exported["department"] == "prediction"
     assert exported["model_role"] == "direction_classifier"
     assert exported["input_schema"]["department"] == "prediction"
+    assert exported["input_schema"]["market_types"] == ["spot"]
+    assert exported["input_schema"]["timeframes"] == ["1h"]
     assert exported["input_schema"]["experiment_id"].startswith("eti-exp-")
     assert len(exported["input_schema"]["lineage"]["code_sha256"]) == 64
     assert len(exported["input_schema"]["lineage"]["config_sha256"]) == 64
