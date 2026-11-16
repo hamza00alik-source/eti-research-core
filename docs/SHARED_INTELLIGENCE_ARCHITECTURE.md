@@ -68,3 +68,14 @@ timeframes remain subsequent implementation steps.
 - No department or model in this architecture can enable live orders.
 - A model can become approved only through the existing independent approval
   process; promotion evidence remains a separate human-reviewed gate.
+
+
+## Role-level specialization
+
+A department may contain multiple distinct specialist roles. The registry
+selector accepts an explicit `model_role` in addition to department, asset
+class, market type and timeframe. A role must belong to the selected department;
+models with conflicting or invalid role metadata fail closed. No cross-role
+fallback is permitted. Queen's readiness manifest reports readiness for every
+declared role separately, so a ready prediction department does not imply that
+its return-distribution or volatility specialists are ready.
