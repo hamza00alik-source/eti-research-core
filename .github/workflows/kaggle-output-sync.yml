@@ -127,7 +127,7 @@ jobs:
                   "model_sources": [],
               }
               (kernel_dir / metadata["code_file"]).write_bytes(canonical_path.read_bytes())
-              (kernel_dir / "kernel-metadata.json").write_text(json.dumps(metadata, indent=2) + "\\n")
+              (kernel_dir / "kernel-metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
               push = __import__("subprocess").run(
                   ["kaggle", "kernels", "push", "-p", str(kernel_dir), "--timeout", "7200"],
                   check=False,
