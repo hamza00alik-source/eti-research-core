@@ -687,11 +687,16 @@ late-arriving earlier qualifying observation changes the deterministically
 selected target, generation does not silently overwrite the stored label; it
 reports a target conflict for explicit review. Coverage counts a persisted
 label as matched only when its stored target ID agrees with the currently
-selected target and any stored mint/pool identity agrees with the baseline.
-Duplicate persisted baseline/horizon keys are treated as conflicts rather than
-silently collapsed. Stale target or identity conflicts are reported separately
-and are not counted as matched label records. Resolve such conflicts through
-an explicit dataset-versioning/rebuild process rather than silent mutation.
+selected target, its stored mint/pool identity agrees with the baseline, and
+its sampled price-return outcome exactly agrees with the return recomputed from
+the referenced baseline and target snapshot prices. Missing, malformed, or
+tampered outcomes are conflicts, not matched labels. Corrupt label JSON is
+retained as an invalid coverage record using its authoritative database
+identity rather than silently omitted. Duplicate persisted baseline/horizon
+keys are treated as conflicts rather than silently collapsed. Stale target,
+identity, and outcome conflicts are not counted as matched label records.
+Resolve such conflicts through an explicit dataset-versioning/rebuild process
+rather than silent mutation.
 
 
 Coverage also flags a persisted label as a stale target conflict when its
