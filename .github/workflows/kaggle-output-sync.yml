@@ -93,11 +93,23 @@ jobs:
               )
           remote = json.loads(remote_paths[0].read_text())
 
+          def normalize_kaggle_source(source):
+              # Kaggle's notebook round-trip removes blank-only lines. Normalize
+              # only that formatting difference; preserve every nonblank line
+              # exactly and fail closed for multiline string literals, where
+              # blank lines can be meaningful program data.
+              lines = source.splitlines()
+              if any('"""' in line or "'''" in line for line in lines) and any(not line.strip() for line in lines):
+                  return source
+              return "\n".join(line for line in lines if line.strip())
+
           def code_cells(notebook):
               return [
-                  "\n".join(cell.get("source", []))
-                  if isinstance(cell.get("source", []), list)
-                  else cell.get("source", "")
+                  normalize_kaggle_source(
+                      "\n".join(cell.get("source", []))
+                      if isinstance(cell.get("source", []), list)
+                      else cell.get("source", "")
+                  )
                   for cell in notebook.get("cells", [])
                   if cell.get("cell_type") == "code"
               ]
