@@ -2621,10 +2621,19 @@ class MemoryStore:
                 try:
                     label = json.loads(row["label_json"])
                 except (TypeError, ValueError):
-                    continue
+                    # Keep the authoritative row identity in coverage even when
+                    # its payload is corrupt; the helper will count it as stale.
+                    label = {}
                 if isinstance(label, dict):
                     coverage_labels.append({
                         **label, "mint": row["mint"], "pool_address": row["pool_address"],
+                        "baseline_snapshot_id": row["baseline_snapshot_id"],
+                        "target_snapshot_id": row["target_snapshot_id"],
+                        "horizon_seconds": row["horizon_seconds"],
+                    })
+                else:
+                    coverage_labels.append({
+                        "mint": row["mint"], "pool_address": row["pool_address"],
                         "baseline_snapshot_id": row["baseline_snapshot_id"],
                         "target_snapshot_id": row["target_snapshot_id"],
                         "horizon_seconds": row["horizon_seconds"],
