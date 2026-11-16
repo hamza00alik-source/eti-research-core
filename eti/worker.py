@@ -278,6 +278,7 @@ class AgentWorker:
         bound = dict(payload)
         # Never trust caller-provided equity or exposure when an account snapshot exists.
         bound["equity"] = snapshot["equity"]
+        bound["available_cash"] = snapshot["cash"]
         bound["current_positions"] = current_positions
         bound["correlated_group_exposure"] = group_exposure
         bound["_eti_validated_portfolio_snapshot"] = {
