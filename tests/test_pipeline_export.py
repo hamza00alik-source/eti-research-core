@@ -176,10 +176,10 @@ def test_training_cli_exports_only_when_explicit_flag_is_set(tmp_path, monkeypat
     )
 
     def fake_export(frame, model_id, version, training_data_ref, horizon=6, *,
-                    holdout_reserved_from_prior_evaluation=False):
+                    timeframe=None, holdout_reserved_from_prior_evaluation=False):
         calls.update(
             model_id=model_id, version=version, training_data_ref=training_data_ref,
-            horizon=horizon,
+            horizon=horizon, timeframe=timeframe,
             holdout_reserved_from_prior_evaluation=holdout_reserved_from_prior_evaluation,
         )
         return {"artifact_uri": "artifact://sha256/" + "d" * 64,
@@ -194,6 +194,7 @@ def test_training_cli_exports_only_when_explicit_flag_is_set(tmp_path, monkeypat
         "version": "0.2.0",
         "training_data_ref": "ccxt:coinbaseexchange:BTC/USD:1h:100",
         "horizon": 6,
+        "timeframe": "1h",
         "holdout_reserved_from_prior_evaluation": True,
     }
     assert report["exported_model"]["calibration_status"] == "uncalibrated"
