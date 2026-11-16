@@ -14,7 +14,7 @@ def test_deployable_fit_uses_exact_feature_schema_and_only_completed_rows(monkey
          for position, name in enumerate(FEATURE_COLUMNS)},
         index=index,
     )
-    labels = pd.Series(np.tile([0, 1], len(index) // 2), index=index)
+    labels = pd.Series(np.tile([0, 1, 2], (len(index) + 2) // 3)[:len(index)], index=index)
     labels.iloc[-6:] = np.nan
     seen = {}
 
@@ -162,14 +162,14 @@ def test_calibration_is_rejected_when_independent_holdout_nll_worsens(monkeypatc
          for position, name in enumerate(FEATURE_COLUMNS)},
         index=index,
     )
-    labels = pd.Series(np.tile([0, 1], len(index) // 2), index=index)
+    labels = pd.Series(np.tile([0, 1, 2], (len(index) + 2) // 3)[:len(index)], index=index)
     labels.iloc[-6:] = np.nan
     monkeypatch.setattr("eti.pipeline.validate_ohlcv", lambda data: data)
     monkeypatch.setattr("eti.pipeline.build_features", lambda data: feature_frame)
     monkeypatch.setattr("eti.pipeline.make_labels", lambda data, horizon: labels)
 
     def fake_fit(self, x, y):
-        self.classes_ = np.array([0, 1])
+        self.classes_ = np.array([0, 1, 2])
         return self
 
     def fake_calibration(self, x, y):
