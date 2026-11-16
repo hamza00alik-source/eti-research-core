@@ -94,10 +94,14 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
             rejected.append({"symbol": symbol, "reason": "already_held_position"})
             continue
 
-        assessment = item.get("economic_assessment")
-        if not isinstance(assessment, dict):
-            rejected.append({"symbol": symbol, "reason": "missing_economic_assessment"})
+        research_report = item.get("research_report")
+        if not isinstance(research_report, dict):
+            rejected.append({"symbol": symbol, "reason": "missing_research_report"})
             continue
+        # Recompute the disposition from the supplied source report. Never trust
+        # a caller-provided status/summary object as evidence of economic viability.
+        from .economic_disposition import assess_economic_viability
+        assessment = assess_economic_viability(research_report)
         if (assessment.get("status") != "human_review_required"
                 or assessment.get("live_execution_eligible") is not False):
             rejected.append({"symbol": symbol, "reason": "economic_evidence_not_eligible_for_paper_review"})
@@ -200,6 +204,7 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
         "owner_review_required": True, "orders_submitted": False,
         "paper_only": True, "execution_enabled": False,
         "limitations": [
+            "Economic disposition is recomputed from the supplied research report; report authenticity and storage provenance must be verified by the calling workflow.",
             "A paper allocation proposal is not a model approval, trade instruction or live order.",
             "The risk-adjusted score is a transparent ranking heuristic, not a calibrated forecast.",
             "Correlation groups are supplied labels; pairwise covariance estimation is not implemented here.",
