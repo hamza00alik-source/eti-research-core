@@ -106,6 +106,15 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(folds, bool) or not isinstance(folds, int) or folds < 2:
             rejected.append({"symbol": symbol, "reason": "insufficient_outer_test_folds"})
             continue
+        fold_counts = (
+            assessment.get("base_cost_positive_return_folds"),
+            assessment.get("two_x_positive_return_folds"),
+            assessment.get("folds_beating_no_trade"),
+        )
+        if any(isinstance(value, bool) or not isinstance(value, int) or value != folds
+               for value in fold_counts):
+            rejected.append({"symbol": symbol, "reason": "outer_test_fold_evidence_incomplete"})
+            continue
         try:
             base_return = _number(assessment.get("mean_net_return"), "mean_net_return")
             stressed_return = _number(assessment.get("two_x_mean_net_return"), "two_x_mean_net_return")
