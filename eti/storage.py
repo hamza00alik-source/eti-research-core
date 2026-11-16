@@ -1350,6 +1350,8 @@ class MemoryStore:
             if schema.get("department") not in (None, declared_department):
                 raise ValueError("department conflicts with input_schema.department")
             schema["department"] = declared_department
+        if declared_department is not None and declared_role is None:
+            raise ValueError("model_role is required when department is assigned")
         if declared_role is not None:
             declared_role = _required_text(declared_role, "model_role", 80)
             if declared_department is None:
