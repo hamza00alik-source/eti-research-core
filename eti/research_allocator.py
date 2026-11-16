@@ -161,6 +161,8 @@ def allocate_research_budget(
             continue
         score, reasons = _candidate_score(source, max_age_seconds=max_age)
         instrument = source["instrument"]
+        if instrument.get("market_type", "spot") != "spot" or instrument.get("supports_funding") is True:
+            reasons.append("contract_level_derivative_economics_not_integrated")
         key = f"{instrument.get('venue', '')}:{instrument.get('market_type', '')}:{instrument.get('symbol', '')}"
         raw_cost_model = cost_records.get(key)
         validated_cost_model = None
