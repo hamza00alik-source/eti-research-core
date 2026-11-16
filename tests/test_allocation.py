@@ -10,6 +10,8 @@ def candidate(symbol="BTC/USD", group="crypto_major", **overrides):
         "economic_assessment": {
             "status": "human_review_required", "live_execution_eligible": False,
             "fold_count": 5, "mean_net_return": 0.04, "two_x_mean_net_return": 0.02,
+            "base_cost_positive_return_folds": 5, "two_x_positive_return_folds": 5,
+            "folds_beating_no_trade": 5,
         },
     }
     item.update(overrides)
@@ -40,6 +42,8 @@ def test_allocator_rejects_no_go_and_missing_evidence():
     no_go = candidate("BTC/USD", economic_assessment={
         "status": "no_go", "live_execution_eligible": False, "fold_count": 5,
         "mean_net_return": 0.2, "two_x_mean_net_return": 0.1,
+        "base_cost_positive_return_folds": 5, "two_x_positive_return_folds": 5,
+        "folds_beating_no_trade": 5,
     })
     missing = candidate("ETH/USD", economic_assessment=None)
     result = plan_paper_allocations({"equity": 10000, "candidates": [no_go, missing]})
@@ -82,3 +86,11 @@ def test_allocator_is_registered_as_strategy_department_capability():
     assert "portfolio.allocate" in registry.capabilities()
     result = registry.execute("portfolio.allocate", {"equity": 10000, "candidates": []})
     assert result["execution_enabled"] is False
+
+
+def test_allocator_rejects_forged_or_incomplete_fold_counts():
+    weak = candidate("XAUUSD")
+    weak["economic_assessment"]["two_x_positive_return_folds"] = 4
+    result = plan_paper_allocations({"equity": 10000, "candidates": [weak]})
+    assert result["allocations"] == []
+    assert result["rejected"][0]["reason"] == "outer_test_fold_evidence_incomplete"
