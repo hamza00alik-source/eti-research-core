@@ -114,3 +114,16 @@ def test_rejects_inconsistent_outer_test_fold_identities():
         build_portfolio_quality_report(
             broken, {"coinbase:spot:BTC/USD": 0.5, "kraken:spot:ETH/USD": 0.5}
         )
+
+
+def test_held_position_is_carried_across_another_market_timestamp():
+    broken = source()
+    first = broken["markets"]["coinbase:spot:BTC/USD"]["report"]["trading_performance"]["folds"][0]
+    first["timestamps"] = [first["timestamps"][0], first["timestamps"][2]]
+    first["trading"]["model"]["bar_returns"] = [0.10, 0.05]
+    first["trading"]["model"]["positions"] = [1.0, 0.0]
+    report = build_portfolio_quality_report(
+        broken, {"coinbase:spot:BTC/USD": 0.5, "kraken:spot:ETH/USD": 0.5}
+    )
+    assert report["folds"][0]["bar_count"] == 3
+    assert report["folds"][0]["mean_gross_exposure_fraction"] == pytest.approx(2 / 3)
