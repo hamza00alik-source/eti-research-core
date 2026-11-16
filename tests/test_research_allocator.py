@@ -142,3 +142,20 @@ def test_selected_candidate_identity_includes_market_type():
     assert rows["spot"]["research_priority_rank"] == 1
     assert rows["swap"]["research_priority_rank"] is None
     assert rows["swap"]["training_block_reason"] == "not_selected_within_research_budget"
+
+
+
+def test_allocator_marks_derivatives_ineligible_even_with_valid_cost_model():
+    item = candidate()
+    item["instrument"]["market_type"] = "swap"
+    identity = "kraken:swap:BTC/USD"
+    result = allocate_research_budget(
+        scan(item), cost_models={identity: cost_model(identity)},
+        estimated_run_cost_usd=2, daily_spend_to_date_usd=1,
+        monthly_spend_to_date_usd=10,
+    )
+    row = result["candidates"][0]
+    assert row["data_readiness_score"] > 0
+    assert row["transaction_cost_model_status"] == "validated"
+    assert row["economic_evaluation_eligible"] is False
+    assert "contract_level_derivative_economics_not_integrated" in row["eligibility_reasons"]

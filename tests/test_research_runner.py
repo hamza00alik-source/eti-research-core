@@ -186,7 +186,7 @@ def test_signed_funding_number_is_accepted_without_relaxing_other_costs():
         _number("fee", -3.25)
 
 
-def test_derivative_research_fails_closed_without_timestamped_funding_schedule():
+def test_derivative_economic_evaluation_is_blocked_before_market_data_fetch():
     candidate_scan = scan()
     candidate_allocation = allocation()
     for report in (candidate_scan, candidate_allocation):
@@ -196,9 +196,13 @@ def test_derivative_research_fails_closed_without_timestamped_funding_schedule()
     candidate_allocation["candidates"][0]["transaction_cost_model"]["instrument_identity"] = "kraken:swap:BTC/USD"
     approved = approval()
     approved["instruments"]["kraken:swap:BTC/USD"] = approved["instruments"].pop("kraken:spot:BTC/USD")
-    with pytest.raises(ValueError, match="settlement schedule is missing"):
+    class NoFetchHub:
+        def fetch(self, *args, **kwargs):
+            raise AssertionError("derivative data must not be fetched for unsupported economics")
+
+    with pytest.raises(ValueError, match="derivative economic evaluation is blocked"):
         run_approved_multi_market_research(
-            candidate_scan, candidate_allocation, approved, hub=FakeHub()
+            candidate_scan, candidate_allocation, approved, hub=NoFetchHub()
         )
 
 
@@ -222,3 +226,17 @@ def test_funding_event_alignment_preflight_accepts_exact_utc_bar():
         [{"timestamp": "2026-01-01T02:00:00+00:00", "rate_bps": 2.0}],
         pd.Series(bars), "kraken:swap:BTC/USD",
     )
+
+
+
+def test_spot_short_economic_evaluation_is_blocked_until_borrow_costs_supported():
+    approved = approval()
+    approved["instruments"]["kraken:spot:BTC/USD"]["allow_short"] = True
+    candidate_scan = scan()
+    candidate_allocation = allocation()
+    candidate_scan["candidates"][0]["instrument"]["supports_short"] = True
+    candidate_allocation["candidates"][0]["instrument"]["supports_short"] = True
+    with pytest.raises(ValueError, match="short research is blocked"):
+        run_approved_multi_market_research(
+            candidate_scan, candidate_allocation, approved, hub=FakeHub()
+        )
