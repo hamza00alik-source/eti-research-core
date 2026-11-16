@@ -2608,7 +2608,7 @@ class MemoryStore:
                     if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
                         feature_counts[key] += 1
             label_rows = conn.execute(
-                "SELECT id,baseline_snapshot_id,target_snapshot_id,horizon_seconds,label_json FROM solana_research_labels "
+                "SELECT id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,horizon_seconds,label_json FROM solana_research_labels "
                 "WHERE owner_id=? AND workspace_id=? ORDER BY horizon_seconds",
                 (owner_id, workspace_id),
             )
@@ -2624,7 +2624,8 @@ class MemoryStore:
                     continue
                 if isinstance(label, dict):
                     coverage_labels.append({
-                        **label, "baseline_snapshot_id": row["baseline_snapshot_id"],
+                        **label, "mint": row["mint"], "pool_address": row["pool_address"],
+                        "baseline_snapshot_id": row["baseline_snapshot_id"],
                         "target_snapshot_id": row["target_snapshot_id"],
                         "horizon_seconds": row["horizon_seconds"],
                     })
