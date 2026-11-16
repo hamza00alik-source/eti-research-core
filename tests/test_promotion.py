@@ -96,3 +96,30 @@ def test_promotion_gate_requires_cost_adjusted_locked_evidence():
     chall["cost_adjusted"] = False
     with pytest.raises(ValueError, match="cost-adjusted"):
         assess(champ, chall)
+
+
+
+def test_promotion_gate_rejects_material_calibration_or_drawdown_regression():
+    champion = report("a", [1] * 5, ece=0.03, drawdown=0.05)
+    challenger_ece = report("b", [4] * 5, ece=0.07, drawdown=0.05)
+    challenger_drawdown = report("b", [4] * 5, ece=0.03, drawdown=0.08)
+    assert assess(champion, challenger_ece)["promotion_eligible"] is False
+    assert assess(champion, challenger_drawdown)["promotion_eligible"] is False
+
+
+def test_sign_test_excludes_tied_fold_differences():
+    result = assess(
+        report("a", [1, 1, 1, 1, 1]),
+        report("b", [2, 1, 2, 1, 2]),
+    )
+    assert result["non_tied_fold_count"] == 3
+    assert result["fold_count"] == 5
+    assert result["sign_test_p_value"] == pytest.approx(0.125)
+    assert result["promotion_eligible"] is False
+
+
+def test_promotion_gate_rejects_single_fold_drawdown_or_ece_breach():
+    champion = report("a", [1] * 5, ece=0.03, drawdown=0.05)
+    challenger = report("b", [4] * 5, ece=0.03, drawdown=0.05)
+    challenger["folds"][0]["max_drawdown"] = 0.20
+    assert assess(champion, challenger)["promotion_eligible"] is False
