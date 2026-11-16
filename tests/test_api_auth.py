@@ -520,3 +520,56 @@ def test_registry_cannot_approve_artifact_without_embedded_calibration(tmp_path,
             "/v1/models/uncalibrated-model/0.1.0", headers=trainer_headers
         )
         assert candidate.json()["lifecycle"] == "candidate"
+
+
+def test_paper_portfolio_api_is_authenticated_owner_scoped_and_explicitly_attested(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "portfolio-api.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        assert client.get("/v1/paper/portfolios").status_code == 401
+        owner = _register(client, "portfolio_owner")
+        other = _register(client, "portfolio_other")
+        owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+        other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+        workspace = client.post("/v1/workspaces", headers=owner_headers,
+                                json={"name": "portfolio lab"}).json()
+        workspace_id = workspace["id"]
+        created = client.post("/v1/paper/portfolios", headers=owner_headers, json={
+            "name": "primary paper", "base_currency": "USD",
+            "initial_equity": 10000, "workspace_id": workspace_id,
+        })
+        assert created.status_code == 201, created.text
+        account_id = created.json()["account"]["id"]
+        assert created.json()["live_execution_enabled"] is False
+        assert "not connected to an exchange" in created.json()["note"]
+        snapshot = client.post(
+            f"/v1/paper/portfolios/{account_id}/snapshots",
+            headers=owner_headers, params={"workspace_id": workspace_id},
+            json={
+                "as_of": "2026-11-16T10:00:00Z", "equity": 10000, "cash": 7000,
+                "positions": [
+                    {"symbol": "BTC/USD", "notional": 2000, "correlation_group": "crypto_major"},
+                    {"symbol": "ETH/USD", "notional": 1000, "correlation_group": "crypto_major"},
+                ],
+            },
+        )
+        assert snapshot.status_code == 201, snapshot.text
+        assert snapshot.json()["source"] == "owner_attested"
+        latest = client.get(
+            f"/v1/paper/portfolios/{account_id}/snapshots/latest",
+            headers=owner_headers, params={"workspace_id": workspace_id},
+        )
+        assert latest.status_code == 200
+        assert latest.json()["snapshot"]["id"] == snapshot.json()["snapshot"]["id"]
+        denied = client.get(
+            f"/v1/paper/portfolios/{account_id}/snapshots/latest",
+            headers=other_headers, params={"workspace_id": workspace_id},
+        )
+        assert denied.status_code == 404
+        invalid = client.post(
+            f"/v1/paper/portfolios/{account_id}/snapshots",
+            headers=owner_headers, params={"workspace_id": workspace_id},
+            json={"as_of": "2026-11-16T10:01:00Z", "equity": 1000, "cash": 1001, "positions": []},
+        )
+        assert invalid.status_code == 422

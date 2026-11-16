@@ -455,6 +455,121 @@ def list_paper_trades(session_id: str, limit: int = Query(default=200, ge=1, le=
             "mode": "paper_only", "live_execution_enabled": False}
 
 
+class PaperPortfolioAccountPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    base_currency: str = Field(default="USD", min_length=3, max_length=5, pattern="^[A-Za-z]{3,5}$")
+    initial_equity: float = Field(gt=0, le=1000000000)
+    workspace_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class PaperPortfolioPositionPayload(BaseModel):
+    symbol: str = Field(min_length=1, max_length=40)
+    notional: float = Field(gt=0, le=1000000000)
+    correlation_group: str = Field(min_length=1, max_length=80)
+
+
+class PaperPortfolioSnapshotPayload(BaseModel):
+    as_of: str = Field(min_length=1, max_length=40)
+    equity: float = Field(gt=0, le=1000000000)
+    cash: float = Field(ge=0, le=1000000000)
+    positions: list[PaperPortfolioPositionPayload] = Field(default_factory=list, max_length=100)
+
+
+@app.get("/v1/paper/portfolios")
+def list_paper_portfolio_accounts(
+    workspace_id: str | None = None,
+    account: dict[str, str] = Depends(current_account),
+):
+    store = _memory_store()
+    workspaces = store.list_workspaces(account["id"])
+    selected = workspace_id or (workspaces[0]["id"] if workspaces else None)
+    if selected is None:
+        return {"items": [], "mode": "paper_only", "live_execution_enabled": False}
+    _require_workspace(store, account, selected)
+    return {"items": store.list_paper_portfolio_accounts(account["id"], selected),
+            "mode": "paper_only", "live_execution_enabled": False}
+
+
+@app.post("/v1/paper/portfolios", status_code=201)
+def create_paper_portfolio_account(
+    payload: PaperPortfolioAccountPayload,
+    account: dict[str, str] = Depends(current_account),
+):
+    store = _memory_store()
+    workspaces = store.list_workspaces(account["id"])
+    workspace_id = payload.workspace_id or (workspaces[0]["id"] if workspaces else None)
+    if workspace_id is None:
+        workspace_id = store.create_workspace(account["id"], "ETI Paper Portfolios")["id"]
+    try:
+        portfolio = store.create_paper_portfolio_account(
+            account["id"], workspace_id, payload.name, payload.base_currency,
+            payload.initial_equity,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="paper portfolio name already exists") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"account": portfolio, "mode": "paper_only", "live_execution_enabled": False,
+            "note": "This is an isolated simulated portfolio. It is not connected to an exchange balance."}
+
+
+@app.get("/v1/paper/portfolios/{account_id}/snapshots")
+def list_paper_portfolio_snapshots(
+    account_id: str,
+    workspace_id: str,
+    limit: int = Query(default=50, ge=1, le=500),
+    account: dict[str, str] = Depends(current_account),
+):
+    store = _memory_store()
+    portfolio = store.get_paper_portfolio_account(account["id"], workspace_id, account_id)
+    if portfolio is None:
+        raise HTTPException(status_code=404, detail="paper portfolio account not found")
+    return {"items": store.list_paper_portfolio_snapshots(
+        account["id"], workspace_id, account_id, limit
+    ), "mode": "paper_only", "live_execution_enabled": False}
+
+
+@app.get("/v1/paper/portfolios/{account_id}/snapshots/latest")
+def get_latest_paper_portfolio_snapshot(
+    account_id: str,
+    workspace_id: str,
+    account: dict[str, str] = Depends(current_account),
+):
+    store = _memory_store()
+    portfolio = store.get_paper_portfolio_account(account["id"], workspace_id, account_id)
+    if portfolio is None:
+        raise HTTPException(status_code=404, detail="paper portfolio account not found")
+    snapshot = store.get_latest_paper_portfolio_snapshot(account["id"], workspace_id, account_id)
+    return {"snapshot": snapshot, "mode": "paper_only", "live_execution_enabled": False}
+
+
+@app.post("/v1/paper/portfolios/{account_id}/snapshots", status_code=201)
+def record_paper_portfolio_snapshot(
+    account_id: str,
+    workspace_id: str,
+    payload: PaperPortfolioSnapshotPayload,
+    account: dict[str, str] = Depends(current_account),
+):
+    store = _memory_store()
+    try:
+        snapshot = store.record_paper_portfolio_snapshot(
+            account["id"], workspace_id, account_id, payload.as_of,
+            payload.equity, payload.cash,
+            [item.model_dump() for item in payload.positions],
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="paper portfolio account not found") from exc
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="snapshot already exists for this account timestamp") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"snapshot": snapshot, "mode": "paper_only", "live_execution_enabled": False,
+            "source": "owner_attested",
+            "note": "Snapshot values are owner-attested simulation inputs, not exchange-verified balances or prices."}
+
+
 @app.get("/v1/workspaces")
 def list_workspaces(account: dict[str, str] = Depends(current_account)):
     return {"items": _memory_store().list_workspaces(account["id"])}
