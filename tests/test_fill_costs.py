@@ -13,7 +13,7 @@ def test_buy_fill_measures_adverse_shortfall_and_fee():
     )
     assert result["vwap"] == pytest.approx((2 * 100.1 + 100.2) / 3)
     assert result["implementation_shortfall_bps"] > 0
-    assert result["fee_bps"] == pytest.approx(0.02 / (2 * 100.1 + 100.2) * 10_000)
+    assert result["fee_bps"] == pytest.approx(0.06 / (2 * 100.1 + 100.2) * 10_000)
     assert result["all_in_observed_cost_bps"] == pytest.approx(
         result["implementation_shortfall_bps"] + result["fee_bps"]
     )
