@@ -656,7 +656,10 @@ def test_dataset_report_includes_full_workspace_forward_label_coverage(tmp_path)
     # The normalized label JSON claims the snapshot identity, but the
     # authoritative persisted label columns disagree. Coverage must reject it.
     assert horizon["label_record_count"] == 0
-    assert horizon["stale_label_target_conflict_count"] == 3
+    # The non-object JSON row is retained safely, but its baseline is not yet
+    # mature; immature baselines are deliberately excluded from stale-label
+    # conflict counts.
+    assert horizon["stale_label_target_conflict_count"] == 2
     assert coverage["training_authorized"] is False
 
 
