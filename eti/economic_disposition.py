@@ -20,9 +20,11 @@ def _number(value: Any, field: str) -> float:
 
 
 def assess_economic_viability(report: dict[str, Any]) -> dict[str, Any]:
-    """Classify economic evidence without granting deployment authority."""
+    """Classify model-training or rule-strategy evidence without granting authority."""
     if not isinstance(report, dict):
         raise ValueError("report must be an object")
+    if report.get("kind") == "strategy_walk_forward_report":
+        return assess_rule_strategy_viability(report)
 
     fold_count = report.get("fold_count")
     folds = report.get("folds")
@@ -119,5 +121,54 @@ def assess_economic_viability(report: dict[str, Any]) -> dict[str, Any]:
         "two_x_mean_net_return": two_x_net,
         "two_x_positive_return_folds": two_x_positive,
         "reasons": reasons or ["all conservative economic checks passed; independent human review is still required"],
+        "live_execution_eligible": False,
+    }
+
+
+def assess_rule_strategy_viability(report: dict[str, Any]) -> dict[str, Any]:
+    """Assess untouched outer-test folds from the frozen rule-strategy evaluator."""
+    if not isinstance(report, dict) or report.get("kind") != "strategy_walk_forward_report":
+        raise ValueError("report must be a strategy_walk_forward_report")
+    if report.get("method") != "validation_selected_rule_based_walk_forward_v4_cost_stress":
+        return {"status": "insufficient_evidence", "reasons": ["unsupported rule-strategy evaluation method"], "live_execution_eligible": False}
+    if report.get("execution_enabled") is not False:
+        return {"status": "insufficient_evidence", "reasons": ["execution_enabled must remain false"], "live_execution_eligible": False}
+    fold_count, folds = report.get("fold_count"), report.get("folds")
+    if isinstance(fold_count, bool) or not isinstance(fold_count, int) or fold_count < 2 or not isinstance(folds, list) or len(folds) != fold_count:
+        return {"status": "insufficient_evidence", "reasons": ["at least two consistent outer-test folds are required"], "live_execution_eligible": False}
+    base, stressed, drawdowns = [], [], []
+    for index, fold in enumerate(folds):
+        test = fold.get("test") if isinstance(fold, dict) else None
+        if not isinstance(test, dict):
+            return {"status": "insufficient_evidence", "reasons": [f"outer-test evidence missing for fold {index}"], "live_execution_eligible": False}
+        try:
+            base.append(_number(test.get("net_return"), f"fold[{index}].net_return"))
+            stressed.append(_number(test.get("two_x_cost_net_return"), f"fold[{index}].two_x_cost_net_return"))
+            drawdown = _number(test.get("max_drawdown"), f"fold[{index}].max_drawdown")
+        except ValueError as exc:
+            return {"status": "insufficient_evidence", "reasons": [str(exc)], "live_execution_eligible": False}
+        if not -1.0 <= drawdown <= 0.0:
+            return {"status": "insufficient_evidence", "reasons": [f"fold[{index}].max_drawdown must be between -1 and 0"], "live_execution_eligible": False}
+        drawdowns.append(abs(drawdown))
+    import statistics
+    mean_base, mean_stressed = statistics.fmean(base), statistics.fmean(stressed)
+    base_positive, stressed_positive = sum(v > 0 for v in base), sum(v > 0 for v in stressed)
+    reasons = []
+    if mean_base <= 0 or base_positive != fold_count:
+        reasons.append("every outer-test fold must be positive at base costs")
+    if mean_stressed <= 0 or stressed_positive != fold_count:
+        reasons.append("every outer-test fold must remain positive at 2x costs")
+    return {
+        "status": "no_go" if reasons else "human_review_required",
+        "evidence_type": "rule_based_strategy_walk_forward",
+        "fold_count": fold_count,
+        "mean_net_return": mean_base,
+        "two_x_mean_net_return": mean_stressed,
+        "base_cost_positive_return_folds": base_positive,
+        "two_x_cost_positive_return_folds": stressed_positive,
+        "two_x_positive_return_folds": stressed_positive,
+        "folds_beating_no_trade": base_positive,
+        "mean_max_drawdown": statistics.fmean(drawdowns),
+        "reasons": reasons or ["rule-strategy cost-stress checks passed; owner review remains mandatory"],
         "live_execution_eligible": False,
     }

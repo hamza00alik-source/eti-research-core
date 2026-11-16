@@ -97,6 +97,10 @@ def run_strategy_walk_forward(
             test_close, test_signal, fee_bps=float(fee_bps),
             slippage_bps=float(slippage_bps), allow_short=False,
         )
+        stressed = backtest_positions(
+            test_close, test_signal, fee_bps=float(fee_bps) * 2.0,
+            slippage_bps=float(slippage_bps) * 2.0, allow_short=False,
+        )
         benchmark = backtest_positions(
             test_close, pd.Series(1.0, index=test_close.index),
             fee_bps=float(fee_bps), slippage_bps=float(slippage_bps),
@@ -110,6 +114,7 @@ def run_strategy_walk_forward(
             "test": {
                 "bars": tested["bars"],
                 "net_return": tested["total_return"],
+                "two_x_cost_net_return": stressed["total_return"],
                 "max_drawdown": tested["max_drawdown"],
                 "sharpe_per_bar": tested["sharpe_per_bar"],
                 "exposure": tested["exposure"],
@@ -128,15 +133,22 @@ def run_strategy_walk_forward(
             },
         })
     returns = [item["test"]["net_return"] for item in reports]
+    stressed_returns = [item["test"]["two_x_cost_net_return"] for item in reports]
     drawdowns = [item["test"]["max_drawdown"] for item in reports]
     return {
-        "method": "validation_selected_rule_based_walk_forward_v3",
+        "kind": "strategy_walk_forward_report",
+        "method": "validation_selected_rule_based_walk_forward_v4_cost_stress",
+        "execution_enabled": False,
         "candidate_count": len(candidates),
         "candidate_families": ["ma", "momentum", "breakout", "mean_reversion"],
         "fold_count": len(reports),
         "folds": reports,
         "summary": {
             "mean_test_net_return": float(np.mean(returns)),
+            "mean_test_two_x_cost_net_return": float(np.mean(stressed_returns)),
+            "base_cost_positive_return_folds": int(sum(value > 0 for value in returns)),
+            "two_x_cost_positive_return_folds": int(sum(value > 0 for value in stressed_returns)),
+            "folds_beating_no_trade": int(sum(value > 0 for value in returns)),
             "median_test_net_return": float(np.median(returns)),
             "mean_test_max_drawdown": float(np.mean(drawdowns)),
             "folds_beating_buy_and_hold": int(sum(item["test"]["beats_buy_and_hold"] for item in reports)),
