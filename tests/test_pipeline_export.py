@@ -74,7 +74,7 @@ def test_exported_model_is_explicitly_marked_uncalibrated(monkeypatch):
 
     monkeypatch.setattr(
         "eti.pipeline.fit_deployable_model",
-        lambda frame, horizon: (UncalibratedStub(), schema),
+        lambda frame, horizon, **kwargs: (UncalibratedStub(), schema),
     )
     monkeypatch.setattr(
         "eti.pipeline.ModelArtifactStore.save_model",
