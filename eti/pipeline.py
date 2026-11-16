@@ -97,7 +97,10 @@ def _probability_validation(probabilities: np.ndarray, labels: np.ndarray) -> di
     }
 
 
-def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[BaselineModel, dict]:
+def fit_deployable_model(
+    frame: pd.DataFrame, horizon: int = 6, *,
+    holdout_reserved_from_prior_evaluation: bool = False,
+) -> tuple[BaselineModel, dict]:
     """Fit, calibrate and independently validate probabilities on three chronological blocks.
 
     The classifier is fitted on the first 60%, temperature is fitted on the next
@@ -165,6 +168,7 @@ def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[Baselin
         "raw": raw_metrics,
         "temperature_scaled": calibrated_metrics,
         "calibration_applied_to_export": independent_passed,
+        "reserved_from_prior_research_evaluation": bool(holdout_reserved_from_prior_evaluation),
     }
     if model.calibration_status == "calibrated" and not independent_passed:
         model.calibration_status = "uncalibrated"
@@ -203,10 +207,14 @@ def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[Baselin
 
 def export_deployable_model(
     frame: pd.DataFrame, model_id: str, version: str, training_data_ref: str,
-    horizon: int = 6,
+    horizon: int = 6, *,
+    holdout_reserved_from_prior_evaluation: bool = False,
 ) -> dict:
     """Explicitly fit and store an immutable artifact; never called at import/startup."""
-    model, input_schema = fit_deployable_model(frame, horizon=horizon)
+    model, input_schema = fit_deployable_model(
+        frame, horizon=horizon,
+        holdout_reserved_from_prior_evaluation=holdout_reserved_from_prior_evaluation,
+    )
     artifact = ModelArtifactStore().save_model(model)
     return {
         "model_id": model_id,
@@ -463,6 +471,26 @@ def _timeframe_seconds(timeframe: str) -> float:
     return seconds
 
 
+def _reserve_final_export_holdout(frame: pd.DataFrame, save_model: bool) -> tuple[pd.DataFrame, dict]:
+    """Keep the final chronological 20% out of all research evaluation when exporting."""
+    if not save_model:
+        return frame, {
+            "enabled": False, "evaluation_rows": int(len(frame)),
+            "reserved_rows": 0,
+        }
+    if len(frame) < 10:
+        raise ValueError("Insufficient rows to reserve an independent final export holdout")
+    cutoff = int(len(frame) * 0.80)
+    if cutoff < 1 or cutoff >= len(frame):
+        raise ValueError("Unable to construct a final chronological export holdout")
+    return frame.iloc[:cutoff].copy(), {
+        "enabled": True, "evaluation_rows": int(cutoff),
+        "reserved_rows": int(len(frame) - cutoff),
+        "reserved_fraction": float((len(frame) - cutoff) / len(frame)),
+        "policy": "final_chronological_20_percent_excluded_from_all_prior_research_evaluation",
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run ETI research-only baseline")
     parser.add_argument("--exchange", default="auto", choices=["auto", "binance", "mexc", "coinbaseexchange", "kraken"])
@@ -520,12 +548,17 @@ def main():
         frame = pd.read_csv(args.csv)
         now_ms = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
         frame = drop_incomplete_candles(frame, int(_timeframe_seconds(args.timeframe) * 1000), now_ms)
+        evaluation_frame, holdout_protocol = _reserve_final_export_holdout(frame, args.save_model)
         metrics = run_nested_experiment(
-            frame, horizon=args.horizon, min_train=args.min_train,
+            evaluation_frame, horizon=args.horizon, min_train=args.min_train,
             validation_size=args.validation_size, test_size=args.test_size,
             step_size=args.step_size, timeframe=args.timeframe,
             max_model_fits=nested_fit_cap,
-        ) if args.evaluation == "nested" else run_experiment(frame, horizon=args.horizon, timeframe=args.timeframe)
+        ) if args.evaluation == "nested" else run_experiment(
+            evaluation_frame, horizon=args.horizon, timeframe=args.timeframe
+        )
+        if args.save_model:
+            metrics["independent_holdout_protocol"] = holdout_protocol
     elif args.symbols:
         symbols = [item.strip() for item in args.symbols.split(",") if item.strip()]
         if not symbols:
@@ -566,12 +599,17 @@ def main():
                 "venue_symbol": args.symbol, "requested_symbol": args.symbol,
                 "returned_candles": int(len(frame)),
             }
+        evaluation_frame, holdout_protocol = _reserve_final_export_holdout(frame, args.save_model)
         metrics = run_nested_experiment(
-            frame, horizon=args.horizon, min_train=args.min_train,
+            evaluation_frame, horizon=args.horizon, min_train=args.min_train,
             validation_size=args.validation_size, test_size=args.test_size,
             step_size=args.step_size, timeframe=args.timeframe,
             max_model_fits=nested_fit_cap,
-        ) if args.evaluation == "nested" else run_experiment(frame, horizon=args.horizon, timeframe=args.timeframe)
+        ) if args.evaluation == "nested" else run_experiment(
+            evaluation_frame, horizon=args.horizon, timeframe=args.timeframe
+        )
+        if args.save_model:
+            metrics["independent_holdout_protocol"] = holdout_protocol
     if not args.csv and not args.scan_universe:
         metrics["market_data"] = (
             {"mode": "multi_symbol", "sources": source_records}
@@ -589,7 +627,8 @@ def main():
                 f"{args.timeframe}:{len(frame)}"
             )
         metrics["exported_model"] = export_deployable_model(
-            frame, args.model_id, args.model_version, training_ref, horizon=args.horizon
+            frame, args.model_id, args.model_version, training_ref, horizon=args.horizon,
+            holdout_reserved_from_prior_evaluation=True,
         )
         budget = metrics.setdefault("compute_budget", {})
         budget["deployable_model_fit_calls"] = 1
