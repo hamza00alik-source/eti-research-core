@@ -82,7 +82,7 @@ jobs:
               raise SystemExit(
                   "Kaggle kernel source is stale or differs from the canonical "
                   "notebooks/ETI_v0_1_Training.ipynb. Do not trust its cached output. "
-                  "Run 'ETI Kaggle Training Dispatch' with confirm_run=yes to push "
+                  "Run 'Run ETI Kaggle Training' with confirm_run=yes to push "
                   "the reviewed main-branch notebook, then wait for that run to finish."
               )
           print(
