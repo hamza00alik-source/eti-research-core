@@ -304,6 +304,37 @@ class MemoryStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_paper_trades_session
                     ON paper_trades(owner_id, session_id, created_at);
+
+                CREATE TABLE IF NOT EXISTS paper_portfolio_accounts (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    base_currency TEXT NOT NULL,
+                    initial_equity REAL NOT NULL CHECK(initial_equity > 0),
+                    status TEXT NOT NULL CHECK(status IN ('active','paused','closed')),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(owner_id, workspace_id, name)
+                );
+                CREATE INDEX IF NOT EXISTS idx_paper_portfolio_accounts_owner
+                    ON paper_portfolio_accounts(owner_id, workspace_id, status);
+
+                CREATE TABLE IF NOT EXISTS paper_portfolio_snapshots (
+                    id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL REFERENCES paper_portfolio_accounts(id) ON DELETE CASCADE,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    as_of TEXT NOT NULL,
+                    equity REAL NOT NULL CHECK(equity > 0),
+                    cash REAL NOT NULL CHECK(cash >= 0),
+                    positions_json TEXT NOT NULL,
+                    source TEXT NOT NULL CHECK(source = 'owner_attested'),
+                    created_at TEXT NOT NULL,
+                    UNIQUE(account_id, as_of)
+                );
+                CREATE INDEX IF NOT EXISTS idx_paper_portfolio_snapshots_latest
+                    ON paper_portfolio_snapshots(owner_id, workspace_id, account_id, as_of DESC);
                 """
             )
             autonomy_columns = {
@@ -1475,6 +1506,192 @@ class MemoryStore:
             rows = conn.execute(query, params).fetchall()
         return [self.get_model_version(row["model_id"], row["version"]) for row in rows]
 
+
+    @staticmethod
+    def _paper_portfolio_snapshot_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"], "account_id": row["account_id"],
+            "owner_id": row["owner_id"], "workspace_id": row["workspace_id"],
+            "as_of": row["as_of"], "equity": row["equity"], "cash": row["cash"],
+            "positions": json.loads(row["positions_json"]),
+            "source": row["source"], "created_at": row["created_at"],
+        }
+
+    def create_paper_portfolio_account(
+        self, owner_id: str, workspace_id: str, name: str,
+        base_currency: str, initial_equity: float,
+    ) -> dict[str, Any]:
+        """Create an isolated paper account; no broker balance is implied."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        name = _required_text(name, "name", 80)
+        base_currency = _required_text(base_currency, "base_currency", 12).upper()
+        if not base_currency.isalpha() or len(base_currency) not in (3, 4, 5):
+            raise ValueError("base_currency must be a 3-5 letter currency code")
+        if (isinstance(initial_equity, bool) or not isinstance(initial_equity, (int, float))
+                or not math.isfinite(initial_equity) or initial_equity <= 0):
+            raise ValueError("initial_equity must be finite and positive")
+        account_id, now = str(uuid4()), _utc_now()
+        with self._connection() as conn:
+            if not self._owns_workspace(conn, owner_id, workspace_id):
+                raise LookupError("workspace not found")
+            conn.execute(
+                """INSERT INTO paper_portfolio_accounts
+                (id,owner_id,workspace_id,name,base_currency,initial_equity,status,created_at,updated_at)
+                VALUES(?,?,?,?,?,?,'active',?,?)""",
+                (account_id, owner_id, workspace_id, name, base_currency,
+                 float(initial_equity), now, now),
+            )
+        return self.get_paper_portfolio_account(owner_id, workspace_id, account_id)
+
+    def get_paper_portfolio_account(
+        self, owner_id: str, workspace_id: str, account_id: str,
+    ) -> dict[str, Any] | None:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        account_id = _required_text(account_id, "account_id", 128)
+        with self._connection() as conn:
+            row = conn.execute(
+                """SELECT * FROM paper_portfolio_accounts
+                WHERE owner_id=? AND workspace_id=? AND id=?""",
+                (owner_id, workspace_id, account_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"], "owner_id": row["owner_id"],
+            "workspace_id": row["workspace_id"], "name": row["name"],
+            "base_currency": row["base_currency"],
+            "initial_equity": row["initial_equity"], "status": row["status"],
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+        }
+
+    def list_paper_portfolio_accounts(
+        self, owner_id: str, workspace_id: str,
+    ) -> list[dict[str, Any]]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        with self._connection() as conn:
+            rows = conn.execute(
+                """SELECT * FROM paper_portfolio_accounts
+                WHERE owner_id=? AND workspace_id=? ORDER BY created_at DESC""",
+                (owner_id, workspace_id),
+            ).fetchall()
+        return [{
+            "id": row["id"], "owner_id": row["owner_id"],
+            "workspace_id": row["workspace_id"], "name": row["name"],
+            "base_currency": row["base_currency"],
+            "initial_equity": row["initial_equity"], "status": row["status"],
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+        } for row in rows]
+
+    def record_paper_portfolio_snapshot(
+        self, owner_id: str, workspace_id: str, account_id: str,
+        as_of: str, equity: float, cash: float, positions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Append an owner-attested paper snapshot; snapshots are immutable."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        account_id = _required_text(account_id, "account_id", 128)
+        if not isinstance(as_of, str) or not as_of:
+            raise ValueError("as_of must be an ISO-8601 timestamp")
+        try:
+            parsed = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("as_of must be an ISO-8601 timestamp") from exc
+        if parsed.tzinfo is None:
+            raise ValueError("as_of must include a timezone")
+        as_of = parsed.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+        for value, label, allow_zero in ((equity, "equity", False), (cash, "cash", True)):
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or (value < 0 if allow_zero else value <= 0)):
+                raise ValueError(f"{label} must be finite and {'non-negative' if allow_zero else 'positive'}")
+        if cash > equity:
+            raise ValueError("cash cannot exceed equity")
+        if not isinstance(positions, list) or len(positions) > 100:
+            raise ValueError("positions must be a list containing at most 100 entries")
+        normalized, seen, gross = [], set(), 0.0
+        for index, position in enumerate(positions):
+            if not isinstance(position, dict):
+                raise ValueError(f"positions[{index}] must be an object")
+            symbol = _required_text(position.get("symbol"), f"positions[{index}].symbol", 40)
+            group = _required_text(position.get("correlation_group"), f"positions[{index}].correlation_group", 80)
+            notional = position.get("notional")
+            if (isinstance(notional, bool) or not isinstance(notional, (int, float))
+                    or not math.isfinite(notional) or notional <= 0):
+                raise ValueError(f"positions[{index}].notional must be finite and positive")
+            if symbol in seen:
+                raise ValueError("duplicate position symbols are not allowed")
+            seen.add(symbol)
+            gross += float(notional)
+            normalized.append({"symbol": symbol, "notional": float(notional),
+                               "correlation_group": group})
+        if gross + float(cash) > float(equity) + max(1e-8, float(equity) * 1e-8):
+            raise ValueError("cash plus marked position notionals cannot exceed equity")
+        snapshot_id, now = str(uuid4()), _utc_now()
+        with self._connection() as conn:
+            account = conn.execute(
+                """SELECT status FROM paper_portfolio_accounts
+                WHERE owner_id=? AND workspace_id=? AND id=?""",
+                (owner_id, workspace_id, account_id),
+            ).fetchone()
+            if account is None:
+                raise LookupError("paper portfolio account not found")
+            if account["status"] != "active":
+                raise ValueError("paper portfolio account is not active")
+            conn.execute(
+                """INSERT INTO paper_portfolio_snapshots
+                (id,account_id,owner_id,workspace_id,as_of,equity,cash,positions_json,source,created_at)
+                VALUES(?,?,?,?,?,?,?,?, 'owner_attested',?)""",
+                (snapshot_id, account_id, owner_id, workspace_id, as_of,
+                 float(equity), float(cash), _encode_json(normalized), now),
+            )
+        return self.get_paper_portfolio_snapshot(owner_id, workspace_id, account_id, snapshot_id)
+
+    def get_paper_portfolio_snapshot(
+        self, owner_id: str, workspace_id: str, account_id: str, snapshot_id: str,
+    ) -> dict[str, Any] | None:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        with self._connection() as conn:
+            row = conn.execute(
+                """SELECT * FROM paper_portfolio_snapshots
+                WHERE owner_id=? AND workspace_id=? AND account_id=? AND id=?""",
+                (owner_id, workspace_id, account_id, snapshot_id),
+            ).fetchone()
+        return self._paper_portfolio_snapshot_dict(row) if row else None
+
+    def get_latest_paper_portfolio_snapshot(
+        self, owner_id: str, workspace_id: str, account_id: str,
+    ) -> dict[str, Any] | None:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        account_id = _required_text(account_id, "account_id", 128)
+        with self._connection() as conn:
+            row = conn.execute(
+                """SELECT * FROM paper_portfolio_snapshots
+                WHERE owner_id=? AND workspace_id=? AND account_id=?
+                ORDER BY as_of DESC, created_at DESC LIMIT 1""",
+                (owner_id, workspace_id, account_id),
+            ).fetchone()
+        return self._paper_portfolio_snapshot_dict(row) if row else None
+
+    def list_paper_portfolio_snapshots(
+        self, owner_id: str, workspace_id: str, account_id: str, limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be between 1 and 500")
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        account_id = _required_text(account_id, "account_id", 128)
+        with self._connection() as conn:
+            rows = conn.execute(
+                """SELECT * FROM paper_portfolio_snapshots
+                WHERE owner_id=? AND workspace_id=? AND account_id=?
+                ORDER BY as_of DESC, created_at DESC LIMIT ?""",
+                (owner_id, workspace_id, account_id, limit),
+            ).fetchall()
+        return [self._paper_portfolio_snapshot_dict(row) for row in rows]
 
     def create_paper_session(
         self, owner_id: str, workspace_id: str, model_id: str, model_version: str,
