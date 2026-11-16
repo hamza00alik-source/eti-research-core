@@ -174,9 +174,12 @@ def build_portfolio_quality_report(
         if len(set(ids)) != len(ids):
             raise ValueError(f"{key} has duplicate fold identifiers")
         fold_lists[key] = set(ids)
-    common_folds = sorted(set.intersection(*fold_lists.values()))
+    fold_sets = list(fold_lists.values())
+    if any(item != fold_sets[0] for item in fold_sets[1:]):
+        raise ValueError("weighted instruments must have identical outer-test fold identifiers")
+    common_folds = sorted(fold_sets[0])
     if not common_folds:
-        raise ValueError("weighted instruments have no common outer-test fold identifiers")
+        raise ValueError("weighted instruments have no outer-test folds")
 
     folds = [_fold_portfolio(markets, normalized, fold_id, bars_per_year) for fold_id in common_folds]
     returns = [item["total_return"] for item in folds]
