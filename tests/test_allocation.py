@@ -48,7 +48,7 @@ def test_allocator_proposes_bounded_paper_allocations_only():
     assert result["proposed_gross_exposure_fraction"] <= 0.50
     assert all(item["equity_fraction"] <= 0.10 for item in result["allocations"])
     assert sum(item["equity_fraction"] for item in result["allocations"]
-               if item["correlation_group"] == "crypto_major") <= 0.15
+               if item["correlation_group"] == "crypto_major") <= 0.15 + 1e-9
 
 
 def test_allocator_rejects_no_go_and_missing_evidence():
