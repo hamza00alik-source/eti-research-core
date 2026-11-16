@@ -197,6 +197,16 @@ def run_approved_multi_market_research(
         if not isinstance(allow_short, bool):
             raise ValueError(f"{key}.allow_short must be boolean")
         instrument = _instrument(allocated)
+        if instrument.market_type != "spot" or instrument.supports_funding:
+            raise ValueError(
+                f"{key} derivative economic evaluation is blocked until contract quantity, "
+                "mark-price funding, settlement currency, margin and account-equity P&L "
+                "are integrated end to end"
+            )
+        if allow_short:
+            raise ValueError(
+                f"{key} short research is blocked until borrow and financing costs are modeled"
+            )
         if not math.isclose(validated_model["contract_multiplier"], instrument.contract_multiplier, rel_tol=0, abs_tol=1e-9):
             raise ValueError(f"{key} contract multiplier does not match instrument metadata")
         if not instrument.active:
@@ -208,22 +218,9 @@ def run_approved_multi_market_research(
         if allow_short and not instrument.supports_short:
             raise ValueError(f"{key} does not declare short capability")
         funding_schedule = validated_model.get("funding_schedule", [])
-        if instrument.supports_funding:
-            if funding != 0:
-                raise ValueError(f"{key} derivative funding must use timestamped settlement events, not funding_bps_per_bar")
-            if not funding_schedule:
-                raise ValueError(f"{key} derivative research is blocked: validated funding settlement schedule is missing")
-        elif funding != 0 or funding_schedule:
-            raise ValueError(f"{key} does not support funding; funding assumptions must be zero and schedule empty")
+        if funding != 0 or funding_schedule:
+            raise ValueError(f"{key} spot research cannot include derivative funding assumptions")
         snapshot = data_hub.fetch(instrument, timeframe, limit, min_rows=min_rows)
-        if instrument.supports_funding:
-            coverage = validated_model.get("funding_schedule_coverage") or {}
-            candle_times = pd.to_datetime(snapshot.frame["timestamp"], utc=True)
-            coverage_start = pd.Timestamp(coverage["start"])
-            coverage_end = pd.Timestamp(coverage["end"])
-            if coverage_start > candle_times.min() or coverage_end < candle_times.max():
-                raise ValueError(f"{key} funding schedule does not cover the complete OHLCV research window")
-            _validate_funding_event_alignment(funding_schedule, candle_times, key)
         from .features import build_features, feature_columns_for_frame, make_labels
         frame = snapshot.frame
         feature_frame = build_features(frame)
