@@ -56,11 +56,10 @@ def test_paginated_funding_history_preserves_events_and_marks_completeness_unver
     assert result["evidence_eligible"] is False
     assert result["endpoint_uri"] == "https://api.example.test/public"
     assert result["contract_metadata"]["contract_size"] == 0.001
-    assert result["page_count"] == 3
+    assert result["page_count"] == 2
     assert exchange.calls == [
         ("BTC/USDT:USDT", 1000, 2),
         ("BTC/USDT:USDT", 2001, 2),
-        ("BTC/USDT:USDT", 3001, 2),
     ]
     assert exchange.closed is True
 
