@@ -136,7 +136,9 @@ def select_specialist_models(
     if not isinstance(model_versions, list):
         raise ValueError("model_versions must be a list")
     allowed_roles = DEPARTMENTS[department]["model_roles"]
-    if model_role is not None and model_role not in allowed_roles:
+    if model_role is None:
+        raise ValueError("model_role is required for specialist selection")
+    if model_role not in allowed_roles:
         raise ValueError("model_role is not registered for the selected department")
     expected_class = (
         f"{asset_class}_{market_type}"
