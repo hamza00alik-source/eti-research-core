@@ -73,7 +73,8 @@ Worker-executed `portfolio.allocate` tasks must provide `portfolio_account_id`.
 The worker resolves that account's latest snapshot using the task's owner and
 workspace; caller-supplied equity, current positions and correlation-group
 exposure are ignored and replaced with snapshot values. Missing, foreign,
-malformed, future-dated, or older-than-24-hour snapshots are rejected.
+malformed, future-dated, or older-than-24-hour snapshots are rejected. Until
+FX conversion is implemented, the account must use USD as its base currency.
 
 Snapshots are created through the authenticated `/v1/paper/portfolios` and
 `/snapshots` APIs. Their source is explicitly `owner_attested`: they are
