@@ -312,3 +312,63 @@ def test_worker_reports_research_and_model_training_schedule_counts_separately(
     assert '"model_training_tasks":10' in output
     assert '"paper_tasks":0' in output
     assert '"live_tasks":0' in output
+
+
+def test_portfolio_allocation_uses_fresh_owner_scoped_snapshot_not_caller_exposure(tmp_path):
+    from datetime import datetime, timezone
+
+    store = MemoryStore(tmp_path / "allocation-snapshot.sqlite3")
+    workspace = _workspace(store)
+    account = store.create_paper_portfolio_account(
+        "owner-1", workspace["id"], "paper", "USD", 10000
+    )
+    now = datetime(2026, 11, 16, 17, 0, tzinfo=timezone.utc)
+    store.record_paper_portfolio_snapshot(
+        "owner-1", workspace["id"], account["id"], now.isoformat(),
+        10000, 7000,
+        [
+            {"symbol": "BTC/USD", "notional": 2000, "correlation_group": "crypto_major"},
+            {"symbol": "ETH/USD", "notional": 1000, "correlation_group": "crypto_major"},
+        ],
+    )
+    worker = AgentWorker(store)
+    task = {"owner_id": "owner-1", "workspace_id": workspace["id"]}
+    bound = worker._bind_paper_portfolio_snapshot(task, {
+        "portfolio_account_id": account["id"],
+        "equity": 999999,
+        "current_positions": {"FORGED/USD": 1},
+        "correlated_group_exposure": {"forged": 1},
+        "candidates": [],
+    }, now=now)
+
+    assert bound["equity"] == 10000
+    assert bound["current_positions"] == {"BTC/USD": 2000.0, "ETH/USD": 1000.0}
+    assert bound["correlated_group_exposure"] == {"crypto_major": 3000.0}
+    assert bound["_eti_validated_portfolio_snapshot"]["source"] == "owner_attested"
+
+
+def test_portfolio_allocation_rejects_stale_or_foreign_account_snapshot(tmp_path):
+    from datetime import datetime, timezone, timedelta
+
+    store = MemoryStore(tmp_path / "allocation-snapshot-scope.sqlite3")
+    workspace = _workspace(store)
+    account = store.create_paper_portfolio_account(
+        "owner-1", workspace["id"], "paper", "USD", 10000
+    )
+    now = datetime(2026, 11, 16, 17, 0, tzinfo=timezone.utc)
+    store.record_paper_portfolio_snapshot(
+        "owner-1", workspace["id"], account["id"], now.isoformat(),
+        10000, 10000, [],
+    )
+    worker = AgentWorker(store)
+    task = {"owner_id": "owner-1", "workspace_id": workspace["id"]}
+    with pytest.raises(ValueError, match="stale"):
+        worker._bind_paper_portfolio_snapshot(
+            task, {"portfolio_account_id": account["id"]},
+            now=now + timedelta(days=1, seconds=1),
+        )
+    with pytest.raises(ValueError, match="required"):
+        worker._bind_paper_portfolio_snapshot(
+            {"owner_id": "owner-2", "workspace_id": workspace["id"]},
+            {"portfolio_account_id": account["id"]}, now=now,
+        )
