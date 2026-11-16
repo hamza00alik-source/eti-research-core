@@ -473,7 +473,10 @@ def test_model_registry_persists_department_role_experiment_and_lineage(tmp_path
     assert manifest["departments"]["prediction"]["candidate_models"] == 1
     assert manifest["unassigned_legacy_model_versions"] == 0
     # A candidate is deliberately not selectable as a live specialist.
-    assert select_specialist_models([model], "prediction", asset_class="crypto", market_type="spot") == []
+    assert select_specialist_models(
+        [model], "prediction", asset_class="crypto", market_type="spot",
+        model_role="direction_classifier"
+    ) == []
 
 
 def test_model_registry_rejects_invalid_department_role_and_lineage(tmp_path):
