@@ -96,9 +96,18 @@ def test_training_cli_does_not_export_models_by_default(tmp_path, monkeypatch):
 
     output = tmp_path / "metrics.json"
     monkeypatch.setattr(sys, "argv", ["eti.pipeline", "--output", str(output)])
+    sample = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=100, freq="h", tz="UTC"),
+        "open": np.linspace(100, 101, 100), "high": np.linspace(101, 102, 100),
+        "low": np.linspace(99, 100, 100), "close": np.linspace(100, 101, 100),
+        "volume": np.full(100, 10.0),
+    })
     monkeypatch.setattr(
-        pipeline, "fetch_ohlcv",
-        lambda *args: pd.DataFrame({"close": [100.0, 101.0]}),
+        pipeline, "fetch_ohlcv_auto",
+        lambda *args, **kwargs: (sample.copy(), {
+            "provider": "coinbaseexchange", "venue_symbol": "BTC/USD",
+            "requested_symbol": "BTC/USDT", "mode": "automatic_fallback",
+        }),
     )
     monkeypatch.setattr(
         pipeline, "run_experiment",
@@ -126,17 +135,31 @@ def test_training_cli_exports_only_when_explicit_flag_is_set(tmp_path, monkeypat
         ["eti.pipeline", "--output", str(output), "--save-model",
          "--model-id", "eti-test", "--model-version", "0.2.0"],
     )
+    sample = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=100, freq="h", tz="UTC"),
+        "open": np.linspace(100, 101, 100), "high": np.linspace(101, 102, 100),
+        "low": np.linspace(99, 100, 100), "close": np.linspace(100, 101, 100),
+        "volume": np.full(100, 10.0),
+    })
     monkeypatch.setattr(
-        pipeline, "fetch_ohlcv",
-        lambda *args: pd.DataFrame({"close": [100.0, 101.0]}),
+        pipeline, "fetch_ohlcv_auto",
+        lambda *args, **kwargs: (sample.copy(), {
+            "provider": "coinbaseexchange", "venue_symbol": "BTC/USD",
+            "requested_symbol": "BTC/USDT", "mode": "automatic_fallback",
+        }),
     )
     monkeypatch.setattr(
         pipeline, "run_experiment",
         lambda *args, **kwargs: {"test": {"balanced_accuracy": 0.4}},
     )
 
-    def fake_export(frame, model_id, version, training_data_ref, horizon=6):
-        calls.update(model_id=model_id, version=version, training_data_ref=training_data_ref, horizon=horizon)
+    def fake_export(frame, model_id, version, training_data_ref, horizon=6, *,
+                    holdout_reserved_from_prior_evaluation=False):
+        calls.update(
+            model_id=model_id, version=version, training_data_ref=training_data_ref,
+            horizon=horizon,
+            holdout_reserved_from_prior_evaluation=holdout_reserved_from_prior_evaluation,
+        )
         return {"artifact_uri": "artifact://sha256/" + "d" * 64,
                 "calibration_status": "uncalibrated"}
 
@@ -147,8 +170,9 @@ def test_training_cli_exports_only_when_explicit_flag_is_set(tmp_path, monkeypat
     assert calls == {
         "model_id": "eti-test",
         "version": "0.2.0",
-        "training_data_ref": "ccxt:coinbaseexchange:BTC/USD:1h:2999",
+        "training_data_ref": "ccxt:coinbaseexchange:BTC/USD:1h:100",
         "horizon": 6,
+        "holdout_reserved_from_prior_evaluation": True,
     }
     assert report["exported_model"]["calibration_status"] == "uncalibrated"
     assert "candidate artifact only" in report["warning"]
