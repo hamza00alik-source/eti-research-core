@@ -261,6 +261,7 @@ def export_deployable_model(
             raise ValueError("export timeframe must be one of 1h, 4h, or 1d")
         input_schema["timeframes"] = [timeframe]
     input_schema["market_types"] = ["spot"]
+    artifact = ModelArtifactStore().save_model(model)
     # This export entry point is the spot baseline; derivatives require their
     # own contract-aware export and cost-evidence workflow.
     # Every distinct artifact receives an immutable content-addressed version.
