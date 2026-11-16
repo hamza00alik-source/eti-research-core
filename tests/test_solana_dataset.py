@@ -634,6 +634,14 @@ def test_dataset_report_includes_full_workspace_forward_label_coverage(tmp_path)
              "base-2", "base-3", 300, "{malformed-json",
              now.isoformat().replace("+00:00", "Z")),
         )
+    conn.execute(
+            "INSERT INTO solana_research_labels "
+            "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
+            "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("label-non-object", "owner", workspace["id"], "A" * 40, "Pool111",
+             "base-3", "future", 300, '["not", "an", "object"]',
+             now.isoformat().replace("+00:00", "Z")),
+        )
     bounded = store.export_solana_research_dataset("owner", workspace["id"], limit=1)
     assert bounded["truncated_at_limit"] is True
     assert bounded["snapshot_count"] == 1
@@ -648,7 +656,7 @@ def test_dataset_report_includes_full_workspace_forward_label_coverage(tmp_path)
     # The normalized label JSON claims the snapshot identity, but the
     # authoritative persisted label columns disagree. Coverage must reject it.
     assert horizon["label_record_count"] == 0
-    assert horizon["stale_label_target_conflict_count"] == 2
+    assert horizon["stale_label_target_conflict_count"] == 3
     assert coverage["training_authorized"] is False
 
 
