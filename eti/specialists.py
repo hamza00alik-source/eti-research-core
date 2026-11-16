@@ -68,7 +68,7 @@ def strategy_selection_specialist(payload: dict[str, Any]) -> dict[str, Any]:
     slippage_bps = _finite_number(payload.get("slippage_bps", 2.0), "slippage_bps")
     if fee_bps < 0 or slippage_bps < 0:
         raise ValueError("fee_bps and slippage_bps cannot be negative")
-    selected = select_candidate(close)
+    selected = select_candidate(close, fee_bps=fee_bps, slippage_bps=slippage_bps)
     return {
         "kind": "strategy_selection_specialist",
         "candidate": selected["candidate"],
