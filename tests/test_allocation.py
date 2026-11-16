@@ -180,3 +180,23 @@ def test_allocator_uses_independent_risk_gate_and_remains_paper_only():
     assert result["status"] == "proposals_ready"
     assert result["allocations"][0]["risk_budget_fraction"] <= 0.005 + 1e-12
     assert result["execution_enabled"] is False
+
+
+def test_allocator_never_proposes_more_than_attested_available_cash():
+    result = plan_paper_allocations({
+        "equity": 10000, "available_cash": 300,
+        "candidates": [candidate()],
+        "cash_buffer_fraction": 0.10, "max_gross_exposure_fraction": 0.50,
+        "max_single_asset_fraction": 0.50, "max_correlated_group_fraction": 0.50,
+        "max_risk_per_trade": 0.05,
+    })
+    assert result["status"] == "proposals_ready"
+    assert result["proposed_total_notional"] <= 300
+    assert result["available_cash"] == 300
+
+    no_cash = plan_paper_allocations({
+        "equity": 10000, "available_cash": 0,
+        "candidates": [candidate()],
+    })
+    assert no_cash["allocations"] == []
+    assert no_cash["status"] == "no_eligible_allocations"
