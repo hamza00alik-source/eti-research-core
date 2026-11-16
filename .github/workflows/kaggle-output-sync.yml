@@ -104,7 +104,41 @@ jobs:
 
           expected = code_cells(canonical)
           actual = code_cells(remote)
+
+          # Preserve a precise source-round-trip diff even when verification fails.
+          # This lets the next workflow run expose Kaggle's exact normalization
+          # or source mutation instead of producing an empty diagnostics artifact.
+          import difflib
+          import hashlib
+
+          diagnostics_dir = Path("downloaded/diagnostics")
+          diagnostics_dir.mkdir(parents=True, exist_ok=True)
+
+          def write_source_diagnostics(label, candidate):
+              lines = [
+                  f"comparison={label}",
+                  f"canonical_notebook_sha256={hashlib.sha256(canonical_path.read_bytes()).hexdigest()}",
+                  f"remote_notebook={remote_paths[0] if label == 'initial' else retry_paths[0]}",
+                  f"canonical_code_cells={len(expected)}",
+                  f"remote_code_cells={len(candidate)}",
+              ]
+              for index in range(max(len(expected), len(candidate))):
+                  left = expected[index] if index < len(expected) else "<missing canonical cell>"
+                  right = candidate[index] if index < len(candidate) else "<missing remote cell>"
+                  lines.extend([
+                      "",
+                      f"--- code cell {index}: canonical chars={len(left)}, remote chars={len(right)} ---",
+                      *difflib.unified_diff(
+                          left.splitlines(), right.splitlines(),
+                          fromfile=f"canonical-cell-{index}",
+                          tofile=f"remote-cell-{index}",
+                          lineterm="",
+                      ),
+                  ])
+              (diagnostics_dir / f"kaggle-source-{label}-diff.txt").write_text("\n".join(lines) + "\n")
+
           if expected != actual:
+              write_source_diagnostics("initial", actual)
               print(
                   "Remote Kaggle source differs from canonical source; "
                   "automatically pushing the reviewed main-branch notebook."
@@ -179,6 +213,7 @@ jobs:
               remote = json.loads(retry_paths[0].read_text())
               actual = code_cells(remote)
               if expected != actual:
+                  write_source_diagnostics("after-resync", actual)
                   differing = [
                       index for index, (left, right) in enumerate(zip(expected, actual))
                       if left != right
