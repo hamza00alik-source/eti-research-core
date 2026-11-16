@@ -248,6 +248,7 @@ def fit_deployable_model(
 def export_deployable_model(
     frame: pd.DataFrame, model_id: str, version: str, training_data_ref: str,
     horizon: int = 6, *,
+    timeframe: str | None = None,
     holdout_reserved_from_prior_evaluation: bool = False,
 ) -> dict:
     """Explicitly fit and store an immutable artifact; never called at import/startup."""
@@ -255,7 +256,13 @@ def export_deployable_model(
         frame, horizon=horizon,
         holdout_reserved_from_prior_evaluation=holdout_reserved_from_prior_evaluation,
     )
-    artifact = ModelArtifactStore().save_model(model)
+    if timeframe is not None:
+        if not isinstance(timeframe, str) or timeframe not in {"1h", "4h", "1d"}:
+            raise ValueError("export timeframe must be one of 1h, 4h, or 1d")
+        input_schema["timeframes"] = [timeframe]
+    input_schema["market_types"] = ["spot"]
+    # This export entry point is the spot baseline; derivatives require their
+    # own contract-aware export and cost-evidence workflow.
     # Every distinct artifact receives an immutable content-addressed version.
     # Repeating an identical deterministic experiment may reproduce the same
     # digest; it is not mislabeled as a different trained model.
@@ -272,6 +279,8 @@ def export_deployable_model(
         "l2_regularization": 1.0,
         "random_state": 42,
         "horizon": int(horizon),
+        "market_types": input_schema.get("market_types"),
+        "timeframes": input_schema.get("timeframes"),
         "feature_version": input_schema.get("feature_version"),
         "features": input_schema.get("features"),
     }
@@ -724,6 +733,7 @@ def main():
             )
         metrics["exported_model"] = export_deployable_model(
             frame, args.model_id, args.model_version, training_ref, horizon=args.horizon,
+            timeframe=args.timeframe,
             holdout_reserved_from_prior_evaluation=True,
         )
         budget = metrics.setdefault("compute_budget", {})
