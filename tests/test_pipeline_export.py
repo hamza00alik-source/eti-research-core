@@ -100,6 +100,16 @@ def test_exported_model_is_explicitly_marked_uncalibrated(monkeypatch):
     assert exported["input_schema"]["experiment_id"].startswith("eti-exp-")
     assert len(exported["input_schema"]["lineage"]["code_sha256"]) == 64
     assert len(exported["input_schema"]["lineage"]["config_sha256"]) == 64
+    from eti.intelligence import select_specialist_models
+    approved = {**exported, "lifecycle": "approved"}
+    assert len(select_specialist_models(
+        [approved], "prediction", asset_class="crypto", market_type="spot",
+        timeframe="1h", model_role="direction_classifier"
+    )) == 1
+    assert select_specialist_models(
+        [approved], "prediction", asset_class="crypto", market_type="spot",
+        timeframe="4h", model_role="direction_classifier"
+    ) == []
 
 def test_training_cli_does_not_export_models_by_default(tmp_path, monkeypatch):
     import json
