@@ -162,3 +162,30 @@ def test_default_registry_registers_department_specialists_and_routes():
     }
     assert expected.issubset(set(registry.capabilities()))
     assert registry.execute("learning.economic_assess", {"report": economic_report()})["status"] == "human_review_required"
+
+
+def test_macro_worker_result_is_json_serializable():
+    from eti.storage import _encode_json
+
+    payload = {
+        "series_id": "CPI", "provider": "official-fixture",
+        "decision_time": "2026-01-15T00:00:00Z",
+        "observations": [{
+            "series_id": "CPI", "period": "2025-12-01T00:00:00Z",
+            "value": 2.8, "unit": "percent",
+            "released_at": "2026-01-10T00:00:00Z",
+            "vintage_at": "2026-01-10T00:00:00Z",
+            "source": "official", "license_status": "open", "provenance": "release-1",
+        }],
+    }
+    result = default_capabilities().execute("macro.as_of", payload)
+    assert _encode_json(result)
+    assert result["observations"][0]["available_at"] == "2026-01-10T00:00:00+00:00"
+
+
+def test_strategy_cost_inputs_are_validated_and_applied():
+    with pytest.raises(ValueError, match="non-negative"):
+        strategy_selection_specialist({
+            "close": (100 * np.exp(np.cumsum(np.sin(np.arange(180) / 7) * 0.003))).tolist(),
+            "fee_bps": -1,
+        })
