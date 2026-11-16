@@ -61,6 +61,6 @@ This is a manual action only. CI never starts model fitting automatically. The w
 
 ## Prevent stale Kaggle output from being mistaken for current ETI
 
-The scheduled output-sync workflow now pulls the source notebook from the configured Kaggle kernel and compares its code cells with the canonical `notebooks/ETI_v0_1_Training.ipynb` on the current `main` branch before downloading cached output. If the remote kernel still contains an older Binance-only command or otherwise differs, the sync fails with instructions to run **ETI Kaggle Training Dispatch** using `confirm_run=yes`.
+The scheduled output-sync workflow now pulls the source notebook from the configured Kaggle kernel and compares its code cells with the canonical `notebooks/ETI_v0_1_Training.ipynb` on the current `main` branch before downloading cached output. If the remote kernel still contains an older Binance-only command or otherwise differs, the sync fails with instructions to run **Run ETI Kaggle Training** using `confirm_run=yes`.
 
 A scheduled output download is not a training run. Only a completed, fresh Kaggle execution with the expected ETI metrics JSON and a checksum-verified model artifact can be reported as a successful training/export result. The sync workflow must not treat an old cached notebook output as proof that the latest repository code ran.
