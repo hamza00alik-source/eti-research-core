@@ -368,7 +368,7 @@ def test_portfolio_allocation_rejects_stale_or_foreign_account_snapshot(tmp_path
             task, {"portfolio_account_id": account["id"]},
             now=now + timedelta(days=1, seconds=1),
         )
-    with pytest.raises(ValueError, match="required"):
+    with pytest.raises(ValueError, match="not owned"):
         worker._bind_paper_portfolio_snapshot(
             {"owner_id": "owner-2", "workspace_id": workspace["id"]},
             {"portfolio_account_id": account["id"]}, now=now,
