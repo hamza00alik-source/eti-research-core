@@ -122,3 +122,28 @@ def test_allocator_ignores_forged_cached_economic_status():
     result = plan_paper_allocations({"equity": 10000, "candidates": [forged]})
     assert result["allocations"] == []
     assert result["rejected"][0]["reason"] == "economic_evidence_not_eligible_for_paper_review"
+
+
+def test_allocator_blocks_existing_gross_exposure_above_limit():
+    result = plan_paper_allocations({
+        "equity": 10000, "current_positions": {"BTC/USD": 3000},
+        "max_gross_exposure_fraction": 0.25, "candidates": [candidate("ETH/USD")],
+    })
+    assert result["status"] == "blocked"
+    assert result["reason"] == "existing_gross_exposure_exceeds_limit"
+    assert result["execution_enabled"] is False
+
+
+def test_allocator_uses_original_budget_for_proportional_targets():
+    first = candidate("BTC/USD", "group_a", mean_max_drawdown=0.05)
+    second = candidate("ETH/USD", "group_b", mean_max_drawdown=0.05)
+    result = plan_paper_allocations({
+        "equity": 10000, "candidates": [first, second],
+        "cash_buffer_fraction": 0.20, "max_gross_exposure_fraction": 0.20,
+        "max_single_asset_fraction": 0.50, "max_correlated_group_fraction": 0.50,
+        "max_risk_per_trade": 0.05, "max_positions": 2,
+    })
+    amounts = [item["proposed_notional"] for item in result["allocations"]]
+    assert len(amounts) == 2
+    assert amounts[0] == pytest.approx(amounts[1])
+    assert sum(amounts) == pytest.approx(2000.0)
