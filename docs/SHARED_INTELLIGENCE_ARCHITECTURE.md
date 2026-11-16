@@ -68,3 +68,29 @@ timeframes remain subsequent implementation steps.
 - No department or model in this architecture can enable live orders.
 - A model can become approved only through the existing independent approval
   process; promotion evidence remains a separate human-reviewed gate.
+
+
+## Active deterministic specialist services
+
+The Queen's allowlisted worker registry now exposes bounded specialist handlers:
+
+| Department | Capability | Service |
+|---|---|---|
+| Market intelligence | `market.regime` | Causal volatility/trend regime diagnostics |
+| Strategy | `strategy.select` | Fixed strategy candidate selection on a caller-supplied validation window |
+| Risk | `risk.assess` | Independent deterministic risk gate |
+| Macro | `macro.as_of` | Point-in-time macro vintage selection with release/license checks |
+| Execution | `execution.cost_estimate` | Evidence-validated fee/spread/slippage/impact/funding estimate; no orders |
+| Learning | `learning.economic_assess` | Conservative research economics disposition |
+
+These services reuse the existing ETI feature, strategy, risk, macro, cost and
+research-quality components. They are not all learned neural/ML models. That is
+intentional: risk limits, market-data quality and cost validation are better
+kept deterministic and auditable. Prediction remains a separate calibrated
+model department. Macro services only process supplied observations until a
+licensed, release-time-aware external provider is integrated.
+
+Each capability is allowlisted in server code, accepts data-only payloads, and
+returns `execution_enabled=false`. The cost service estimates costs only; it
+does not place orders. Strategy selection uses validation data only and requires
+the caller to retain a separate untouched test window.
