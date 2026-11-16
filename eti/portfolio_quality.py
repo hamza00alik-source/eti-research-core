@@ -66,7 +66,8 @@ def _fold_portfolio(markets: dict[str, Any], weights: dict[str, float],
     # Union timestamps preserve each venue's observed bars. A market that is
     # closed/missing at a timestamp contributes cash (zero return/exposure);
     # weights are never silently re-normalized.
-    returns = pd.concat(streams.values(), axis=1).sort_index().fillna(0.0)
+    raw_returns = pd.concat(streams.values(), axis=1).sort_index()
+    returns = raw_returns.fillna(0.0)
     position_frame = pd.concat(positions.values(), axis=1).sort_index().fillna(0.0)
     weight_series = pd.Series(weights, dtype=float)
     weighted_returns = returns.mul(weight_series, axis=1)
@@ -80,7 +81,7 @@ def _fold_portfolio(markets: dict[str, Any], weights: dict[str, float],
         float(portfolio_returns.mean() / volatility * math.sqrt(bars_per_year))
         if volatility > 0 else 0.0
     )
-    corr = returns.corr(min_periods=2)
+    corr = raw_returns.corr(min_periods=2)
     correlation = {
         left: {
             right: (float(corr.loc[left, right]) if pd.notna(corr.loc[left, right]) else None)
@@ -117,7 +118,7 @@ def _fold_portfolio(markets: dict[str, Any], weights: dict[str, float],
         "correlation_matrix": correlation,
         "variance_risk_contribution": risk_contribution,
         "synchronized_asset_bar_coverage": {
-            key: float(streams[key].index.isin(portfolio_returns.index).mean())
+            key: float(len(streams[key].index.intersection(portfolio_returns.index)) / len(portfolio_returns))
             for key in weights
         },
     }
