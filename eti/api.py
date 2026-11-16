@@ -613,6 +613,10 @@ class ModelVersionPayload(BaseModel):
     training_data_ref: str = Field(min_length=1, max_length=300)
     evaluation_report: dict[str, Any]
     calibration_status: str = Field(min_length=1, max_length=20)
+    department: str | None = Field(default=None, min_length=1, max_length=40)
+    model_role: str | None = Field(default=None, min_length=1, max_length=80)
+    experiment_id: str | None = Field(default=None, min_length=1, max_length=128)
+    lineage: dict[str, Any] | None = None
 
 class PaperSessionPayload(BaseModel):
     model_id: str = Field(min_length=1, max_length=120)
@@ -791,7 +795,9 @@ def register_model(payload: ModelVersionPayload,
             payload.model_id, payload.version, payload.artifact_uri,
             payload.artifact_sha256, payload.input_schema, payload.supported_classes,
             payload.training_data_ref, payload.evaluation_report,
-            payload.calibration_status, account["username"])
+            payload.calibration_status, account["username"],
+            department=payload.department, model_role=payload.model_role,
+            experiment_id=payload.experiment_id, lineage=payload.lineage)
     except sqlite3.IntegrityError as exc:
         raise HTTPException(status_code=409, detail="model version already exists") from exc
     except ValueError as exc:
