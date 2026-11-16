@@ -77,3 +77,23 @@ def test_provider_probe_rejects_incomplete_last_candle():
     import pytest
     with pytest.raises(ValueError, match="incomplete"):
         probe_provider("kraken", FakeProvider(data), now_ms=now_ms)
+
+
+
+def test_provider_probe_rejects_missing_candle_intervals():
+    data = frame().drop(index=50).reset_index(drop=True)
+    now_ms = int((data.timestamp.iloc[-1] + pd.Timedelta(hours=1, seconds=1)).timestamp() * 1000)
+    import pytest
+    with pytest.raises(ValueError, match="missing or irregular intervals"):
+        probe_provider("coinbaseexchange", FakeProvider(data), now_ms=now_ms)
+
+
+def test_require_all_policy_fails_when_any_provider_is_unavailable():
+    data = frame()
+    now_ms = int((data.timestamp.iloc[-1] + pd.Timedelta(hours=1, seconds=1)).timestamp() * 1000)
+    report = run_provider_smoke_check({
+        "coinbaseexchange": FakeProvider(data),
+        "kraken": FakeProvider(error=TimeoutError("offline")),
+    }, now_ms=now_ms, require_all=True)
+    assert report["status"] == "degraded"
+    assert report["policy_passed"] is False
