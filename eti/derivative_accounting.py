@@ -20,6 +20,12 @@ def _finite(name: str, value: Any) -> float:
     return result
 
 
+def _currency(name: str, value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be an explicit non-empty currency code")
+    return value.strip().upper()
+
+
 def calculate_contract_funding_payment(
     *,
     position_contracts: float,
@@ -51,11 +57,11 @@ def calculate_contract_funding_payment(
     kind = str(contract_kind).strip().lower()
     if kind not in {"linear", "inverse"}:
         raise ValueError("contract_kind must be 'linear' or 'inverse'")
-    base = str(base_currency).strip().upper()
-    quote = str(quote_currency).strip().upper()
-    settlement = str(settlement_currency).strip().upper()
-    if not base or not quote or not settlement or base == quote:
-        raise ValueError("base, quote and settlement currencies must be explicit and distinct")
+    base = _currency("base_currency", base_currency)
+    quote = _currency("quote_currency", quote_currency)
+    settlement = _currency("settlement_currency", settlement_currency)
+    if base == quote:
+        raise ValueError("base and quote currencies must be distinct")
     if settlement not in {base, quote}:
         raise ValueError("settlement_currency must be base or quote; FX conversion is unsupported")
 
