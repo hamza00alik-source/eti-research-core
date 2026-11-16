@@ -256,9 +256,52 @@ def export_deployable_model(
         holdout_reserved_from_prior_evaluation=holdout_reserved_from_prior_evaluation,
     )
     artifact = ModelArtifactStore().save_model(model)
+    # Every distinct artifact receives an immutable content-addressed version.
+    # Repeating an identical deterministic experiment may reproduce the same
+    # digest; it is not mislabeled as a different trained model.
+    artifact_digest = artifact["artifact_sha256"]
+    if len(version) > 65:
+        raise ValueError("base model version must be at most 65 characters")
+    base_version = version
+    immutable_version = f"{base_version}+{artifact_digest[:12]}"
+    config = {
+        "estimator": "HistGradientBoostingClassifier",
+        "max_iter": 120,
+        "learning_rate": 0.06,
+        "max_leaf_nodes": 15,
+        "l2_regularization": 1.0,
+        "random_state": 42,
+        "horizon": int(horizon),
+        "feature_version": input_schema.get("feature_version"),
+        "features": input_schema.get("features"),
+    }
+    config_sha256 = hashlib.sha256(
+        json.dumps(config, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    code_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    dataset_sha256 = input_schema["dataset_sha256"]
+    experiment_digest = hashlib.sha256(
+        f"{code_sha256}:{config_sha256}:{dataset_sha256}".encode("utf-8")
+    ).hexdigest()
+    experiment_id = "eti-exp-" + experiment_digest[:16]
+    input_schema.update({
+        "department": "prediction",
+        "model_role": "direction_classifier",
+        "experiment_id": experiment_id,
+        "lineage": {
+            "code_sha256": code_sha256,
+            "config_sha256": config_sha256,
+            "dataset_sha256": dataset_sha256,
+            "data_cutoff": input_schema.get("independent_validation_end"),
+        },
+    })
     return {
         "model_id": model_id,
-        "version": version,
+        "version": immutable_version,
+        "base_version": base_version,
+        "department": "prediction",
+        "model_role": "direction_classifier",
+        "experiment_id": experiment_id,
         **artifact,
         "input_schema": input_schema,
         "supported_classes": ["crypto_spot"],
