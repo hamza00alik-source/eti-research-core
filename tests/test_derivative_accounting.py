@@ -69,3 +69,15 @@ def test_quote_settlement_for_inverse_contract():
 def test_invalid_contract_funding_inputs_fail_closed(overrides):
     with pytest.raises(ValueError):
         calc(**overrides)
+
+
+
+@pytest.mark.parametrize("overrides", [
+    {"base_currency": None},
+    {"quote_currency": ""},
+    {"settlement_currency": "   "},
+    {"base_currency": "BTC", "quote_currency": "BTC", "settlement_currency": "BTC"},
+])
+def test_contract_funding_requires_explicit_distinct_currency_codes(overrides):
+    with pytest.raises(ValueError, match="currency"):
+        calc(**overrides)
