@@ -80,7 +80,7 @@ def _fold_portfolio(markets: dict[str, Any], weights: dict[str, float],
         raise ValueError(f"fold {fold_id} has fewer than two bars in the shared calendar window")
     raw_returns = pd.concat(streams.values(), axis=1).reindex(timeline)
     returns = raw_returns.fillna(0.0)
-    position_frame = pd.concat(positions.values(), axis=1).reindex(timeline).fillna(0.0)
+    position_frame = pd.concat(positions.values(), axis=1).reindex(timeline).ffill().fillna(0.0)
     weight_series = pd.Series(weights, dtype=float)
     weighted_returns = returns.mul(weight_series, axis=1)
     portfolio_returns = weighted_returns.sum(axis=1)
