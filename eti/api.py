@@ -444,6 +444,26 @@ def list_paper_trades(session_id: str, limit: int = Query(default=200, ge=1, le=
             "mode": "paper_only", "live_execution_enabled": False}
 
 
+class PaperPortfolioAccountPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    base_currency: str = Field(default="USD", min_length=3, max_length=5, pattern="^[A-Za-z]{3,5}$")
+    initial_equity: float = Field(gt=0, le=1000000000)
+    workspace_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class PaperPortfolioPositionPayload(BaseModel):
+    symbol: str = Field(min_length=1, max_length=40)
+    notional: float = Field(gt=0, le=1000000000)
+    correlation_group: str = Field(min_length=1, max_length=80)
+
+
+class PaperPortfolioSnapshotPayload(BaseModel):
+    as_of: str = Field(min_length=1, max_length=40)
+    equity: float = Field(gt=0, le=1000000000)
+    cash: float = Field(ge=0, le=1000000000)
+    positions: list[PaperPortfolioPositionPayload] = Field(default_factory=list, max_length=100)
+
+
 @app.get("/v1/paper/portfolios")
 def list_paper_portfolio_accounts(
     workspace_id: str | None = None,
@@ -736,26 +756,6 @@ class PaperSessionPayload(BaseModel):
 
 class PaperSessionStatusPayload(BaseModel):
     status: str = Field(pattern="^(running|paused)$")
-
-
-class PaperPortfolioAccountPayload(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
-    base_currency: str = Field(default="USD", min_length=3, max_length=5, pattern="^[A-Za-z]{3,5}$")
-    initial_equity: float = Field(gt=0, le=1000000000)
-    workspace_id: str | None = Field(default=None, min_length=1, max_length=128)
-
-
-class PaperPortfolioPositionPayload(BaseModel):
-    symbol: str = Field(min_length=1, max_length=40)
-    notional: float = Field(gt=0, le=1000000000)
-    correlation_group: str = Field(min_length=1, max_length=80)
-
-
-class PaperPortfolioSnapshotPayload(BaseModel):
-    as_of: str = Field(min_length=1, max_length=40)
-    equity: float = Field(gt=0, le=1000000000)
-    cash: float = Field(ge=0, le=1000000000)
-    positions: list[PaperPortfolioPositionPayload] = Field(default_factory=list, max_length=100)
 
 
 def _model_admin_usernames() -> set[str]:
