@@ -518,3 +518,72 @@ def test_model_registry_requires_role_for_department_assignment(tmp_path):
             {"passed": True}, "calibrated", "trainer",
             department="prediction",
         )
+
+
+def test_paper_portfolio_account_and_immutable_owner_attested_snapshots(tmp_path):
+    path = tmp_path / "portfolio.sqlite3"
+    store = MemoryStore(path)
+    workspace = store.create_workspace("owner-a", "main")
+    account = store.create_paper_portfolio_account(
+        "owner-a", workspace["id"], "primary-paper", "USD", 10000
+    )
+    snapshot = store.record_paper_portfolio_snapshot(
+        "owner-a", workspace["id"], account["id"],
+        "2026-11-16T10:00:00Z", 10000, 7000,
+        [{"symbol": "BTC/USD", "notional": 2000, "correlation_group": "crypto_major"},
+         {"symbol": "ETH/USD", "notional": 1000, "correlation_group": "crypto_major"}],
+    )
+    reopened = MemoryStore(path)
+    latest = reopened.get_latest_paper_portfolio_snapshot(
+        "owner-a", workspace["id"], account["id"]
+    )
+    assert latest["id"] == snapshot["id"]
+    assert latest["source"] == "owner_attested"
+    assert latest["positions"][0]["symbol"] == "BTC/USD"
+    assert reopened.get_latest_paper_portfolio_snapshot(
+        "owner-b", workspace["id"], account["id"]
+    ) is None
+
+
+def test_paper_portfolio_snapshots_reject_invalid_equity_positions_and_time(tmp_path):
+    store = MemoryStore(tmp_path / "portfolio.sqlite3")
+    workspace = store.create_workspace("owner", "main")
+    account = store.create_paper_portfolio_account(
+        "owner", workspace["id"], "paper", "USD", 1000
+    )
+    common = ("owner", workspace["id"], account["id"], "2026-11-16T10:00:00Z")
+    with pytest.raises(ValueError, match="cash cannot exceed equity"):
+        store.record_paper_portfolio_snapshot(*common, 1000, 1001, [])
+    with pytest.raises(ValueError, match="cannot exceed equity"):
+        store.record_paper_portfolio_snapshot(
+            "owner", workspace["id"], account["id"], "2026-11-16T10:01:00Z",
+            1000, 500, [{"symbol": "BTC/USD", "notional": 600, "correlation_group": "crypto"}],
+        )
+    with pytest.raises(ValueError, match="timezone"):
+        store.record_paper_portfolio_snapshot(
+            "owner", workspace["id"], account["id"], "2026-11-16T10:02:00",
+            1000, 1000, [],
+        )
+    with pytest.raises(ValueError, match="duplicate"):
+        store.record_paper_portfolio_snapshot(
+            "owner", workspace["id"], account["id"], "2026-11-16T10:03:00Z",
+            1000, 500, [
+                {"symbol": "BTC/USD", "notional": 200, "correlation_group": "crypto"},
+                {"symbol": "BTC/USD", "notional": 200, "correlation_group": "crypto"},
+            ],
+        )
+
+
+def test_paper_portfolio_account_and_snapshots_require_workspace_ownership(tmp_path):
+    store = MemoryStore(tmp_path / "portfolio.sqlite3")
+    workspace = store.create_workspace("owner-a", "main")
+    with pytest.raises(LookupError, match="workspace not found"):
+        store.create_paper_portfolio_account("owner-b", workspace["id"], "paper", "USD", 1000)
+    account = store.create_paper_portfolio_account(
+        "owner-a", workspace["id"], "paper", "USD", 1000
+    )
+    with pytest.raises(LookupError, match="account not found"):
+        store.record_paper_portfolio_snapshot(
+            "owner-b", workspace["id"], account["id"], "2026-11-16T10:00:00Z",
+            1000, 1000, [],
+        )
