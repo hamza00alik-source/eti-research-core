@@ -144,6 +144,18 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
         })
 
     existing_gross = sum(positions.values())
+    if existing_gross > equity * max_gross + 1e-9:
+        return {
+            "kind": "paper_portfolio_allocation_plan", "status": "blocked",
+            "reason": "existing_gross_exposure_exceeds_limit", "allocations": [],
+            "rejected": rejected, "execution_enabled": False, "paper_only": True,
+        }
+    if existing_gross > equity * (1.0 - cash_buffer) + 1e-9:
+        return {
+            "kind": "paper_portfolio_allocation_plan", "status": "blocked",
+            "reason": "existing_exposure_breaches_cash_buffer", "allocations": [],
+            "rejected": rejected, "execution_enabled": False, "paper_only": True,
+        }
     gross_room = max(0.0, equity * max_gross - existing_gross)
     deployable_room = max(0.0, equity * (1.0 - cash_buffer) - existing_gross)
     total_budget = min(gross_room, deployable_room)
@@ -156,8 +168,9 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
     planned_by_group: dict[str, float] = {}
     planned_total = 0.0
     for row in selected:
-        remaining_budget = max(0.0, total_budget - planned_total)
-        target = remaining_budget * row["score"] / score_total if score_total > 0 else 0.0
+        # Allocate from the original budget, not the shrinking remainder.
+        # Caps may leave cash unused; the planner never relaxes a limit.
+        target = total_budget * row["score"] / score_total if score_total > 0 else 0.0
         risk_cap = equity * risk_per_trade / row["stop_distance"]
         single_room = max(0.0, equity * max_single - positions.get(row["symbol"], 0.0))
         group_room = max(0.0, equity * max_group - group_exposure.get(row["group"], 0.0)
