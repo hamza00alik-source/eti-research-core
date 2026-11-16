@@ -31,8 +31,16 @@ def _is_finite_number(value: int | float) -> bool:
         return False
 
 
-def validate_snapshot_rows(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
-    """Report data-quality issues without coercing, dropping, or repairing source values."""
+def validate_snapshot_rows(
+    snapshots: list[dict[str, Any]], *, row_issue_limit: int = 500,
+) -> dict[str, Any]:
+    """Report data-quality issues without coercing, dropping, or repairing source values.
+
+    ``row_issue_limit`` bounds diagnostic detail, not validation: aggregate counts
+    and ``rows_with_issues`` always cover the complete input list.
+    """
+    if isinstance(row_issue_limit, bool) or not isinstance(row_issue_limit, int) or row_issue_limit < 0:
+        raise ValueError("row_issue_limit must be a non-negative integer")
     issue_counts = {
         "malformed_payload": 0, "unsupported_schema_version": 0,
         "missing_evidence": 0, "missing_feature_values": 0,
@@ -110,8 +118,8 @@ def validate_snapshot_rows(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
         "rows_checked": len(snapshots),
         "issue_counts": issue_counts,
         "rows_with_issues": len(invalid_rows),
-        "row_issues": invalid_rows[:500],
-        "row_issue_list_truncated": len(invalid_rows) > 500,
+        "row_issues": invalid_rows[:row_issue_limit],
+        "row_issue_list_truncated": len(invalid_rows) > row_issue_limit,
         "note": "No values are repaired or imputed; zero liquidity/price and negative values are flagged for review.",
     }
 
@@ -136,16 +144,12 @@ def prepare_solana_training_rows(dataset_export: dict[str, Any]) -> dict[str, An
         row.get("id"): row for row in snapshots
         if isinstance(row, dict) and isinstance(row.get("id"), str)
     }
-    diagnostics = validate_snapshot_rows(snapshots)
+    # Request complete row-level detail once: the default report remains capped,
+    # but preparation must never let that display cap weaken its exclusion gate.
+    diagnostics = validate_snapshot_rows(snapshots, row_issue_limit=len(snapshots))
     invalid_snapshot_ids = {
-        row.get("id") for row in snapshots
-        if isinstance(row, dict) and validate_snapshot_rows([row])["rows_with_issues"]
-    }
-    # The aggregate diagnostic intentionally caps its displayed issue list;
-    # per-row checks above ensure that cap never weakens preparation filtering.
-    invalid_snapshot_ids.update(
         issue.get("snapshot_id") for issue in diagnostics["row_issues"]
-    )
+    }
     eligible: list[dict[str, Any]] = []
     excluded: dict[str, int] = {}
 
