@@ -634,7 +634,7 @@ def test_dataset_report_includes_full_workspace_forward_label_coverage(tmp_path)
              "base-2", "base-3", 300, "{malformed-json",
              now.isoformat().replace("+00:00", "Z")),
         )
-    conn.execute(
+        conn.execute(
             "INSERT INTO solana_research_labels "
             "(id,owner_id,workspace_id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,"
             "horizon_seconds,label_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
