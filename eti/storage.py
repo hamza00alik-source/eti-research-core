@@ -424,13 +424,14 @@ class MemoryStore:
             row=conn.execute("SELECT * FROM autonomy_profiles WHERE owner_id=?", (owner_id,)).fetchone()
         return self._autonomy_profile_dict(row) if row else None
 
-    def enqueue_due_autonomy_tasks(self, now: datetime | None = None) -> int:
+    def enqueue_due_autonomy_tasks(self, now: datetime | None = None) -> dict[str, int]:
         """Atomically enqueue scheduled spot/swap research and model training tasks."""
         current = now or datetime.now(timezone.utc)
         if current.tzinfo is None:
             raise ValueError("now must be timezone-aware")
         now_text = current.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
-        queued = 0
+        research_queued = 0
+        training_queued = 0
         with self._connection() as conn:
             rows = conn.execute("SELECT * FROM autonomy_profiles WHERE enabled=1").fetchall()
             for row in rows:
@@ -483,7 +484,7 @@ class MemoryStore:
                                                        "market_type": market_type, "symbol": market_symbol,
                                                        "timeframe": timeframe}), now_text),
                                     )
-                                    queued += 1
+                                    research_queued += 1
                     # Small public benchmark universe extends autonomous research beyond crypto.
                     global_watchlist = [
                         ("forex", "spot", "EURUSD=X"),
@@ -519,7 +520,7 @@ class MemoryStore:
                                            "asset_class": asset_class, "market_type": market_type,
                                            "symbol": symbol, "timeframe": timeframe}), now_text),
                         )
-                        queued += 1
+                        research_queued += 1
                 training_enabled = bool(row["model_training_enabled"])
                 training_previous = row["last_model_training_at"]
                 training_due = training_enabled and (
@@ -563,7 +564,7 @@ class MemoryStore:
                              "autonomy.market_discovery.scheduled",
                              _encode_json({"task_id": task_id, **payload}), now_text),
                         )
-                        queued += 1
+                        training_queued += 1
                     # Four cross-asset reference models complement the dynamically discovered crypto candidates.
                     training_jobs = [
                         {"venue": "yahoo", "asset_class": "forex", "market_type": "spot", "symbol": "EURUSD=X"},
@@ -596,9 +597,9 @@ class MemoryStore:
                              _encode_json({"task_id": task_id, **job, "timeframe": timeframe}),
                              now_text),
                         )
-                        queued += 1
+                        training_queued += 1
 
-        return queued
+        return {"research_tasks": research_queued, "model_training_tasks": training_queued}
 
     def record_agent_worker_heartbeat(
         self, worker_id: str, capabilities: list[str], now: int | None = None
