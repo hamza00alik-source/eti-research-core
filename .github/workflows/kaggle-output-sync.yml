@@ -63,7 +63,7 @@ jobs:
 
           def code_cells(notebook):
               return [
-                  "\\n".join(cell.get("source", []))
+                  "\n".join(cell.get("source", []))
                   if isinstance(cell.get("source", []), list)
                   else cell.get("source", "")
                   for cell in notebook.get("cells", [])
