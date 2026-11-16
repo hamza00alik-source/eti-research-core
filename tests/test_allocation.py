@@ -160,6 +160,7 @@ def test_allocator_uses_original_budget_for_proportional_targets():
 
 def test_allocator_rejects_report_for_a_different_instrument():
     item = candidate("ETH/USD")
+    item["research_report"]["symbol"] = "BTC/USD"
     result = plan_paper_allocations({"equity": 10000, "candidates": [item]})
     assert result["allocations"] == []
     assert result["rejected"][0]["reason"] == "research_instrument_identity_mismatch"
