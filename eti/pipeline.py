@@ -278,7 +278,16 @@ def export_deployable_model(
     config_sha256 = hashlib.sha256(
         json.dumps(config, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    code_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    code_digest = hashlib.sha256()
+    for source_path in (
+        Path(__file__),
+        Path(__file__).with_name("model.py"),
+        Path(__file__).with_name("features.py"),
+        Path(__file__).with_name("data.py"),
+    ):
+        code_digest.update(source_path.name.encode("utf-8"))
+        code_digest.update(source_path.read_bytes())
+    code_sha256 = code_digest.hexdigest()
     dataset_sha256 = input_schema["dataset_sha256"]
     experiment_digest = hashlib.sha256(
         f"{code_sha256}:{config_sha256}:{dataset_sha256}".encode("utf-8")
