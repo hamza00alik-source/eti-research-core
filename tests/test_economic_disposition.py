@@ -37,7 +37,7 @@ class EconomicDispositionTests(unittest.TestCase):
 
     def test_negative_two_x_cost_result_is_no_go(self):
         item = report()
-        item["cost_sensitivity"]["scenarios"][0]["mean_net_return"] = -0.02
+        item["cost_sensitivity"]["scenarios"][1]["mean_net_return"] = -0.02
         result = assess_economic_viability(item)
         self.assertEqual(result["status"], "no_go")
 
