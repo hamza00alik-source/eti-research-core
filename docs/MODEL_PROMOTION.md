@@ -7,7 +7,7 @@
 - cost-adjusted net return per fold, max drawdown and out-of-sample ECE;
 - a declared comparison-family size, used for Bonferroni adjustment.
 
-The statistical test is an exact one-sided sign test over fold-level net-return improvements. This deliberately avoids treating individual bars as independent samples. A positive result only returns `eligible_for_human_review`; it never modifies an artifact, changes champion status, approves a model, or enables orders.
+The statistical test is an exact one-sided sign test over non-tied fold-level net-return improvements; ties are excluded from the sign-test denominator. This deliberately avoids treating individual bars as independent samples. The challenger must also meet per-fold and mean drawdown/ECE ceilings and may not worsen mean drawdown or out-of-sample ECE beyond small configured tolerances versus the champion. A positive result only returns `eligible_for_human_review`; it never modifies an artifact, changes champion status, approves a model, or enables orders.
 
 ## Important limitations
 
