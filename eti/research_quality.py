@@ -36,7 +36,7 @@ def _scenario(scenarios: list[dict[str, Any]], multiplier: float) -> dict[str, A
 
 
 def _probability_calibration_evidence(report: dict[str, Any], fold_count: int) -> dict[str, Any]:
-    """Validate fold-level calibration diagnostics against the aggregate summary."""
+    """Validate fold-level calibration diagnostics and their aggregate summary."""
     aggregate = report.get("probability_calibration")
     if aggregate is None:
         return {"status": "not_available", "method": None,
@@ -52,34 +52,84 @@ def _probability_calibration_evidence(report: dict[str, Any], fold_count: int) -
 
     raw_nll, raw_brier, calibrated_nll, calibrated_brier = [], [], [], []
     assessed = confirmed = attempted = 0
+    valid_statuses = {
+        "calibration_confirmed_on_outer_test",
+        "insufficient_outer_test_class_coverage",
+        "outer_test_nll_worse_than_raw",
+        "outer_test_brier_worse_than_raw",
+        "not_assessed",
+    }
+
+    def validate_metrics(value: Any, index: int, label: str, expected_count: int) -> tuple[float, float]:
+        if not isinstance(value, dict):
+            raise ValueError(f"fold {index} {label} probability metrics must be an object")
+        sample_count = value.get("sample_count")
+        counts = value.get("class_counts")
+        if (isinstance(sample_count, bool) or not isinstance(sample_count, int)
+                or sample_count != expected_count or not isinstance(counts, dict)):
+            raise ValueError(f"fold {index} {label} probability sample/class counts are invalid")
+        normalized_counts = {}
+        for cls in ("0", "1", "2"):
+            count = counts.get(cls)
+            if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                raise ValueError(f"fold {index} {label} class counts are invalid")
+            normalized_counts[cls] = count
+        if sum(normalized_counts.values()) != sample_count:
+            raise ValueError(f"fold {index} {label} class counts do not sum to sample_count")
+        nll = _finite_number(value.get("negative_log_likelihood"), f"fold {index} {label} NLL")
+        brier = _finite_number(value.get("brier_score"), f"fold {index} {label} Brier score")
+        if nll < 0 or not 0 <= brier <= 2:
+            raise ValueError(f"fold {index} {label} probability metrics are outside valid bounds")
+        return nll, brier
+
     for index, fold in enumerate(folds):
         item = fold.get("probability_calibration") if isinstance(fold, dict) else None
         if not isinstance(item, dict):
             raise ValueError(f"fold {index} is missing probability-calibration evidence")
         fit = item.get("calibration_fit")
-        if isinstance(fit, dict) and fit.get("status") in ("fit", "not_calibrated"):
+        if not isinstance(fit, dict):
+            raise ValueError(f"fold {index} calibration-fit evidence is missing")
+        fit_status = fit.get("status")
+        if fit_status in ("fit", "not_calibrated"):
             attempted += 1
+        if fit_status == "fit" and (fit.get("passed") is not True
+                                    or fit.get("method") != "temperature_scaling"):
+            raise ValueError(f"fold {index} claims a calibration fit without a passed temperature fit")
         raw = item.get("raw")
         scaled = item.get("temperature_scaled")
+        actual = fold.get("test_actual")
+        if not isinstance(actual, list) or not actual:
+            raise ValueError(f"fold {index} outer-test labels are required for calibration evidence")
+        expected_count = len(actual)
         if raw is not None:
-            if not isinstance(raw, dict):
-                raise ValueError(f"fold {index} raw probability metrics must be an object")
-            raw_nll.append(_finite_number(raw.get("negative_log_likelihood"), f"fold {index} raw NLL"))
-            raw_brier.append(_finite_number(raw.get("brier_score"), f"fold {index} raw Brier score"))
+            nll, brier = validate_metrics(raw, index, "raw", expected_count)
+            raw_nll.append(nll)
+            raw_brier.append(brier)
         if scaled is not None:
-            if not isinstance(scaled, dict):
-                raise ValueError(f"fold {index} calibrated probability metrics must be an object")
-            calibrated_nll.append(_finite_number(
-                scaled.get("negative_log_likelihood"), f"fold {index} calibrated NLL"
-            ))
-            calibrated_brier.append(_finite_number(
-                scaled.get("brier_score"), f"fold {index} calibrated Brier score"
-            ))
+            if raw is None or fit_status != "fit" or fit.get("passed") is not True:
+                raise ValueError(f"fold {index} calibrated metrics lack a successful fit and raw baseline")
+            nll, brier = validate_metrics(scaled, index, "calibrated", expected_count)
+            calibrated_nll.append(nll)
+            calibrated_brier.append(brier)
             assessed += 1
-        if item.get("status") == "calibrated_and_outer_test_confirmed":
-            if scaled is None:
-                raise ValueError(f"fold {index} claims calibration confirmation without test metrics")
-            confirmed += 1
+
+        confirmation = item.get("outer_test_confirmation")
+        if confirmation not in valid_statuses:
+            raise ValueError(f"fold {index} outer-test calibration confirmation is invalid")
+        item_status = item.get("status")
+        if scaled is not None:
+            if confirmation == "calibration_confirmed_on_outer_test":
+                if (item_status != "calibrated_and_outer_test_confirmed"
+                        or item.get("outer_test_class_coverage_passed") is not True
+                        or item.get("outer_test_nll_not_worse") is not True
+                        or item.get("outer_test_brier_not_worse") is not True):
+                    raise ValueError(f"fold {index} calibration confirmation flags are inconsistent")
+                confirmed += 1
+            elif item_status != "calibration_not_confirmed_on_outer_test":
+                raise ValueError(f"fold {index} unconfirmed calibration status is inconsistent")
+        else:
+            if confirmation != "not_assessed" or item_status not in ("uncalibrated", "unavailable"):
+                raise ValueError(f"fold {index} unassessed calibration status is inconsistent")
 
     def mean(values: list[float]) -> float | None:
         return float(sum(values) / len(values)) if values else None
@@ -96,17 +146,17 @@ def _probability_calibration_evidence(report: dict[str, Any], fold_count: int) -
         "mean_calibrated_outer_test_nll": mean(calibrated_nll),
         "mean_calibrated_outer_test_brier": mean(calibrated_brier),
     }
-    for key, actual in expected.items():
+    for key, actual_value in expected.items():
         supplied = aggregate.get(key)
-        if isinstance(actual, int):
-            if isinstance(supplied, bool) or not isinstance(supplied, int) or supplied != actual:
+        if isinstance(actual_value, int):
+            if isinstance(supplied, bool) or not isinstance(supplied, int) or supplied != actual_value:
                 raise ValueError(f"aggregate probability-calibration field {key} does not match fold evidence")
-        elif actual is None:
+        elif actual_value is None:
             if supplied is not None:
                 raise ValueError(f"aggregate probability-calibration field {key} must be null")
         else:
             value = _finite_number(supplied, f"aggregate {key}")
-            if not math.isclose(value, actual, rel_tol=1e-9, abs_tol=1e-12):
+            if not math.isclose(value, actual_value, rel_tol=1e-9, abs_tol=1e-12):
                 raise ValueError(f"aggregate probability-calibration field {key} does not match fold evidence")
 
     if confirmed == fold_count and assessed == fold_count:
