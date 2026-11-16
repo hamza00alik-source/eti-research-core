@@ -36,7 +36,7 @@ def test_nested_training_pipeline_orchestrates_market_folds(monkeypatch):
     assert "candidate_summary" in result
     assert result["compute_budget"]["estimated_model_fit_calls"] == result["fold_count"] * 2
     assert result["probability_calibration"]["method"] == "fold_local_temperature_scaling"
-    assert result["folds"][0]["probability_calibration"]["status"] == "uncalibrated"
+    assert result["folds"][0]["probability_calibration"]["calibration_fit"]["status"] == "insufficient_calibration_window"
     assert "hist_gradient_boosting" in result["candidate_summary"]
     scenarios = result["cost_sensitivity"]["scenarios"]
     assert [item["cost_multiplier"] for item in scenarios] == [1.0, 1.5, 2.0]
