@@ -33,3 +33,17 @@ as failed; missing or malformed evidence is rejected.
 
 The Queen's operational task-reliability intelligence remains a separate
 evidence stream and must never be mixed with this research-quality report.
+
+
+## Probability-calibration evidence
+
+When a completed research artifact includes fold-local calibration diagnostics,
+the quality report also validates the aggregate calibration summary against
+the per-fold records. It reports how many outer-test folds were assessed and
+how many independently confirmed calibration, alongside raw and calibrated
+NLL and Brier-score means. An inconsistent or fabricated aggregate is rejected.
+
+Legacy research artifacts without this evidence are explicitly marked
+`not_available`; they are not silently treated as calibrated. Calibration
+status is descriptive and does not change the trading evidence status or
+grant model-promotion, budget, or execution authority.
