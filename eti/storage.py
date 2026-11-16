@@ -1359,24 +1359,26 @@ class MemoryStore:
             if schema.get("model_role") not in (None, declared_role):
                 raise ValueError("model_role conflicts with input_schema.model_role")
             schema["model_role"] = declared_role
-        if experiment_id is not None:
-            experiment_id = _required_text(experiment_id, "experiment_id", 128)
-            if schema.get("experiment_id") not in (None, experiment_id):
+        declared_experiment_id = experiment_id if experiment_id is not None else schema.get("experiment_id")
+        if declared_experiment_id is not None:
+            declared_experiment_id = _required_text(declared_experiment_id, "experiment_id", 128)
+            if schema.get("experiment_id") not in (None, declared_experiment_id):
                 raise ValueError("experiment_id conflicts with input_schema.experiment_id")
-            schema["experiment_id"] = experiment_id
-        if lineage is not None:
-            if not isinstance(lineage, dict):
+            schema["experiment_id"] = declared_experiment_id
+        declared_lineage = lineage if lineage is not None else schema.get("lineage")
+        if declared_lineage is not None:
+            if not isinstance(declared_lineage, dict):
                 raise ValueError("lineage must be a JSON object")
             import re
             for digest_name in ("code_sha256", "config_sha256", "dataset_sha256"):
-                digest = lineage.get(digest_name)
+                digest = declared_lineage.get(digest_name)
                 if digest is not None and (
                     not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
                 ):
                     raise ValueError(f"lineage.{digest_name} must be a lowercase SHA-256 digest")
-            if schema.get("lineage") not in (None, lineage):
+            if schema.get("lineage") not in (None, declared_lineage):
                 raise ValueError("lineage conflicts with input_schema.lineage")
-            schema["lineage"] = lineage
+            schema["lineage"] = declared_lineage
 
         schema_json, classes_json = _encode_json(schema), _encode_json(normalized_classes)
         evaluation_json = _encode_json(evaluation_report)
