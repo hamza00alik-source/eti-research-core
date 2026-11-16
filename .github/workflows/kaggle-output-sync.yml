@@ -81,6 +81,7 @@ jobs:
           kaggle kernels pull "$KERNEL" -p remote_kernel
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           canonical_path = Path("notebooks/ETI_v0_1_Training.ipynb")
