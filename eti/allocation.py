@@ -48,6 +48,8 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("payload must be an object")
     equity = _number(payload.get("equity"), "equity", minimum=0.0000001)
+    available_cash = _number(payload.get("available_cash", equity), "available_cash",
+                              minimum=0, maximum=equity)
     cash_buffer = _number(payload.get("cash_buffer_fraction", 0.20),
                           "cash_buffer_fraction", minimum=0, maximum=0.95)
     max_gross = _number(payload.get("max_gross_exposure_fraction", 0.25),
@@ -190,7 +192,7 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
         }
     gross_room = max(0.0, equity * max_gross - existing_gross)
     deployable_room = max(0.0, equity * (1.0 - cash_buffer) - existing_gross)
-    total_budget = min(gross_room, deployable_room)
+    total_budget = min(gross_room, deployable_room, available_cash)
     active_count = sum(amount > 0 for amount in positions.values())
     slots = max(0, max_positions - active_count)
     eligible.sort(key=lambda row: (-row["score"], row["symbol"], row["strategy"]))
@@ -254,7 +256,8 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "kind": "paper_portfolio_allocation_plan",
         "status": "proposals_ready" if allocations else "no_eligible_allocations",
-        "equity": equity, "cash_buffer_fraction": cash_buffer,
+        "equity": equity, "available_cash": available_cash,
+        "cash_buffer_fraction": cash_buffer,
         "proposed_total_notional": round(allocated, 8),
         "proposed_gross_exposure_fraction": round((existing_gross + allocated) / equity, 8),
         "unallocated_budget": round(max(0.0, total_budget - allocated), 8),
