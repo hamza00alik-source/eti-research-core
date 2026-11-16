@@ -179,7 +179,7 @@ def build_portfolio_quality_report(
     if len(timeframes) != 1:
         raise ValueError("weighted instruments must use the same research timeframe")
     timeframe = next(iter(timeframes))
-    match = re.fullmatch(r"(\\d+)([smhdw])", timeframe)
+    match = re.fullmatch(r"(\d+)([smhdw])", timeframe)
     if not match:
         raise ValueError(f"unsupported fixed-duration portfolio timeframe: {timeframe}")
     amount, unit = int(match.group(1)), match.group(2)
