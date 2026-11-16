@@ -3,25 +3,21 @@ from eti.allocation import plan_paper_allocations
 from eti.agents import default_capabilities
 
 
-def research_report(*, mean_return=0.04, two_x_return=0.02,
+def research_report(symbol="BTC/USD", *, mean_return=0.04, two_x_return=0.02,
                     positive_folds=5, two_x_positive_folds=5, beating_no_trade=5):
     return {
-        "training_performed": True, "execution_enabled": False,
-        "kind": "legacy_model_research_report",
+        "kind": "strategy_walk_forward_report",
+        "method": "validation_selected_rule_based_walk_forward_v4_cost_stress",
+        "execution_enabled": False,
         "venue": "binance", "asset_class": "crypto", "market_type": "spot",
-        "symbol": "BTC/USD", "timeframe": "1h",
+        "symbol": symbol, "timeframe": "1h",
         "latest_price": 100.0, "data_end": "2026-11-16T00:00:00+00:00",
-        "fold_count": 5, "folds": [{}, {}, {}, {}, {}],
-        "trading_performance": {"summary": {
-            "mean_net_return": mean_return,
-            "folds_beating_no_trade": beating_no_trade,
-        }},
-        "cost_sensitivity": {"scenarios": [
-            {"cost_multiplier": 1.0, "fold_count": 5,
-             "mean_net_return": mean_return, "positive_return_folds": positive_folds},
-            {"cost_multiplier": 2.0, "fold_count": 5,
-             "mean_net_return": two_x_return, "positive_return_folds": two_x_positive_folds},
-        ]},
+        "fold_count": 5,
+        "folds": [
+            {"test": {"net_return": mean_return, "two_x_cost_net_return": two_x_return,
+                      "max_drawdown": -0.08}}
+            for _ in range(5)
+        ],
     }
 
 
@@ -34,7 +30,7 @@ def candidate(symbol="BTC/USD", group="crypto_major", **overrides):
             "price_as_of": "2026-11-16T00:00:00+00:00",
             "source": "owner_defined_stop", "entry_price": 100.0, "stop_price": 96.0,
         },
-        "research_report": research_report(),
+        "research_report": research_report(symbol),
     }
     item.update(overrides)
     return item
@@ -61,7 +57,7 @@ def test_allocator_proposes_bounded_paper_allocations_only():
 
 
 def test_allocator_rejects_no_go_and_missing_evidence():
-    no_go = candidate("BTC/USD", research_report=research_report(
+    no_go = candidate("BTC/USD", research_report=research_report("BTC/USD",
         mean_return=-0.01, two_x_return=-0.03,
         positive_folds=0, two_x_positive_folds=0, beating_no_trade=0,
     ))
@@ -109,7 +105,7 @@ def test_allocator_is_registered_as_strategy_department_capability():
 
 
 def test_allocator_rejects_forged_or_incomplete_fold_counts():
-    weak = candidate("XAUUSD", research_report=research_report(
+    weak = candidate("XAUUSD", research_report=research_report("XAUUSD",
         two_x_positive_folds=4,
     ))
     result = plan_paper_allocations({"equity": 10000, "candidates": [weak]})
@@ -125,7 +121,7 @@ def test_allocator_ignores_forged_cached_economic_status():
         "base_cost_positive_return_folds": 5, "two_x_positive_return_folds": 5,
         "folds_beating_no_trade": 5,
     }
-    forged["research_report"] = research_report(mean_return=-0.02, two_x_return=-0.04,
+    forged["research_report"] = research_report("BTC/USD", mean_return=-0.02, two_x_return=-0.04,
                                                 positive_folds=0, two_x_positive_folds=0,
                                                 beating_no_trade=0)
     result = plan_paper_allocations({"equity": 10000, "candidates": [forged]})
