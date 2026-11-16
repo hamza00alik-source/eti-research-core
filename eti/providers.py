@@ -189,6 +189,7 @@ class CcxtPublicProvider:
                 "requested_until": pd.to_datetime(until_ms, unit="ms", utc=True).isoformat(),
                 "observed_at": pd.to_datetime(observed_ms, unit="ms", utc=True).isoformat(),
                 "events": events, "event_count": len(events), "page_count": page_count,
+                "limit_reached": len(by_timestamp) >= limit and cursor <= until_ms,
                 "endpoint_uri": endpoint_uri if isinstance(endpoint_uri, str) and endpoint_uri.startswith("https://") else None,
                 "history_completeness": "unverified",
                 "evidence_eligible": False,
