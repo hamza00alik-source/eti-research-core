@@ -31,6 +31,7 @@ def test_nested_training_pipeline_orchestrates_market_folds(monkeypatch):
         frame, horizon=3, min_train=80, validation_size=25,
         test_size=25, step_size=25)
     assert result["training_performed"] is True
+    assert result["execution_enabled"] is False
     assert result["fold_count"] > 0
     assert "hist_gradient_boosting" in result["folds"][0]["validation_scores"]
     assert "candidate_summary" in result
