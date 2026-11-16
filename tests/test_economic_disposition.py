@@ -14,6 +14,8 @@ def report():
             "folds_beating_no_trade": 3,
         }},
         "cost_sensitivity": {"scenarios": [
+            {"cost_multiplier": 1.0, "fold_count": 3,
+             "mean_net_return": 0.02, "positive_return_folds": 3},
             {"cost_multiplier": 2.0, "fold_count": 3,
              "mean_net_return": 0.01, "positive_return_folds": 3}
         ]},
