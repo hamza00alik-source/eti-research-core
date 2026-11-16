@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
+import math
 
 from .backtest import backtest_positions
 from .strategies import (
@@ -64,9 +65,18 @@ def evaluate_candidate(
     return result
 
 
-def select_candidate(close: pd.Series) -> dict:
+def select_candidate(
+    close: pd.Series, *, fee_bps: float = 6.0, slippage_bps: float = 2.0
+) -> dict:
     """Select only on supplied validation slice; caller must keep test data separate."""
     if len(close) < 100:
         raise ValueError("At least 100 validation bars are required")
-    results = [evaluate_candidate(close, c) for c in candidate_set()]
+    for name, value in (("fee_bps", fee_bps), ("slippage_bps", slippage_bps)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise ValueError(f"{name} must be finite and non-negative")
+    results = [
+        evaluate_candidate(close, candidate, fee_bps=float(fee_bps),
+                           slippage_bps=float(slippage_bps))
+        for candidate in candidate_set()
+    ]
     return max(results, key=lambda item: item["selection_score"])
