@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 import eti.pipeline as pipeline
 
@@ -33,6 +34,8 @@ def test_nested_training_pipeline_orchestrates_market_folds(monkeypatch):
     assert result["training_performed"] is True
     assert result["execution_enabled"] is False
     assert result["fold_count"] > 0
+    assert result["annualization"]["method"] == "observed_usable_bars_per_calendar_year"
+    assert result["annualization"]["bars_per_year"] == pytest.approx(365.25 * 24, rel=0.02)
     assert "hist_gradient_boosting" in result["folds"][0]["validation_scores"]
     assert "candidate_summary" in result
     assert result["compute_budget"]["estimated_model_fit_calls"] == result["fold_count"] * 2
@@ -52,3 +55,30 @@ def test_nested_training_pipeline_orchestrates_market_folds(monkeypatch):
     assert len(outer_fold["timestamps"]) == model_stream["bars"]
     assert len(model_stream["bar_returns"]) == model_stream["bars"]
     assert len(model_stream["positions"]) == model_stream["bars"]
+
+
+
+def test_observed_annualization_accounts_for_weekends_and_sessions():
+    timestamps = []
+    for day in pd.bdate_range("2024-01-01", periods=30):
+        for hour in range(10, 16):
+            timestamps.append(day + pd.Timedelta(hours=hour))
+    frame = pd.DataFrame({"timestamp": pd.to_datetime(timestamps, utc=True)})
+    dataset = pd.DataFrame(index=range(len(frame)))
+
+    bars_per_year, details = pipeline._estimate_observed_bars_per_year(frame, dataset)
+
+    continuous_hourly = 365.25 * 24
+    assert 1000 < bars_per_year < 2200
+    assert bars_per_year < continuous_hourly * 0.25
+    assert details["usable_rows"] == len(dataset)
+    assert details["warning"].startswith("Sample-rate estimate")
+
+
+def test_observed_annualization_rejects_invalid_timestamp_span():
+    frame = pd.DataFrame({
+        "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z"])
+    })
+    dataset = pd.DataFrame(index=[0, 1])
+    with pytest.raises(ValueError, match="positive duration"):
+        pipeline._estimate_observed_bars_per_year(frame, dataset)
