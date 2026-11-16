@@ -87,6 +87,7 @@ def test_authorized_live_tick_places_one_risk_gated_order_and_is_candle_idempote
     tmp_path, monkeypatch
 ):
     import eti.execution as execution
+    execution.LIVE_ORDER_EXECUTION_ENABLED = True  # test-only exercise of the otherwise gated order path
     store = _live_store(tmp_path)
     calls = {"orders": 0}
     now = pd.Timestamp.now(tz="UTC").floor("h")
@@ -161,6 +162,7 @@ def test_authorized_live_tick_places_one_risk_gated_order_and_is_candle_idempote
 
 def test_uncertain_exchange_order_response_triggers_kill_switch(tmp_path, monkeypatch):
     import eti.execution as execution
+    execution.LIVE_ORDER_EXECUTION_ENABLED = True  # test-only exercise of the otherwise gated order path
     store = _live_store(tmp_path)
     now = pd.Timestamp.now(tz="UTC").floor("h")
     timestamps = [int((now - pd.Timedelta(hours=80 - i)).timestamp() * 1000) for i in range(80)]
@@ -307,3 +309,36 @@ def test_live_authorization_requires_all_four_owner_confirmations(monkeypatch):
     result = api.authorize_live_execution(payload_all_confirmed, account)
     assert result["mode"] == "live"
     assert store.called is True
+
+
+
+def test_authorized_live_profile_still_cannot_place_orders_while_global_gate_is_off(tmp_path, monkeypatch):
+    import eti.execution as execution
+
+    store = _live_store(tmp_path)
+    assert execution.LIVE_ORDER_EXECUTION_ENABLED is False
+    calls = {"exchange_init": 0, "decrypt": 0}
+
+    class ForbiddenExchange:
+        def __init__(self, config):
+            calls["exchange_init"] += 1
+            raise AssertionError("exchange must not be initialized while live gate is off")
+
+    class ForbiddenVault:
+        def decrypt(self, *args, **kwargs):
+            calls["decrypt"] += 1
+            raise AssertionError("credentials must not be decrypted while live gate is off")
+
+    monkeypatch.setattr(execution, "CredentialVault", ForbiddenVault)
+    monkeypatch.setitem(sys.modules, "ccxt", SimpleNamespace(binance=ForbiddenExchange))
+    result = execution.run_live_tick(
+        {"owner_id": "owner", "venue": "binance", "symbol": "BTC/USDT", "timeframe": "1h"},
+        store,
+    )
+    assert result == {
+        "status": "blocked", "processed": False,
+        "reason": "live_order_execution_globally_disabled",
+        "live_execution": False,
+    }
+    assert calls == {"exchange_init": 0, "decrypt": 0}
+    assert store.list_live_orders("owner") == []
