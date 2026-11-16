@@ -64,9 +64,23 @@ def _fold_portfolio(markets: dict[str, Any], weights: dict[str, float],
     for key in weights:
         streams[key], positions[key] = _fold_stream(markets[key], key, fold_id)
 
-    # Union timestamps preserve each venue's observed bars. A market that is
-    # closed/missing at a timestamp contributes cash (zero return/exposure);
-    # weights are never silently re-normalized.
+    # Restrict the portfolio to the calendar window shared by all assets.
+    # Within that window, a closed/missing market bar contributes cash; weights
+    # are never silently re-normalized.
+    starts = [series.index[0] for series in streams.values()]
+    ends = [series.index[-1] for series in streams.values()]
+    shared_start, shared_end = max(starts), min(ends)
+    if shared_start >= shared_end:
+        raise ValueError(f"fold {fold_id} instruments have no overlapping calendar window")
+    timeline = pd.DatetimeIndex(sorted(set(
+        timestamp for series in streams.values() for timestamp in series.index
+        if shared_start <= timestamp <= shared_end
+    )))
+    if len(timeline) < 2:
+        raise ValueError(f"fold {fold_id} has fewer than two bars in the shared calendar window")
+    raw_returns = pd.concat(streams.values(), axis=1).reindex(timeline)
+    returns = raw_returns.fillna(0.0)
+    position_frame = pd.concat(positions.values(), axis=1).reindex(timeline).fillna(0.0)
     weight_series = pd.Series(weights, dtype=float)
     weighted_returns = returns.mul(weight_series, axis=1)
     portfolio_returns = weighted_returns.sum(axis=1)
