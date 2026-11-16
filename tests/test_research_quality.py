@@ -30,6 +30,33 @@ def market_result(returns=(0.03, 0.02, -0.01, 0.04, 0.01), stressed=0.004):
     }
 
 
+
+def market_with_calibration_evidence():
+    market = market_result()
+    report = market["report"]
+    count = len(report["trading_performance"]["folds"])
+    report["folds"] = []
+    for index in range(count):
+        report["folds"].append({
+            "probability_calibration": {
+                "status": "calibrated_and_outer_test_confirmed",
+                "raw": {"negative_log_likelihood": 1.2, "brier_score": 0.6},
+                "temperature_scaled": {"negative_log_likelihood": 1.1, "brier_score": 0.55},
+            }
+        })
+    report["probability_calibration"] = {
+        "method": "fold_local_temperature_scaling",
+        "fold_count": count,
+        "calibration_attempted_folds": count,
+        "outer_test_assessed_folds": count,
+        "outer_test_confirmed_folds": count,
+        "mean_raw_outer_test_nll": 1.2,
+        "mean_calibrated_outer_test_nll": 1.1,
+        "mean_raw_outer_test_brier": 0.6,
+        "mean_calibrated_outer_test_brier": 0.55,
+    }
+    return market
+
 def result_for(market):
     return {
         "schema_version": "eti.multi_market_research_result.v1",
@@ -111,3 +138,25 @@ def test_source_artifact_fit_and_market_counts_are_validated(field, value):
     source[field] = value
     with pytest.raises(ValueError):
         build_research_quality_report(source)
+
+
+def test_quality_report_includes_verified_fold_local_calibration_evidence():
+    report = build_research_quality_report(result_for(market_with_calibration_evidence()))
+    calibration = report["markets"]["coinbase:spot:BTC/USD"]["probability_calibration"]
+    assert calibration["status"] == "confirmed_all_folds"
+    assert calibration["outer_test_assessed_folds"] == 5
+    assert calibration["outer_test_confirmed_folds"] == 5
+    assert calibration["mean_calibrated_outer_test_nll"] == pytest.approx(1.1)
+    assert calibration["mean_calibrated_outer_test_brier"] == pytest.approx(0.55)
+
+
+def test_quality_report_rejects_fabricated_calibration_aggregate_counts():
+    market = market_with_calibration_evidence()
+    market["report"]["probability_calibration"]["outer_test_confirmed_folds"] = 4
+    with pytest.raises(ValueError, match="does not match fold evidence"):
+        summarize_market_research("venue:spot:ABC/USD", market)
+
+
+def test_legacy_quality_report_marks_probability_calibration_unavailable():
+    metric = summarize_market_research("venue:spot:ABC/USD", market_result())
+    assert metric["probability_calibration"]["status"] == "not_available"
