@@ -94,6 +94,8 @@ def assess_challenger_promotion(
     min_mean_improvement_bps: float = 0.0,
     max_mean_drawdown: float = 0.10,
     max_mean_oos_ece: float = 0.08,
+    max_drawdown_worsening: float = 0.02,
+    max_ece_worsening: float = 0.02,
 ) -> dict[str, Any]:
     """Assess a preregistered paired challenger; never changes artifact state.
 
@@ -111,7 +113,14 @@ def assess_challenger_promotion(
     min_improvement = _finite("min_mean_improvement_bps", min_mean_improvement_bps)
     max_drawdown = _finite("max_mean_drawdown", max_mean_drawdown)
     max_ece = _finite("max_mean_oos_ece", max_mean_oos_ece)
-    if not 0 < alpha < 1 or min_improvement < 0 or not 0 <= max_drawdown <= 1 or not 0 <= max_ece <= 1:
+    max_dd_worsening = _finite("max_drawdown_worsening", max_drawdown_worsening)
+    max_ece_worsening_value = _finite("max_ece_worsening", max_ece_worsening)
+    if (
+        not 0 < alpha < 1 or min_improvement < 0
+        or not 0 <= max_drawdown <= 1 or not 0 <= max_ece <= 1
+        or not 0 <= max_dd_worsening <= 1
+        or not 0 <= max_ece_worsening_value <= 1
+    ):
         raise ValueError("promotion thresholds are outside permitted ranges")
 
     champ = _folds(champion, "champion")
@@ -136,30 +145,50 @@ def assess_challenger_promotion(
 
     differences = [challenger_fold["net_return_bps"] - champion_fold["net_return_bps"]
                    for champion_fold, challenger_fold in zip(champ, chall)]
-    wins = sum(value > 0 for value in differences)
-    n = len(differences)
-    # Exact one-sided binomial sign-test tail under p(win)=0.5.
-    raw_p = sum(math.comb(n, k) for k in range(wins, n + 1)) / (2 ** n)
+    non_tied = [value for value in differences if value != 0]
+    wins = sum(value > 0 for value in non_tied)
+    n = len(non_tied)
+    # Exact one-sided binomial sign-test tail under p(win)=0.5; ties are excluded.
+    raw_p = (
+        sum(math.comb(n, k) for k in range(wins, n + 1)) / (2 ** n)
+        if n else 1.0
+    )
     adjusted_p = min(1.0, raw_p * comparison_family_size)
-    mean_improvement = sum(differences) / n
-    mean_drawdown = sum(item["max_drawdown"] for item in chall) / n
-    mean_ece = sum(item["ece"] for item in chall) / n
+    mean_improvement = sum(differences) / len(differences)
+    mean_champion_drawdown = sum(item["max_drawdown"] for item in champ) / len(champ)
+    mean_drawdown = sum(item["max_drawdown"] for item in chall) / len(chall)
+    mean_champion_ece = sum(item["ece"] for item in champ) / len(champ)
+    mean_ece = sum(item["ece"] for item in chall) / len(chall)
+    drawdown_worsening = mean_drawdown - mean_champion_drawdown
+    ece_worsening = mean_ece - mean_champion_ece
+    per_fold_drawdown_passed = all(item["max_drawdown"] <= max_drawdown for item in chall)
+    per_fold_ece_passed = all(item["ece"] <= max_ece for item in chall)
     eligible = (
         adjusted_p <= alpha
         and mean_improvement > min_improvement
         and mean_drawdown <= max_drawdown
+        and per_fold_drawdown_passed
         and mean_ece <= max_ece
+        and per_fold_ece_passed
+        and drawdown_worsening <= max_dd_worsening
+        and ece_worsening <= max_ece_worsening_value
     )
     return {
         "promotion_eligible": bool(eligible),
         "status": "eligible_for_human_review" if eligible else "not_eligible",
-        "fold_count": n, "test_bars": total_bars,
+        "fold_count": len(differences), "non_tied_fold_count": n, "test_bars": total_bars,
         "fold_wins": wins, "mean_net_return_improvement_bps": mean_improvement,
         "sign_test_p_value": raw_p,
         "comparison_family_size": comparison_family_size,
         "bonferroni_adjusted_p_value": adjusted_p,
+        "mean_champion_drawdown": mean_champion_drawdown,
         "mean_challenger_drawdown": mean_drawdown,
+        "challenger_drawdown_worsening": drawdown_worsening,
+        "per_fold_drawdown_passed": per_fold_drawdown_passed,
+        "mean_champion_out_of_sample_ece": mean_champion_ece,
         "mean_challenger_out_of_sample_ece": mean_ece,
+        "challenger_ece_worsening": ece_worsening,
+        "per_fold_ece_passed": per_fold_ece_passed,
         "automatic_promotion": False,
         "requires_human_review": True,
         "warning": (
