@@ -71,28 +71,39 @@ def test_specialist_selection_requires_approved_explicitly_assigned_model():
             "input_schema": {"features": ["rsi"]},
         },
     ]
-    selected = select_specialist_models(versions, "prediction", asset_class="crypto", market_type="spot")
+    for item in versions[:2]:
+        item["input_schema"]["model_role"] = "direction_classifier"
+    versions[2]["input_schema"]["model_role"] = "risk_forecast_optional"
+    selected = select_specialist_models(
+        versions, "prediction", asset_class="crypto", market_type="spot",
+        model_role="direction_classifier"
+    )
     assert [(item["model_id"], item["version"]) for item in selected] == [("specialist", "1.0.0")]
 
 
 def test_specialist_selection_respects_market_type_and_timeframe():
     candidate = model(market_types=["spot"], timeframes=["1h"])
+    candidate["input_schema"]["model_role"] = "direction_classifier"
     assert select_specialist_models(
-        [candidate], "prediction", asset_class="crypto", market_type="swap", timeframe="1h"
+        [candidate], "prediction", asset_class="crypto", market_type="swap", timeframe="1h",
+        model_role="direction_classifier"
     ) == []
     assert select_specialist_models(
-        [candidate], "prediction", asset_class="crypto", market_type="spot", timeframe="4h"
+        [candidate], "prediction", asset_class="crypto", market_type="spot", timeframe="4h",
+        model_role="direction_classifier"
     ) == []
     assert len(select_specialist_models(
-        [candidate], "prediction", asset_class="crypto", market_type="spot", timeframe="1h"
+        [candidate], "prediction", asset_class="crypto", market_type="spot", timeframe="1h",
+        model_role="direction_classifier"
     )) == 1
 
 
 def test_conflicting_department_metadata_fails_closed():
     item = model()
+    item["input_schema"]["model_role"] = "direction_classifier"
     item["evaluation_report"]["department"] = "risk"
     with pytest.raises(ValueError, match="conflicting"):
-        select_specialist_models([item], "prediction")
+        select_specialist_models([item], "prediction", model_role="direction_classifier")
 
 
 def test_manifest_reports_unconfigured_departments_and_legacy_models():
@@ -159,3 +170,10 @@ def test_department_specialist_capabilities_are_explicitly_routed():
         routed = route_department_task(capability, {})
         assert routed["department"] == department
         assert routed["execution_enabled"] is False
+
+
+def test_specialist_selection_requires_an_explicit_role():
+    candidate = model()
+    candidate["input_schema"]["model_role"] = "direction_classifier"
+    with pytest.raises(ValueError, match="model_role is required"):
+        select_specialist_models([candidate], "prediction", asset_class="crypto", market_type="spot")
