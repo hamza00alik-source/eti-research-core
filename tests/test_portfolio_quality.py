@@ -105,3 +105,12 @@ def test_insufficient_fold_count_is_not_promoted_to_approval():
     )
     assert report["evidence_status"] == "insufficient_synchronized_folds"
     assert report["execution_authority"] is False
+
+
+def test_rejects_inconsistent_outer_test_fold_identities():
+    broken = source()
+    broken["markets"]["kraken:spot:ETH/USD"]["report"]["trading_performance"]["folds"].pop()
+    with pytest.raises(ValueError, match="identical outer-test fold identifiers"):
+        build_portfolio_quality_report(
+            broken, {"coinbase:spot:BTC/USD": 0.5, "kraken:spot:ETH/USD": 0.5}
+        )
