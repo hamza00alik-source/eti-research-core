@@ -690,6 +690,12 @@ def test_dataset_report_exposes_full_workspace_snapshot_validation(tmp_path):
     assert validation["rows_with_issues"] == 1
     assert validation["issue_counts"]["zero_price_or_liquidity"] == 1
     assert validation["issue_counts"]["negative_feature_values"] == 2
+    # Finite-value presence is not the same as usable feature coverage.
+    assert report["feature_coverage"]["price_usd"]["count"] == 1
+    assert report["feature_coverage"]["price_usd"]["valid_count"] == 0
+    assert report["feature_coverage"]["liquidity_usd"]["count"] == 1
+    assert report["feature_coverage"]["liquidity_usd"]["valid_count"] == 0
+    assert report["feature_coverage"]["volume_h24_usd"]["valid_count"] == 1
     assert report["training_gate"]["ready"] is False
 
 
