@@ -28,11 +28,15 @@
 - [x] Cost-aware long-only spot simulation and separate hypothetical long/short results
 - [x] Net return, drawdown, Sharpe/Sortino, exposure, turnover, trade count, win rate and profit factor
 - [x] Same-window buy-and-hold and no-trade baselines
-- [ ] Market-regime stratification, experiment registry and stronger dependence-aware statistical inference
+- [ ] Market-regime-stratified performance and stronger dependence-aware statistical inference
+- [x] Immutable experiment/model registry metadata with explicit department, role, artifact hash and code/config/data lineage
 
 ## v0.4 — specialist intelligence
-- Train-from-scratch specialist numerical models after the evaluation harness is complete
-- Regime, trend, mean-reversion, volatility and risk specialists
+- [x] Shared intelligence foundation with eight Queen-coordinated departments and role-scoped model selection
+- [x] Allowlisted deterministic specialist services for regime diagnostics, strategy selection, independent risk, point-in-time macro snapshots, cost estimation and economic disposition
+- [x] Queen readiness manifest reports each specialist role separately
+- [ ] Train and independently validate specialist numerical models after the evaluation harness is complete
+- [ ] Regime, trend, mean-reversion, volatility and risk specialist ML models (separate candidates, no universal model)
 - Probability calibration and uncertainty estimation
 - Controlled evolutionary candidate generation with immutable risk constraints
 
@@ -89,3 +93,10 @@
 - [ ] Add model artifact persistence and approved-version inference
 - [ ] Add PostgreSQL queue/storage backend and worker health monitoring
 - [ ] Deploy HTTPS API + worker + PWA and verify end-to-end Android browser installation
+
+
+## Verified first training evidence
+- [x] Retrieve and checksum-verify the first Kaggle BTC/USD 1h model artifact and full research report
+- [x] Record the first run's cost-adjusted no-go result and keep the candidate out of deployment
+
+See `docs/FIRST_KAGGLE_RUN_2026-11-16.md`. The next Kaggle run must be intentionally confirmed to generate artifacts with the post-merge immutable experiment-lineage metadata.
