@@ -88,9 +88,8 @@ def test_funding_history_rejects_conflicting_duplicate_timestamp(monkeypatch):
         [row(2000, 0.0003)],
     ])
     monkeypatch.setitem(sys.modules, "ccxt", SimpleNamespace(binance=lambda config: exchange))
-    # An exchange returning a timestamp earlier than the requested cursor is rejected,
-    # rather than silently deduplicated or used to fabricate completeness.
-    with pytest.raises(ValueError, match="before requested coverage"):
+    # A conflicting duplicate is rejected rather than silently overwriting history.
+    with pytest.raises(ValueError, match="conflicting rates"):
         CcxtPublicProvider("binance", "swap").fetch_funding_rate_history(
             "BTC/USDT:USDT", 1000, 3000, limit=10, page_size=2,
         )
