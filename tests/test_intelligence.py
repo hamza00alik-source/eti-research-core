@@ -114,3 +114,32 @@ def test_manifest_reports_unconfigured_departments_and_legacy_models():
 def test_manifest_never_calls_task_success_trading_quality():
     manifest = build_intelligence_manifest([])
     assert any("not proof of profitability" in item for item in manifest["limitations"])
+
+
+def test_specialist_selection_is_role_scoped_and_manifest_reports_role_readiness():
+    direction = model()
+    direction["input_schema"]["model_role"] = "direction_classifier"
+    volatility = model(version="1.0.1")
+    volatility["input_schema"]["model_role"] = "volatility_forecast"
+    selected = select_specialist_models(
+        [direction, volatility], "prediction", asset_class="crypto",
+        market_type="spot", model_role="direction_classifier"
+    )
+    assert [item["version"] for item in selected] == ["1.0.0"]
+    manifest = build_intelligence_manifest([direction, volatility])
+    roles = manifest["departments"]["prediction"]["role_readiness"]
+    assert roles["direction_classifier"]["status"] == "ready"
+    assert roles["volatility_forecast"]["status"] == "ready"
+    assert roles["return_distribution"]["status"] == "not_configured"
+
+
+def test_role_selection_rejects_role_from_another_department():
+    with pytest.raises(ValueError, match="model_role"):
+        select_specialist_models([], "prediction", model_role="slippage_estimator")
+
+
+def test_model_with_invalid_declared_role_fails_closed():
+    candidate = model()
+    candidate["input_schema"]["model_role"] = "macro_regime"
+    with pytest.raises(ValueError, match="model_role"):
+        select_specialist_models([candidate], "prediction")
