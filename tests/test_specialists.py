@@ -184,7 +184,7 @@ def test_macro_worker_result_is_json_serializable():
 
 
 def test_strategy_cost_inputs_are_validated_and_applied():
-    with pytest.raises(ValueError, match="non-negative"):
+    with pytest.raises(ValueError, match="cannot be negative"):
         strategy_selection_specialist({
             "close": (100 * np.exp(np.cumsum(np.sin(np.arange(180) / 7) * 0.003))).tolist(),
             "fee_bps": -1,
