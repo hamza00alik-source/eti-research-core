@@ -664,6 +664,36 @@ def test_dataset_report_includes_full_workspace_forward_label_coverage(tmp_path)
 
 
 
+def test_dataset_report_exposes_full_workspace_snapshot_validation(tmp_path):
+    import hashlib
+
+    store = MemoryStore(tmp_path / "snapshot-validation-report.sqlite3")
+    workspace = store.create_workspace("owner", "quality")
+    payload = (
+        '{"evidence":{"price_usd":0,"liquidity_usd":-1,'
+        '"volume_h24_usd":2,"txns_h1_buys":-3,"txns_h1_sells":4}}'
+    )
+    digest = hashlib.sha256(payload.encode()).hexdigest()
+    with store._connection() as conn:
+        conn.execute(
+            "INSERT INTO solana_research_snapshots "
+            "(id,owner_id,workspace_id,task_id,capability,mint,pool_address,schema_version,"
+            "payload_json,payload_sha256,fetched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            ("invalid-quality", "owner", workspace["id"], "task-quality",
+             "solana.market.scan", "A" * 40, "PoolQuality", 1, payload, digest,
+             "2026-01-01T00:00:00Z"),
+        )
+
+    report = store.get_solana_research_dataset_report("owner", workspace["id"])
+    validation = report["snapshot_validation"]
+    assert validation["rows_checked"] == 1
+    assert validation["rows_with_issues"] == 1
+    assert validation["issue_counts"]["zero_price_or_liquidity"] == 1
+    assert validation["issue_counts"]["negative_feature_values"] == 2
+    assert report["training_gate"]["ready"] is False
+
+
+
 def test_label_generation_is_idempotent_and_surfaces_late_target_conflicts(tmp_path):
     import hashlib
 
