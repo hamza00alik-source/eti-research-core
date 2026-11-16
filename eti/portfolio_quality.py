@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -66,9 +67,6 @@ def _fold_portfolio(markets: dict[str, Any], weights: dict[str, float],
     # Union timestamps preserve each venue's observed bars. A market that is
     # closed/missing at a timestamp contributes cash (zero return/exposure);
     # weights are never silently re-normalized.
-    raw_returns = pd.concat(streams.values(), axis=1).sort_index()
-    returns = raw_returns.fillna(0.0)
-    position_frame = pd.concat(positions.values(), axis=1).sort_index().fillna(0.0)
     weight_series = pd.Series(weights, dtype=float)
     weighted_returns = returns.mul(weight_series, axis=1)
     portfolio_returns = weighted_returns.sum(axis=1)
@@ -129,7 +127,7 @@ def build_portfolio_quality_report(
     weights: dict[str, float],
     *,
     minimum_folds: int = 5,
-    bars_per_year: float = 365.25 * 24,
+    bars_per_year: float | None = None,
 ) -> dict[str, Any]:
     """Combine exact instrument keys with fixed capital weights (unallocated weight is cash)."""
     if not isinstance(result, dict) or result.get("schema_version") != "eti.multi_market_research_result.v1":
@@ -157,6 +155,25 @@ def build_portfolio_quality_report(
         raise ValueError("portfolio weights cannot exceed 1.0; residual capital is cash")
     if isinstance(minimum_folds, bool) or not isinstance(minimum_folds, int) or minimum_folds < 1:
         raise ValueError("minimum_folds must be a positive integer")
+    timeframes = set()
+    for key in normalized:
+        report = markets[key].get("report")
+        timeframe = report.get("timeframe") if isinstance(report, dict) else None
+        if not isinstance(timeframe, str) or not timeframe:
+            raise ValueError(f"{key} must declare its research timeframe")
+        timeframes.add(timeframe)
+    if len(timeframes) != 1:
+        raise ValueError("weighted instruments must use the same research timeframe")
+    timeframe = next(iter(timeframes))
+    match = re.fullmatch(r"(\\d+)([smhdw])", timeframe)
+    if not match:
+        raise ValueError(f"unsupported fixed-duration portfolio timeframe: {timeframe}")
+    amount, unit = int(match.group(1)), match.group(2)
+    timeframe_seconds = amount * {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}[unit]
+    if timeframe_seconds <= 0:
+        raise ValueError("portfolio timeframe must be positive")
+    if bars_per_year is None:
+        bars_per_year = 365.25 * 24 * 60 * 60 / timeframe_seconds
     bars_per_year = _number(bars_per_year, "bars_per_year")
     if bars_per_year <= 0:
         raise ValueError("bars_per_year must be positive")
@@ -223,7 +240,7 @@ def main() -> None:
                         help="JSON object mapping exact venue:market_type:symbol keys to fractions")
     parser.add_argument("--output", type=Path, default=Path("artifacts/portfolio-quality-report.json"))
     parser.add_argument("--minimum-folds", type=int, default=5)
-    parser.add_argument("--bars-per-year", type=float, default=365.25 * 24)
+    parser.add_argument("--bars-per-year", type=float, default=None)
     args = parser.parse_args()
     source = json.loads(args.input.read_text(encoding="utf-8"))
     weights = json.loads(args.weights)
