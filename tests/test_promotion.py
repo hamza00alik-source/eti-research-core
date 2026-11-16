@@ -123,3 +123,19 @@ def test_promotion_gate_rejects_single_fold_drawdown_or_ece_breach():
     challenger = report("b", [4] * 5, ece=0.03, drawdown=0.05)
     challenger["folds"][0]["max_drawdown"] = 0.20
     assert assess(champion, challenger)["promotion_eligible"] is False
+
+
+
+def test_promotion_gate_requires_distinct_model_hashes():
+    champ = report("a", [1] * 5)
+    chall = report("a", [2] * 5)
+    with pytest.raises(ValueError, match="distinct model hashes"):
+        assess(champ, chall)
+
+
+def test_promotion_gate_requires_same_training_data_for_paired_comparison():
+    champ = report("a", [1] * 5)
+    chall = report("b", [2] * 5)
+    chall["training_data_sha256"] = digest("f")
+    with pytest.raises(ValueError, match="must share training_data_sha256"):
+        assess(champ, chall)
