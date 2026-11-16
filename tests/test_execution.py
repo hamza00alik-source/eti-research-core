@@ -276,6 +276,7 @@ def test_live_authorization_requires_all_four_owner_confirmations(monkeypatch):
     import pytest
     from fastapi import HTTPException
     import eti.api as api
+    monkeypatch.setattr(api, "LIVE_ORDER_EXECUTION_ENABLED", True)  # test-only authorization-path exercise
 
     class FakeStore:
         def __init__(self):

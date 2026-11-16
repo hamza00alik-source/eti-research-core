@@ -1,4 +1,4 @@
-"""Research API and PWA host. No live order placement routes exist."""
+"""Research API and PWA host. Live order submission remains hard-disabled."""
 from __future__ import annotations
 from pathlib import Path
 import math
@@ -19,6 +19,7 @@ from .auth import AuthManager, AuthenticationError, RateLimitExceeded, Registrat
 from .config import AppConfig
 from .credentials import CredentialVault, CredentialVaultError, verify_exchange_credentials
 from .decision import build_research_decision
+from .execution import LIVE_ORDER_EXECUTION_ENABLED
 from .portfolio import assess_portfolio
 from .risk import RiskEngine, RiskRequest
 from .storage import MemoryStore
@@ -304,8 +305,15 @@ def delete_exchange_credentials(venue: str,
 def get_live_execution_profile(account: dict[str, str] = Depends(current_account)):
     _require_model_admin(account)
     profile = _memory_store().get_live_execution_profile(account["id"])
-    return {"profile": profile, "mode": "live" if profile and profile["enabled"] else "disabled",
-            "per_trade_approval": False, "live_execution_available": True}
+    available = bool(LIVE_ORDER_EXECUTION_ENABLED)
+    return {
+        "profile": profile,
+        "mode": "live" if available and profile and profile["enabled"] else "disabled",
+        "per_trade_approval": False,
+        "live_execution_available": available,
+        "live_order_execution_globally_disabled": not available,
+        "note": "Live order submission is blocked by ETI's code-level hard kill switch." if not available else "Live order submission is available only with owner authorization and every independent safety gate.",
+    }
 
 
 @app.put("/v1/execution/profile")
@@ -328,16 +336,19 @@ def save_live_execution_profile(payload: LiveExecutionSettingsPayload,
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"profile": profile, "mode": "disabled",
-            "note": "Settings are saved but live trading is still disabled. Authorize once to let ETI execute within these hard limits."}
+            "live_execution_available": bool(LIVE_ORDER_EXECUTION_ENABLED),
+            "note": "Settings are saved. Live order submission remains blocked by ETI's code-level hard kill switch." if not LIVE_ORDER_EXECUTION_ENABLED else "Settings are saved; live trading remains disabled until explicit owner authorization."}
 
 
 @app.post("/v1/execution/authorize")
 def authorize_live_execution(payload: LiveExecutionAuthorizationPayload,
                              account: dict[str, str] = Depends(current_account)):
     _require_model_admin(account)
+    if not LIVE_ORDER_EXECUTION_ENABLED:
+        raise HTTPException(status_code=409, detail="Live order submission is globally disabled by ETI's code-level hard kill switch; authorization cannot override it.")
     if not all((payload.confirm_live_trading, payload.confirm_spot_trading_permission,
                 payload.confirm_withdrawals_disabled, payload.confirm_ip_restrictions)):
-        raise HTTPException(status_code=422, detail="All one-time live trading and API-key safety confirmations are required")
+        raise HTTPException(status_code=422, detail="All four one-time live trading and API-key safety confirmations are required")
     try:
         profile = _memory_store().authorize_live_execution(account["id"])
     except LookupError as exc:
@@ -354,7 +365,7 @@ def live_execution_kill_switch(account: dict[str, str] = Depends(current_account
     profile = _memory_store().disable_live_execution(account["id"], "owner_kill_switch")
     if profile is None:
         raise HTTPException(status_code=404, detail="live execution profile not found")
-    return {"profile": profile, "mode": "disabled", "message": "Live order scheduling is disabled."}
+    return {"profile": profile, "mode": "disabled", "message": "New live order scheduling is disabled. Existing exchange orders and open positions are not automatically canceled or liquidated; check and manage them directly at the exchange."}
 
 
 @app.get("/v1/execution/orders")
@@ -1047,8 +1058,15 @@ def decision_assess(payload: DecisionPayload):
 
 @app.get("/execution/status")
 def execution_status():
-    return {"enabled": False, "live_orders_implemented": False,
-            "message": "ETI is research-only. No order execution endpoints are available."}
+    return {
+        "enabled": bool(LIVE_ORDER_EXECUTION_ENABLED),
+        "live_orders_implemented": True,
+        "hard_kill_switch_active": not LIVE_ORDER_EXECUTION_ENABLED,
+        "owner_authorization_required": True,
+        "message": ("Live order submission code exists but is blocked by ETI's code-level hard kill switch."
+                    if not LIVE_ORDER_EXECUTION_ENABLED else
+                    "Live order submission requires explicit owner authorization and independent safety gates."),
+    }
 
 
 web_dir = Path(__file__).resolve().parent.parent / "web"
