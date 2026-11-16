@@ -114,3 +114,19 @@ def test_manifest_reports_unconfigured_departments_and_legacy_models():
 def test_manifest_never_calls_task_success_trading_quality():
     manifest = build_intelligence_manifest([])
     assert any("not proof of profitability" in item for item in manifest["limitations"])
+
+
+def test_department_specialist_capabilities_are_explicitly_routed():
+    expected = {
+        "market.regime": "market_intelligence",
+        "strategy.select": "strategy",
+        "risk.assess": "risk",
+        "macro.as_of": "macro",
+        "execution.cost_estimate": "execution",
+        "learning.economic_assess": "learning",
+    }
+    for capability, department in expected.items():
+        assert department_for_capability(capability) == department
+        routed = route_department_task(capability, {})
+        assert routed["department"] == department
+        assert routed["execution_enabled"] is False
