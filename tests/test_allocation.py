@@ -3,16 +3,29 @@ from eti.allocation import plan_paper_allocations
 from eti.agents import default_capabilities
 
 
+def research_report(*, mean_return=0.04, two_x_return=0.02,
+                    positive_folds=5, two_x_positive_folds=5, beating_no_trade=5):
+    return {
+        "training_performed": True, "execution_enabled": False,
+        "fold_count": 5, "folds": [{}, {}, {}, {}, {}],
+        "trading_performance": {"summary": {
+            "mean_net_return": mean_return,
+            "folds_beating_no_trade": beating_no_trade,
+        }},
+        "cost_sensitivity": {"scenarios": [
+            {"cost_multiplier": 1.0, "fold_count": 5,
+             "mean_net_return": mean_return, "positive_return_folds": positive_folds},
+            {"cost_multiplier": 2.0, "fold_count": 5,
+             "mean_net_return": two_x_return, "positive_return_folds": two_x_positive_folds},
+        ]},
+    }
+
+
 def candidate(symbol="BTC/USD", group="crypto_major", **overrides):
     item = {
         "symbol": symbol, "strategy": "momentum", "correlation_group": group,
         "mean_max_drawdown": 0.08, "stop_distance_fraction": 0.04,
-        "economic_assessment": {
-            "status": "human_review_required", "live_execution_eligible": False,
-            "fold_count": 5, "mean_net_return": 0.04, "two_x_mean_net_return": 0.02,
-            "base_cost_positive_return_folds": 5, "two_x_positive_return_folds": 5,
-            "folds_beating_no_trade": 5,
-        },
+        "research_report": research_report(),
     }
     item.update(overrides)
     return item
@@ -39,17 +52,15 @@ def test_allocator_proposes_bounded_paper_allocations_only():
 
 
 def test_allocator_rejects_no_go_and_missing_evidence():
-    no_go = candidate("BTC/USD", economic_assessment={
-        "status": "no_go", "live_execution_eligible": False, "fold_count": 5,
-        "mean_net_return": 0.2, "two_x_mean_net_return": 0.1,
-        "base_cost_positive_return_folds": 5, "two_x_positive_return_folds": 5,
-        "folds_beating_no_trade": 5,
-    })
-    missing = candidate("ETH/USD", economic_assessment=None)
+    no_go = candidate("BTC/USD", research_report=research_report(
+        mean_return=-0.01, two_x_return=-0.03,
+        positive_folds=0, two_x_positive_folds=0, beating_no_trade=0,
+    ))
+    missing = candidate("ETH/USD", research_report=None)
     result = plan_paper_allocations({"equity": 10000, "candidates": [no_go, missing]})
     assert result["allocations"] == []
     assert {item["reason"] for item in result["rejected"]} == {
-        "economic_evidence_not_eligible_for_paper_review", "missing_economic_assessment"
+        "economic_evidence_not_eligible_for_paper_review", "missing_research_report"
     }
 
 
@@ -89,8 +100,25 @@ def test_allocator_is_registered_as_strategy_department_capability():
 
 
 def test_allocator_rejects_forged_or_incomplete_fold_counts():
-    weak = candidate("XAUUSD")
-    weak["economic_assessment"]["two_x_positive_return_folds"] = 4
+    weak = candidate("XAUUSD", research_report=research_report(
+        two_x_positive_folds=4,
+    ))
     result = plan_paper_allocations({"equity": 10000, "candidates": [weak]})
     assert result["allocations"] == []
-    assert result["rejected"][0]["reason"] == "outer_test_fold_evidence_incomplete"
+    assert result["rejected"][0]["reason"] == "economic_evidence_not_eligible_for_paper_review"
+
+
+def test_allocator_ignores_forged_cached_economic_status():
+    forged = candidate("BTC/USD")
+    forged["economic_assessment"] = {
+        "status": "human_review_required", "live_execution_eligible": False,
+        "fold_count": 5, "mean_net_return": 0.9, "two_x_mean_net_return": 0.8,
+        "base_cost_positive_return_folds": 5, "two_x_positive_return_folds": 5,
+        "folds_beating_no_trade": 5,
+    }
+    forged["research_report"] = research_report(mean_return=-0.02, two_x_return=-0.04,
+                                                positive_folds=0, two_x_positive_folds=0,
+                                                beating_no_trade=0)
+    result = plan_paper_allocations({"equity": 10000, "candidates": [forged]})
+    assert result["allocations"] == []
+    assert result["rejected"][0]["reason"] == "economic_evidence_not_eligible_for_paper_review"
