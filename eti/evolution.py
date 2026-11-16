@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
+import math
 
 from .backtest import backtest_positions
 from .strategies import (
