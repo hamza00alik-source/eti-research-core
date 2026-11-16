@@ -2623,27 +2623,25 @@ class MemoryStore:
                 except (TypeError, ValueError):
                     # Keep the authoritative row identity in coverage even when
                     # its payload is corrupt; the helper will count it as stale.
+                    label = None
+                if not isinstance(label, dict):
+                    # Valid JSON scalars/lists are malformed label payloads too.
                     label = {}
-                if isinstance(label, dict):
-                    coverage_labels.append({
-                        **label, "mint": row["mint"], "pool_address": row["pool_address"],
-                        "baseline_snapshot_id": row["baseline_snapshot_id"],
-                        "target_snapshot_id": row["target_snapshot_id"],
-                        "horizon_seconds": row["horizon_seconds"],
-                    })
-                else:
-                    coverage_labels.append({
-                        "mint": row["mint"], "pool_address": row["pool_address"],
-                        "baseline_snapshot_id": row["baseline_snapshot_id"],
-                        "target_snapshot_id": row["target_snapshot_id"],
-                        "horizon_seconds": row["horizon_seconds"],
-                    })
-                    if (
-                        isinstance(label.get("sampled_price_return_pct"), (int, float))
-                        and not isinstance(label.get("sampled_price_return_pct"), bool)
-                        and math.isfinite(label["sampled_price_return_pct"])
-                    ):
-                        stats["price_returns_available"] += 1
+                coverage_labels.append({
+                    **label,
+                    "mint": row["mint"],
+                    "pool_address": row["pool_address"],
+                    "baseline_snapshot_id": row["baseline_snapshot_id"],
+                    "target_snapshot_id": row["target_snapshot_id"],
+                    "horizon_seconds": row["horizon_seconds"],
+                })
+                sampled_return = label.get("sampled_price_return_pct")
+                if (
+                    isinstance(sampled_return, (int, float))
+                    and not isinstance(sampled_return, bool)
+                    and math.isfinite(sampled_return)
+                ):
+                    stats["price_returns_available"] += 1
             # Count distinct mints with SQL, avoiding a potentially large in-memory set.
             distinct_by_horizon = conn.execute(
                 "SELECT horizon_seconds,COUNT(DISTINCT mint) AS n FROM solana_research_labels "
