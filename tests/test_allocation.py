@@ -14,9 +14,12 @@ def research_report(symbol="BTC/USD", *, mean_return=0.04, two_x_return=0.02,
         "latest_price": 100.0, "data_end": "2026-11-16T00:00:00+00:00",
         "fold_count": 5,
         "folds": [
-            {"test": {"net_return": mean_return, "two_x_cost_net_return": two_x_return,
-                      "max_drawdown": -0.08}}
-            for _ in range(5)
+            {"test": {
+                "net_return": mean_return if index < positive_folds else -abs(mean_return or 0.001),
+                "two_x_cost_net_return": two_x_return if index < two_x_positive_folds else -abs(two_x_return or 0.001),
+                "max_drawdown": -0.08,
+            }}
+            for index in range(5)
         ],
     }
 
