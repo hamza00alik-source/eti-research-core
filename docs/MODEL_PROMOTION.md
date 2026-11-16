@@ -2,7 +2,7 @@
 
 `eti.promotion.assess_challenger_promotion` evaluates a preregistered paired comparison over identical, non-overlapping outer test windows. It requires:
 - SHA-256 identifiers for model, training data, locked evaluation data and cost model;
-- the same evaluation-data and cost-model hashes for champion and challenger;
+- distinct model hashes, but the same training-data, evaluation-data and cost-model hashes for champion and challenger;
 - at least five non-overlapping paired folds and at least 1,000 test bars by default;
 - cost-adjusted net return per fold, max drawdown and out-of-sample ECE;
 - a declared comparison-family size, used for Bonferroni adjustment.
