@@ -72,6 +72,9 @@ timeframes remain subsequent implementation steps.
 
 ## Role-level specialization
 
+Model role is part of specialist identity and selection; department readiness alone is not sufficient for a specific prediction task.
+
+
 A department may contain multiple distinct specialist roles. The registry
 selector accepts an explicit `model_role` in addition to department, asset
 class, market type and timeframe. A role must belong to the selected department;
