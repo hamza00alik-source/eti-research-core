@@ -21,6 +21,45 @@ from .universe import scan_market_universe
 from .calibrated_evaluation import run_nested_calibrated_walk_forward
 
 
+def _estimate_observed_bars_per_year(
+    frame: pd.DataFrame, dataset: pd.DataFrame
+) -> tuple[float, dict]:
+    """Estimate annual bar frequency from actual usable timestamps.
+
+    This accounts for overnight/weekend/session gaps in exchange-traded markets.
+    It is an observed sample-rate estimate, not a verified exchange calendar.
+    """
+    if len(dataset) < 2:
+        raise ValueError("At least two usable observations are required for annualization")
+    if "timestamp" not in frame.columns:
+        raise ValueError("OHLCV timestamps are required for annualization")
+    timestamps = pd.to_datetime(
+        frame.loc[dataset.index, "timestamp"], utc=True, errors="coerce"
+    )
+    if timestamps.isna().any() or not timestamps.is_monotonic_increasing:
+        raise ValueError("Usable market timestamps must be valid and chronological")
+    elapsed_seconds = float((timestamps.iloc[-1] - timestamps.iloc[0]).total_seconds())
+    if not np.isfinite(elapsed_seconds) or elapsed_seconds <= 0:
+        raise ValueError("Usable market timestamps must span a positive duration")
+    bars_per_year = float(
+        len(dataset) * (365.25 * 24 * 60 * 60) / elapsed_seconds
+    )
+    if not np.isfinite(bars_per_year) or bars_per_year <= 0:
+        raise ValueError("Unable to estimate a valid annual bar frequency")
+    return bars_per_year, {
+        "method": "observed_usable_bars_per_calendar_year",
+        "usable_rows": int(len(dataset)),
+        "elapsed_calendar_seconds": elapsed_seconds,
+        "first_timestamp": timestamps.iloc[0].isoformat(),
+        "last_timestamp": timestamps.iloc[-1].isoformat(),
+        "bars_per_year": bars_per_year,
+        "warning": (
+            "Sample-rate estimate; not a substitute for a verified exchange "
+            "calendar or holiday/session model."
+        ),
+    }
+
+
 def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h") -> dict:
     frame = validate_ohlcv(frame)
     features = build_features(frame)
@@ -54,8 +93,7 @@ def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h")
         "accuracy": float(accuracy_score(y_test, test_pred)),
         "balanced_accuracy": float(balanced_accuracy_score(y_test, test_pred)),
     }
-    timeframe_seconds = _timeframe_seconds(timeframe)
-    bars_per_year = 365.25 * 24 * 60 * 60 / timeframe_seconds
+    bars_per_year, annualization = _estimate_observed_bars_per_year(frame, dataset)
     test_index = dataset.index[test_start:]
     sim = simulate_long_flat(
         frame.loc[test_index, "close"].reset_index(drop=True),
@@ -69,6 +107,7 @@ def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h")
         "validation": valid_metrics,
         "test": test_metrics,
         "paper_simulation": {k: v for k, v in sim.items() if k != "equity_curve"},
+        "annualization": annualization,
         "warning": "Single chronological holdout baseline with horizon purging. Not evidence of profitability or future performance.",
     }
 
@@ -291,7 +330,7 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
         min_train=min_train, validation_size=validation_size,
         test_size=test_size, step_size=step_size, purge_bars=horizon,
     )
-    bars_per_year = 365.25 * 24 * 60 * 60 / _timeframe_seconds(timeframe)
+    bars_per_year, annualization = _estimate_observed_bars_per_year(frame, dataset)
     # Causal regimes are aligned to the exact cleaned dataset rows.
     regime_frame = classify_market_regime(frame)
     regime_by_row = regime_frame.loc[dataset.index, "regime"].reset_index(drop=True)
@@ -403,6 +442,7 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
         "note": "The same untouched outer-test predictions are re-simulated at 1.0x, 1.5x and 2.0x fee/slippage assumptions. This is a robustness diagnostic, not a forecast of actual execution costs.",
     }
     report.update({"rows": len(dataset), "horizon": horizon, "timeframe": timeframe,
+                   "annualization": annualization,
                    "cost_assumptions": {"fee_bps": float(fee_bps), "slippage_bps": float(slippage_bps),
                                         "funding_bps_per_bar": float(funding_bps_per_bar),
                                         "funding_event_count": len(funding_events or []),
