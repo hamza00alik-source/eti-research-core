@@ -232,7 +232,11 @@ def test_funding_event_alignment_preflight_accepts_exact_utc_bar():
 def test_spot_short_economic_evaluation_is_blocked_until_borrow_costs_supported():
     approved = approval()
     approved["instruments"]["kraken:spot:BTC/USD"]["allow_short"] = True
+    candidate_scan = scan()
+    candidate_allocation = allocation()
+    candidate_scan["candidates"][0]["instrument"]["supports_short"] = True
+    candidate_allocation["candidates"][0]["instrument"]["supports_short"] = True
     with pytest.raises(ValueError, match="short research is blocked"):
         run_approved_multi_market_research(
-            scan(), allocation(), approved, hub=FakeHub()
+            candidate_scan, candidate_allocation, approved, hub=FakeHub()
         )
