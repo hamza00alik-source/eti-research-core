@@ -328,10 +328,17 @@ def evaluate_forward_label_coverage(
     for observations in groups.values():
         observations.sort(key=lambda pair: (pair[0], pair[1]["id"]))
 
-    label_targets = {
-        (row.get("baseline_snapshot_id"), row.get("horizon_seconds")): row.get("target_snapshot_id")
-        for row in labels if isinstance(row, dict)
-    }
+    label_targets: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for row in labels:
+        if not isinstance(row, dict):
+            continue
+        baseline_id, horizon = row.get("baseline_snapshot_id"), row.get("horizon_seconds")
+        if (
+            not isinstance(baseline_id, str) or not baseline_id
+            or isinstance(horizon, bool) or not isinstance(horizon, int) or horizon <= 0
+        ):
+            continue
+        label_targets.setdefault((baseline_id, horizon), []).append(row)
     by_horizon: dict[str, Any] = {}
     for horizon in horizons_seconds:
         eligible = mature = immature = with_target = without_target = labelled = 0
@@ -359,7 +366,17 @@ def evaluate_forward_label_coverage(
                 with_target += 1
                 label_key = (base["id"], horizon)
                 if label_key in label_targets:
-                    if label_targets[label_key] == target[1]["id"]:
+                    # A persisted label is current only when its target is the
+                    # deterministic first qualifying observation and its optional
+                    # mint/pool identity agrees with the baseline evidence.
+                    entries = label_targets[label_key]
+                    matching = [
+                        entry for entry in entries
+                        if entry.get("target_snapshot_id") == target[1]["id"]
+                        and entry.get("mint", base["mint"]) == base["mint"]
+                        and entry.get("pool_address", base["pool_address"]) == base["pool_address"]
+                    ]
+                    if len(entries) == 1 and len(matching) == 1:
                         labelled += 1
                         evidence = (target[1].get("payload") or {}).get("evidence", {})
                         if not isinstance(evidence, dict) or _finite_positive(evidence.get("price_usd")) is None:
