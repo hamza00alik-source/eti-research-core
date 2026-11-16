@@ -378,21 +378,31 @@ def evaluate_forward_label_coverage(
                             _finite_positive(base_evidence.get("price_usd")),
                             _finite_positive(target_evidence.get("price_usd")),
                         )
-                    matching = [
+                    identity_matching = [
                         entry for entry in entries
                         if entry.get("target_snapshot_id") == target[1]["id"]
                         and entry.get("mint", base["mint"]) == base["mint"]
                         and entry.get("pool_address", base["pool_address"]) == base["pool_address"]
-                        and expected_return is not None
-                        and entry.get("sampled_price_return_pct") == expected_return
                     ]
-                    if len(entries) == 1 and len(matching) == 1:
-                        labelled += 1
-                        evidence = (target[1].get("payload") or {}).get("evidence", {})
-                        if not isinstance(evidence, dict) or _finite_positive(evidence.get("price_usd")) is None:
-                            missing_price += 1
-                    else:
+                    if len(entries) != 1 or len(identity_matching) != 1:
                         stale_label += 1
+                    else:
+                        target_price = (
+                            _finite_positive(target_evidence.get("price_usd"))
+                            if isinstance(target_evidence, dict) else None
+                        )
+                        if target_price is None:
+                            # Preserve a specific missing-target-price diagnostic,
+                            # while still treating the persisted outcome as stale.
+                            missing_price += 1
+                            stale_label += 1
+                        elif (
+                            expected_return is None
+                            or identity_matching[0].get("sampled_price_return_pct") != expected_return
+                        ):
+                            stale_label += 1
+                        else:
+                            labelled += 1
         by_horizon[str(horizon)] = {
             "eligible_baseline_count": eligible,
             "not_yet_mature_count": immature,
