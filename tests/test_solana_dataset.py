@@ -741,3 +741,68 @@ def test_label_generation_is_idempotent_and_surfaces_late_target_conflicts(tmp_p
     exported = store.export_solana_research_dataset("owner", workspace["id"])
     assert len(exported["labels"]) == 1
     assert exported["labels"][0]["target_snapshot_id"] == "three"
+
+
+
+def test_training_preparation_checks_all_invalid_snapshots_without_quadratic_revalidation():
+    from eti.solana_dataset import prepare_solana_training_rows
+
+    baseline = {
+        "id": "base", "capability": "solana.market.scan", "mint": "A" * 40,
+        "pool_address": "PoolA", "schema_version": 1,
+        "fetched_at": "2026-01-01T00:00:00Z",
+        "payload": {"evidence": {
+            "price_usd": 1.0, "liquidity_usd": 100.0, "volume_h24_usd": 20.0,
+            "txns_h1_buys": 3, "txns_h1_sells": 2,
+        }},
+    }
+    invalid_rows = [
+        {
+            "id": f"invalid-{index}", "capability": "solana.market.scan",
+            "mint": f"mint-{index}", "pool_address": f"pool-{index}",
+            "schema_version": 1, "fetched_at": f"2026-01-01T00:{index // 60:02d}:{index % 60:02d}Z",
+            "payload": {"evidence": {}},
+        }
+        for index in range(500)
+    ]
+    bad_target = {
+        "id": "bad-target", "capability": "solana.market.scan", "mint": "A" * 40,
+        "pool_address": "PoolA", "schema_version": 1,
+        "fetched_at": "2026-01-01T00:06:00Z",
+        "payload": {"evidence": {}},
+    }
+    exported = {
+        "schema": "eti.solana.research_dataset.v1",
+        "snapshots": [baseline, *invalid_rows, bad_target],
+        "labels": [{
+            "id": "label-1", "mint": "A" * 40, "pool_address": "PoolA",
+            "baseline_snapshot_id": "base", "target_snapshot_id": "bad-target",
+            "baseline_snapshot_in_export": True, "target_snapshot_in_export": True,
+            "horizon_seconds": 300, "label_parse_error": False,
+            "reference_issues": [],
+            "label": {"sampled_price_return_pct": 0.0},
+        }],
+    }
+
+    prepared = prepare_solana_training_rows(exported)
+    assert prepared["eligible_row_count"] == 0
+    assert prepared["exclusion_counts"] == {"snapshot_validation_issues": 1}
+
+
+def test_snapshot_validation_row_issue_limit_only_caps_detail_not_counts():
+    rows = [
+        {
+            "id": f"invalid-{index}", "capability": "solana.market.scan",
+            "mint": f"mint-{index}", "pool_address": f"pool-{index}",
+            "schema_version": 1, "fetched_at": f"2026-01-01T00:{index // 60:02d}:{index % 60:02d}Z",
+            "payload": {"evidence": {}},
+        }
+        for index in range(501)
+    ]
+    report = validate_snapshot_rows(rows)
+    assert report["rows_with_issues"] == 501
+    assert len(report["row_issues"]) == 500
+    assert report["row_issue_list_truncated"] is True
+    complete = validate_snapshot_rows(rows, row_issue_limit=len(rows))
+    assert len(complete["row_issues"]) == 501
+    assert complete["row_issue_list_truncated"] is False
