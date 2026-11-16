@@ -49,3 +49,19 @@ Every output includes `paper_only=true`, `orders_submitted=false`,
 `owner_review_required=true`, and `execution_enabled=false`. Even
 `proposals_ready` means only that a bounded paper proposal was produced. It is
 not an instruction to trade or evidence of future profitability.
+
+
+## Provenance and independent risk gate
+
+Rule-strategy candidates must carry a research report whose venue, asset class,
+market type, symbol and timeframe identify the same instrument as the candidate.
+The report's latest price and data-end timestamp bind an owner-defined stop
+record to that exact research snapshot. The allocator computes stop distance
+from entry and stop prices; it does not trust a caller-supplied distance fraction.
+
+Before serializing each proposed notional, ETI's independent deterministic
+RiskEngine rechecks the request against account equity, stop distance, gross
+exposure, position size and the configured per-trade risk limit. This remains
+a paper proposal only. The current correlation-group label is still an
+operator-supplied classification, not a covariance estimate, and must be
+reviewed before any future portfolio automation.
