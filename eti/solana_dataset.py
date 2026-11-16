@@ -42,7 +42,7 @@ def validate_snapshot_rows(
     if isinstance(row_issue_limit, bool) or not isinstance(row_issue_limit, int) or row_issue_limit < 0:
         raise ValueError("row_issue_limit must be a non-negative integer")
     issue_counts = {
-        "malformed_payload": 0, "unsupported_schema_version": 0,
+        "malformed_snapshot_row": 0, "malformed_payload": 0, "unsupported_schema_version": 0,
         "missing_evidence": 0, "missing_feature_values": 0,
         "non_finite_feature_values": 0, "negative_feature_values": 0,
         "zero_price_or_liquidity": 0, "invalid_timestamp": 0,
