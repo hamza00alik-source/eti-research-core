@@ -443,3 +443,64 @@ def test_autonomy_skips_dated_future_scan_without_exact_contract_symbol(tmp_path
     crypto_types = {task["input"]["market_type"] for task in tasks
                     if task["input"].get("asset_class") == "crypto"}
     assert crypto_types == {"spot", "swap"}
+
+
+def test_model_registry_persists_department_role_experiment_and_lineage(tmp_path):
+    from eti.intelligence import build_intelligence_manifest, select_specialist_models
+
+    store = MemoryStore(tmp_path / "specialist-models.sqlite3")
+    model = store.register_model_version(
+        "eti-btc-direction", "run-001", "artifact://sha256/" + "a" * 64,
+        "a" * 64, {"features": ["close", "volume"]}, ["crypto_spot"],
+        "dataset:btc-1h", {"passed": True}, "calibrated", "trainer",
+        department="prediction", model_role="direction_classifier",
+        experiment_id="eti-exp-001",
+        lineage={
+            "code_sha256": "b" * 64,
+            "config_sha256": "c" * 64,
+            "dataset_sha256": "d" * 64,
+            "venue": "coinbase",
+            "symbol": "BTC/USD",
+            "timeframe": "1h",
+        },
+    )
+    assert model["input_schema"]["department"] == "prediction"
+    assert model["input_schema"]["model_role"] == "direction_classifier"
+    assert model["input_schema"]["experiment_id"] == "eti-exp-001"
+    assert model["input_schema"]["lineage"]["dataset_sha256"] == "d" * 64
+
+    manifest = build_intelligence_manifest([model])
+    assert manifest["departments"]["prediction"]["candidate_models"] == 1
+    assert manifest["unassigned_legacy_model_versions"] == 0
+    # A candidate is deliberately not selectable as a live specialist.
+    assert select_specialist_models([model], "prediction", asset_class="crypto", market_type="spot") == []
+
+
+def test_model_registry_rejects_invalid_department_role_and_lineage(tmp_path):
+    store = MemoryStore(tmp_path / "invalid-specialist.sqlite3")
+    common = (
+        "eti-specialist", "1.0", "artifact://sha256/" + "e" * 64, "e" * 64,
+        {"features": ["close"]}, ["crypto_spot"], "dataset:1",
+        {"passed": True}, "calibrated", "trainer",
+    )
+    with pytest.raises(ValueError, match="department"):
+        store.register_model_version(*common, department="unknown")
+    with pytest.raises(ValueError, match="model_role"):
+        store.register_model_version(
+            *common, department="prediction", model_role="slippage_estimator"
+        )
+    with pytest.raises(ValueError, match="SHA-256"):
+        store.register_model_version(
+            *common, department="prediction", model_role="direction_classifier",
+            lineage={"dataset_sha256": "not-a-hash"}
+        )
+
+
+def test_model_registry_keeps_legacy_registration_compatible(tmp_path):
+    store = MemoryStore(tmp_path / "legacy-model.sqlite3")
+    model = store.register_model_version(
+        "legacy", "0.1", "artifact://legacy/0.1", "f" * 64,
+        {"features": ["close"]}, ["crypto_spot"], "dataset:legacy",
+        {"passed": True}, "calibrated", "trainer",
+    )
+    assert "department" not in model["input_schema"]
