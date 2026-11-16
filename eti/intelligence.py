@@ -99,11 +99,13 @@ def _declared_department(model: dict[str, Any]) -> str | None:
     schema = model.get("input_schema")
     report = model.get("evaluation_report")
     values = []
-    if isinstance(schema, dict):
-        values.append(schema.get("department"))
-    if isinstance(report, dict):
-        values.append(report.get("department"))
-    declared = {value for value in values if isinstance(value, str) and value}
+    if isinstance(schema, dict) and "department" in schema:
+        values.append(schema["department"])
+    if isinstance(report, dict) and "department" in report:
+        values.append(report["department"])
+    if any(not isinstance(value, str) or not value for value in values):
+        raise ValueError("model department declarations must be non-empty strings")
+    declared = set(values)
     if len(declared) > 1:
         raise ValueError("model has conflicting department declarations")
     if not declared:
