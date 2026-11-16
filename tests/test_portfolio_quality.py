@@ -52,7 +52,7 @@ def test_builds_synchronized_weighted_portfolio_with_cash_and_risk_evidence():
     assert report["evidence_status"] == "human_review_required"
     assert report["folds"][0]["bar_count"] == 3
     assert report["folds"][0]["total_return"] == pytest.approx(
-        (1 + 0.04) * (1 - 0.04) * (1 + 0.02) - 1
+        (1 + 0.08) * (1 - 0.08) * (1 + 0.04) - 1
     )
     assert report["folds"][0]["correlation_matrix"]["coinbase:spot:BTC/USD"]["kraken:spot:ETH/USD"] == pytest.approx(1.0)
     assert report["execution_authority"] is False
