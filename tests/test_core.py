@@ -87,7 +87,8 @@ def test_end_to_end_research_pipeline_runs():
     metrics = run_experiment(sample_ohlcv(1200), horizon=6, timeframe="1h")
     assert metrics["rows"] > 200
     assert metrics["timeframe"] == "1h"
-    assert metrics["paper_simulation"]["bars_per_year"] == pytest.approx(365.25 * 24)
+    assert metrics["paper_simulation"]["bars_per_year"] == metrics["annualization"]["bars_per_year"]
+    assert metrics["annualization"]["method"] == "observed_usable_bars_per_calendar_year"
 
 
 def test_fetch_ohlcv_continues_after_exchange_returns_short_page(monkeypatch):
