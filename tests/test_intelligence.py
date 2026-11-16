@@ -143,3 +143,19 @@ def test_model_with_invalid_declared_role_fails_closed():
     candidate["input_schema"]["model_role"] = "macro_regime"
     with pytest.raises(ValueError, match="model_role"):
         select_specialist_models([candidate], "prediction")
+
+
+def test_department_specialist_capabilities_are_explicitly_routed():
+    expected = {
+        "market.regime": "market_intelligence",
+        "strategy.select": "strategy",
+        "risk.assess": "risk",
+        "macro.as_of": "macro",
+        "execution.cost_estimate": "execution",
+        "learning.economic_assess": "learning",
+    }
+    for capability, department in expected.items():
+        assert department_for_capability(capability) == department
+        routed = route_department_task(capability, {})
+        assert routed["department"] == department
+        assert routed["execution_enabled"] is False
