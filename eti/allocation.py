@@ -175,7 +175,9 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
         single_room = max(0.0, equity * max_single - positions.get(row["symbol"], 0.0))
         group_room = max(0.0, equity * max_group - group_exposure.get(row["group"], 0.0)
                          - planned_by_group.get(row["group"], 0.0))
-        notional = max(0.0, min(target, risk_cap, single_room, group_room))
+        raw_notional = max(0.0, min(target, risk_cap, single_room, group_room))
+        # Round down, never to nearest: the serialized plan must not exceed a cap.
+        notional = math.floor(raw_notional * 100_000_000) / 100_000_000
         if notional <= 0:
             rejected.append({"symbol": row["symbol"], "reason": "no_remaining_risk_or_exposure_capacity"})
             continue
@@ -185,9 +187,9 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
             "symbol": row["symbol"], "strategy": row["strategy"],
             "correlation_group": row["group"],
             "risk_adjusted_score": round(row["score"], 8),
-            "proposed_notional": round(notional, 8),
-            "equity_fraction": round(notional / equity, 8),
-            "risk_budget_fraction": round(notional * row["stop_distance"] / equity, 8),
+            "proposed_notional": notional,
+            "equity_fraction": notional / equity,
+            "risk_budget_fraction": notional * row["stop_distance"] / equity,
             "evidence": {
                 "outer_test_folds": row["fold_count"],
                 "mean_net_return": row["base_return"],
