@@ -673,8 +673,11 @@ not infer failure, inactivity, delisting, or training eligibility from gaps.
 
 `evaluate_forward_label_coverage` reports candidate baselines, baselines
 not yet mature at the observation cutoff, mature baselines with and without a
-qualifying future sample, emitted label records, and labels whose target price
-is unavailable. Rates are calculated only among mature baselines. Repeated or
+qualifying future sample, emitted label records, stale persisted-label conflicts,
+and identity-matched label candidates whose referenced target price is missing.
+A missing target price is counted as a specific diagnostic and the associated
+persisted outcome remains stale rather than being counted as a matched label.
+Rates are calculated only among mature baselines. Repeated or
 missing snapshot IDs are excluded because their persisted references are not
 unambiguous. A mature baseline without a target is an unresolved observation
 gap in the exported evidence; it does not establish provider failure, token
