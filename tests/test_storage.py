@@ -507,3 +507,14 @@ def test_model_registry_keeps_legacy_registration_compatible(tmp_path):
         {"passed": True}, "calibrated", "trainer",
     )
     assert "department" not in model["input_schema"]
+
+
+def test_model_registry_requires_role_for_department_assignment(tmp_path):
+    store = MemoryStore(tmp_path / "missing-role.sqlite3")
+    with pytest.raises(ValueError, match="model_role is required"):
+        store.register_model_version(
+            "eti-specialist", "1.0", "artifact://legacy/" + "a" * 64, "a" * 64,
+            {"features": ["close"]}, ["crypto_spot"], "dataset:1",
+            {"passed": True}, "calibrated", "trainer",
+            department="prediction",
+        )
