@@ -23,7 +23,7 @@ DEPARTMENTS: dict[str, dict[str, Any]] = {
         "name": "Market Intelligence",
         "mode": "shared_features_plus_specialists",
         "purpose": "Describe regimes, volatility, trends, correlations and derivatives context.",
-        "capabilities": ("market.snapshot", "derivatives.context"),
+        "capabilities": ("market.snapshot", "derivatives.context", "market.regime"),
         "model_required": True,
         "model_roles": ("regime_classifier", "volatility_estimator", "cross_asset_context"),
     },
@@ -39,7 +39,7 @@ DEPARTMENTS: dict[str, dict[str, Any]] = {
         "name": "Strategy Intelligence",
         "mode": "rules_plus_specialist_models",
         "purpose": "Generate, compare and select strategies using locked, cost-adjusted evidence.",
-        "capabilities": ("strategy.walk_forward", "paper.tick"),
+        "capabilities": ("strategy.walk_forward", "strategy.select", "paper.tick"),
         "model_required": True,
         "model_roles": ("strategy_selector", "portfolio_optimizer"),
     },
@@ -47,7 +47,7 @@ DEPARTMENTS: dict[str, dict[str, Any]] = {
         "name": "Risk Intelligence",
         "mode": "deterministic_controls_plus_analytics",
         "purpose": "Enforce position, exposure, leverage, drawdown and loss limits independently.",
-        "capabilities": (),
+        "capabilities": ("risk.assess",),
         "model_required": False,
         "model_roles": ("risk_forecast_optional",),
     },
@@ -55,7 +55,7 @@ DEPARTMENTS: dict[str, dict[str, Any]] = {
         "name": "Macro Intelligence",
         "mode": "point_in_time_data_plus_specialists",
         "purpose": "Interpret releases, revisions, policy events and cross-market macro context.",
-        "capabilities": (),
+        "capabilities": ("macro.as_of",),
         "model_required": True,
         "model_roles": ("macro_regime", "event_impact"),
     },
@@ -63,7 +63,7 @@ DEPARTMENTS: dict[str, dict[str, Any]] = {
         "name": "Execution Intelligence",
         "mode": "cost_models_plus_deterministic_controls",
         "purpose": "Estimate fees, spread, slippage, impact and order quality for eligible venues.",
-        "capabilities": ("live.tick",),
+        "capabilities": ("execution.cost_estimate", "live.tick"),
         "model_required": False,
         "model_roles": ("fill_probability_optional", "slippage_estimator"),
     },
@@ -71,7 +71,7 @@ DEPARTMENTS: dict[str, dict[str, Any]] = {
         "name": "Learning and Evaluation Intelligence",
         "mode": "evidence_and_lifecycle_services",
         "purpose": "Monitor drift, evaluate outcomes and govern champion/challenger candidates.",
-        "capabilities": (),
+        "capabilities": ("learning.economic_assess",),
         "model_required": False,
         "model_roles": ("drift_detector_optional",),
     },
@@ -116,6 +116,28 @@ def _declared_department(model: dict[str, Any]) -> str | None:
     return department
 
 
+def _declared_model_role(model: dict[str, Any], department: str) -> str | None:
+    """Read and validate explicit role metadata across registry evidence."""
+    schema = model.get("input_schema")
+    report = model.get("evaluation_report")
+    values = []
+    if isinstance(schema, dict) and "model_role" in schema:
+        values.append(schema["model_role"])
+    if isinstance(report, dict) and "model_role" in report:
+        values.append(report["model_role"])
+    if any(not isinstance(value, str) or not value for value in values):
+        raise ValueError("model role declarations must be non-empty strings")
+    declared = set(values)
+    if len(declared) > 1:
+        raise ValueError("model has conflicting model_role declarations")
+    if not declared:
+        return None
+    role = next(iter(declared))
+    if role not in DEPARTMENTS[department]["model_roles"]:
+        raise ValueError("model has a model_role not registered for its department")
+    return role
+
+
 def select_specialist_models(
     model_versions: list[dict[str, Any]],
     department: str,
@@ -136,7 +158,9 @@ def select_specialist_models(
     if not isinstance(model_versions, list):
         raise ValueError("model_versions must be a list")
     allowed_roles = DEPARTMENTS[department]["model_roles"]
-    if model_role is not None and model_role not in allowed_roles:
+    if model_role is None:
+        raise ValueError("model_role is required for specialist selection")
+    if model_role not in allowed_roles:
         raise ValueError("model_role is not registered for the selected department")
     expected_class = (
         f"{asset_class}_{market_type}"
@@ -157,9 +181,7 @@ def select_specialist_models(
             continue
         schema = model.get("input_schema")
         schema = schema if isinstance(schema, dict) else {}
-        declared_role = schema.get("model_role")
-        if declared_role is not None and declared_role not in allowed_roles:
-            raise ValueError("model has a model_role not registered for its department")
+        declared_role = _declared_model_role(model, department)
         if model_role is not None and declared_role != model_role:
             continue
         market_types = schema.get("market_types")
@@ -198,11 +220,14 @@ def build_intelligence_manifest(
         approved = sum(model.get("lifecycle") == "approved" for model in items)
         candidates = sum(model.get("lifecycle") == "candidate" for model in items)
         role_readiness = {}
+        unassigned_role_models = 0
+        for model in items:
+            if _declared_model_role(model, department) is None:
+                unassigned_role_models += 1
         for role in spec["model_roles"]:
             role_items = [
                 model for model in items
-                if isinstance(model.get("input_schema"), dict)
-                and model["input_schema"].get("model_role") == role
+                if _declared_model_role(model, department) == role
             ]
             role_approved = sum(model.get("lifecycle") == "approved" for model in role_items)
             role_candidates = sum(model.get("lifecycle") == "candidate" for model in role_items)
@@ -214,17 +239,20 @@ def build_intelligence_manifest(
                     "candidate_review" if role_candidates else "not_configured"
                 ),
             }
+        role_approved_total = sum(item["approved_models"] for item in role_readiness.values())
+        role_candidate_total = sum(item["candidate_models"] for item in role_readiness.values())
         departments[department] = {
             **spec,
             "capabilities": list(spec["capabilities"]),
             "model_roles": list(spec["model_roles"]),
             "role_readiness": role_readiness,
             "registered_models": len(items),
+            "unassigned_role_models": unassigned_role_models,
             "approved_models": approved,
             "candidate_models": candidates,
             "status": (
-                "ready" if approved else
-                "candidate_review" if candidates else
+                "ready" if role_approved_total else
+                "candidate_review" if role_candidate_total else
                 "not_configured" if spec["model_required"] else
                 "deterministic_foundation_available"
             ),

@@ -11,7 +11,16 @@ from eti.intelligence import (
 
 def model(*, department="prediction", lifecycle="approved", classes=None,
           market_types=None, timeframes=None, version="1.0.0"):
-    schema = {"department": department}
+    default_roles = {
+        "prediction": "direction_classifier",
+        "strategy": "strategy_selector",
+        "risk": "risk_forecast_optional",
+        "market_intelligence": "regime_classifier",
+        "macro": "macro_regime",
+        "execution": "slippage_estimator",
+        "learning": "drift_detector_optional",
+    }
+    schema = {"department": department, "model_role": default_roles.get(department)}
     if market_types is not None:
         schema["market_types"] = market_types
     if timeframes is not None:
@@ -71,28 +80,39 @@ def test_specialist_selection_requires_approved_explicitly_assigned_model():
             "input_schema": {"features": ["rsi"]},
         },
     ]
-    selected = select_specialist_models(versions, "prediction", asset_class="crypto", market_type="spot")
+    for item in versions[:2]:
+        item["input_schema"]["model_role"] = "direction_classifier"
+    versions[2]["input_schema"]["model_role"] = "risk_forecast_optional"
+    selected = select_specialist_models(
+        versions, "prediction", asset_class="crypto", market_type="spot",
+        model_role="direction_classifier"
+    )
     assert [(item["model_id"], item["version"]) for item in selected] == [("specialist", "1.0.0")]
 
 
 def test_specialist_selection_respects_market_type_and_timeframe():
     candidate = model(market_types=["spot"], timeframes=["1h"])
+    candidate["input_schema"]["model_role"] = "direction_classifier"
     assert select_specialist_models(
-        [candidate], "prediction", asset_class="crypto", market_type="swap", timeframe="1h"
+        [candidate], "prediction", asset_class="crypto", market_type="swap", timeframe="1h",
+        model_role="direction_classifier"
     ) == []
     assert select_specialist_models(
-        [candidate], "prediction", asset_class="crypto", market_type="spot", timeframe="4h"
+        [candidate], "prediction", asset_class="crypto", market_type="spot", timeframe="4h",
+        model_role="direction_classifier"
     ) == []
     assert len(select_specialist_models(
-        [candidate], "prediction", asset_class="crypto", market_type="spot", timeframe="1h"
+        [candidate], "prediction", asset_class="crypto", market_type="spot", timeframe="1h",
+        model_role="direction_classifier"
     )) == 1
 
 
 def test_conflicting_department_metadata_fails_closed():
     item = model()
+    item["input_schema"]["model_role"] = "direction_classifier"
     item["evaluation_report"]["department"] = "risk"
     with pytest.raises(ValueError, match="conflicting"):
-        select_specialist_models([item], "prediction")
+        select_specialist_models([item], "prediction", model_role="direction_classifier")
 
 
 def test_manifest_reports_unconfigured_departments_and_legacy_models():
@@ -143,3 +163,34 @@ def test_model_with_invalid_declared_role_fails_closed():
     candidate["input_schema"]["model_role"] = "macro_regime"
     with pytest.raises(ValueError, match="model_role"):
         select_specialist_models([candidate], "prediction")
+
+
+def test_department_specialist_capabilities_are_explicitly_routed():
+    expected = {
+        "market.regime": "market_intelligence",
+        "strategy.select": "strategy",
+        "risk.assess": "risk",
+        "macro.as_of": "macro",
+        "execution.cost_estimate": "execution",
+        "learning.economic_assess": "learning",
+    }
+    for capability, department in expected.items():
+        assert department_for_capability(capability) == department
+        routed = route_department_task(capability, {})
+        assert routed["department"] == department
+        assert routed["execution_enabled"] is False
+
+
+def test_specialist_selection_requires_an_explicit_role():
+    candidate = model()
+    candidate["input_schema"]["model_role"] = "direction_classifier"
+    with pytest.raises(ValueError, match="model_role is required"):
+        select_specialist_models([candidate], "prediction", asset_class="crypto", market_type="spot")
+
+
+def test_roleless_approved_model_does_not_mark_department_ready():
+    item = model()
+    item["input_schema"].pop("model_role")
+    manifest = build_intelligence_manifest([item])
+    assert manifest["departments"]["prediction"]["status"] == "not_configured"
+    assert manifest["departments"]["prediction"]["unassigned_role_models"] == 1

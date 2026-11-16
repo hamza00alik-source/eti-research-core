@@ -86,7 +86,7 @@ def test_exported_model_is_explicitly_marked_uncalibrated(monkeypatch):
         },
     )
     exported = export_deployable_model(
-        pd.DataFrame(), "eti-test", "0.1.0", "dataset:test"
+        pd.DataFrame(), "eti-test", "0.1.0", "dataset:test", timeframe="1h"
     )
     assert exported["calibration_status"] == "uncalibrated"
     assert exported["supported_classes"] == ["crypto_spot"]
@@ -95,9 +95,21 @@ def test_exported_model_is_explicitly_marked_uncalibrated(monkeypatch):
     assert exported["department"] == "prediction"
     assert exported["model_role"] == "direction_classifier"
     assert exported["input_schema"]["department"] == "prediction"
+    assert exported["input_schema"]["market_types"] == ["spot"]
+    assert exported["input_schema"]["timeframes"] == ["1h"]
     assert exported["input_schema"]["experiment_id"].startswith("eti-exp-")
     assert len(exported["input_schema"]["lineage"]["code_sha256"]) == 64
     assert len(exported["input_schema"]["lineage"]["config_sha256"]) == 64
+    from eti.intelligence import select_specialist_models
+    approved = {**exported, "lifecycle": "approved"}
+    assert len(select_specialist_models(
+        [approved], "prediction", asset_class="crypto", market_type="spot",
+        timeframe="1h", model_role="direction_classifier"
+    )) == 1
+    assert select_specialist_models(
+        [approved], "prediction", asset_class="crypto", market_type="spot",
+        timeframe="4h", model_role="direction_classifier"
+    ) == []
 
 def test_training_cli_does_not_export_models_by_default(tmp_path, monkeypatch):
     import json
@@ -164,10 +176,10 @@ def test_training_cli_exports_only_when_explicit_flag_is_set(tmp_path, monkeypat
     )
 
     def fake_export(frame, model_id, version, training_data_ref, horizon=6, *,
-                    holdout_reserved_from_prior_evaluation=False):
+                    timeframe=None, holdout_reserved_from_prior_evaluation=False):
         calls.update(
             model_id=model_id, version=version, training_data_ref=training_data_ref,
-            horizon=horizon,
+            horizon=horizon, timeframe=timeframe,
             holdout_reserved_from_prior_evaluation=holdout_reserved_from_prior_evaluation,
         )
         return {"artifact_uri": "artifact://sha256/" + "d" * 64,
@@ -182,6 +194,7 @@ def test_training_cli_exports_only_when_explicit_flag_is_set(tmp_path, monkeypat
         "version": "0.2.0",
         "training_data_ref": "ccxt:coinbaseexchange:BTC/USD:1h:100",
         "horizon": 6,
+        "timeframe": "1h",
         "holdout_reserved_from_prior_evaluation": True,
     }
     assert report["exported_model"]["calibration_status"] == "uncalibrated"

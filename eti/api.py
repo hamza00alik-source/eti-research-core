@@ -600,6 +600,9 @@ def create_agent_message(workspace_id: str, payload: AgentMessagePayload,
 
 class ModelInferencePayload(BaseModel):
     asset_class: str = Field(min_length=1, max_length=40)
+    model_role: str = Field(min_length=1, max_length=80)
+    market_type: str = Field(min_length=1, max_length=20)
+    timeframe: str = Field(min_length=1, max_length=20)
     features: dict[str, float] = Field(min_length=1, max_length=128)
 
 
@@ -739,7 +742,20 @@ def infer_model(model_id: str, version: str, payload: ModelInferencePayload,
         raise HTTPException(status_code=404, detail="approved model version not found")
     if payload.asset_class not in metadata["supported_classes"]:
         raise HTTPException(status_code=422, detail="model does not support this asset class")
-    expected = metadata["input_schema"].get("features")
+    schema = metadata["input_schema"]
+    if schema.get("department") != "prediction":
+        raise HTTPException(status_code=422, detail="inference requires a prediction-department model")
+    if schema.get("model_role") != payload.model_role:
+        raise HTTPException(status_code=422, detail="model role does not match the registered specialist")
+    if payload.model_role != "direction_classifier":
+        raise HTTPException(status_code=422, detail="this inference endpoint currently supports direction_classifier only")
+    market_types = schema.get("market_types")
+    timeframes = schema.get("timeframes")
+    if not isinstance(market_types, list) or payload.market_type not in market_types:
+        raise HTTPException(status_code=422, detail="model does not support this market type")
+    if not isinstance(timeframes, list) or payload.timeframe not in timeframes:
+        raise HTTPException(status_code=422, detail="model does not support this timeframe")
+    expected = schema.get("features")
     if (not isinstance(expected, list) or not expected
             or any(not isinstance(name, str) or not name for name in expected)
             or len(expected) != len(set(expected))):

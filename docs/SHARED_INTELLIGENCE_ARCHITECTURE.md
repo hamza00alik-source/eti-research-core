@@ -82,3 +82,40 @@ models with conflicting or invalid role metadata fail closed. No cross-role
 fallback is permitted. Queen's readiness manifest reports readiness for every
 declared role separately, so a ready prediction department does not imply that
 its return-distribution or volatility specialists are ready.
+
+
+## Active deterministic specialist services
+
+The Queen's allowlisted worker registry exposes bounded specialist handlers:
+
+| Department | Capability | Service |
+|---|---|---|
+| Market intelligence | `market.regime` | Causal volatility/trend regime diagnostics |
+| Strategy | `strategy.select` | Fixed strategy candidate selection on a caller-supplied validation window |
+| Risk | `risk.assess` | Independent deterministic risk gate |
+| Macro | `macro.as_of` | Point-in-time macro vintage selection with release/license checks |
+| Execution | `execution.cost_estimate` | Evidence-validated fee/spread/slippage/impact/funding estimate; no orders |
+| Learning | `learning.economic_assess` | Conservative research economics disposition |
+
+These services reuse existing ETI components. They are intentionally not all ML
+models: market-data quality, risk controls and execution cost validation remain
+deterministic and auditable. Prediction is a separate calibrated model
+department. Macro services process only supplied observations until a licensed,
+release-time-aware external provider is integrated.
+
+All handlers are allowlisted, accept data-only payloads, and return
+`execution_enabled=false`. The cost service estimates costs only; it never
+places orders. Strategy selection uses validation data only; callers must
+preserve a separate untouched test window.
+
+
+## Approved inference boundaries
+
+The authenticated inference endpoint now requires an explicit model role, market
+type and timeframe. It rejects a model unless its approved registry metadata
+declares `department=prediction`, the exact requested role, and exact supported
+market-type/timeframe values. The current probability response contract supports
+only `direction_classifier`; other specialist roles cannot be routed through
+that three-class output by assumption. Legacy approved records without these
+metadata fields fail closed until reviewed and re-registered with explicit
+scope.
