@@ -10,7 +10,7 @@ def digest(ch):
 def report(model, returns, *, evaluation=None, cost=None, ece=0.03, drawdown=0.05):
     return {
         "model_sha256": digest(model),
-        "training_data_sha256": digest("a" if model == "b" else "c"),
+        "training_data_sha256": digest("c"),
         "evaluation_data_sha256": digest(evaluation or "d"),
         "cost_model_sha256": digest(cost or "e"),
         "cost_adjusted": True,
