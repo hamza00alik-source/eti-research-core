@@ -37,9 +37,13 @@ def probe_provider(
     if not timestamps.is_unique or not timestamps.is_monotonic_increasing:
         raise ValueError("provider timestamps are not unique and chronological")
     current = int(now_ms if now_ms is not None else pd.Timestamp.now(tz="UTC").timestamp() * 1000)
-    if int(timestamps[-1].timestamp() * 1000) > current:
+    last_open_ms = int(timestamps[-1].timestamp() * 1000)
+    if last_open_ms > current:
         raise ValueError("provider returned a future-dated candle")
-    age_seconds = max(0.0, (current - (int(timestamps[-1].timestamp() * 1000) + TIMEFRAME_MS[timeframe])) / 1000.0)
+    last_close_ms = last_open_ms + TIMEFRAME_MS[timeframe]
+    if last_close_ms > current:
+        raise ValueError("provider latest candle is incomplete")
+    age_seconds = (current - last_close_ms) / 1000.0
     if age_seconds > max_age_bars * TIMEFRAME_MS[timeframe] / 1000:
         raise ValueError(f"provider latest completed candle is stale ({age_seconds:.0f}s)")
     return {
