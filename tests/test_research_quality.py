@@ -40,6 +40,7 @@ def market_with_calibration_evidence():
         report["folds"].append({
             "probability_calibration": {
                 "status": "calibrated_and_outer_test_confirmed",
+                "calibration_fit": {"status": "fit"},
                 "raw": {"negative_log_likelihood": 1.2, "brier_score": 0.6},
                 "temperature_scaled": {"negative_log_likelihood": 1.1, "brier_score": 0.55},
             }
