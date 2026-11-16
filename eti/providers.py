@@ -1,6 +1,7 @@
 """Extensible market-data providers: crypto spot/derivatives and labelled local OHLCV files."""
 from __future__ import annotations
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 import pandas as pd
@@ -97,6 +98,116 @@ class CcxtPublicProvider:
         else:
             selected.sort(key=lambda item: item["symbol"])
         return selected[:limit]
+
+    def fetch_funding_rate_history(
+        self, symbol: str, since_ms: int, until_ms: int, *,
+        limit: int = 1000, page_size: int = 100,
+    ) -> dict:
+        """Fetch paginated historical funding events with explicit unverified coverage.
+
+        This retrieves raw venue history only. It does not claim the API response
+        is complete, licensed for every downstream use, or suitable as a
+        transaction-cost evidence schedule without independent source review.
+        """
+        if self.market_type not in {"swap", "future"}:
+            raise ValueError("funding history is available only for swap and future markets")
+        for name, value in (("since_ms", since_ms), ("until_ms", until_ms),
+                            ("limit", limit), ("page_size", page_size)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} must be an integer")
+        if since_ms < 0 or until_ms <= since_ms:
+            raise ValueError("funding history interval must be positive and chronological")
+        if not 1 <= limit <= 5000 or not 1 <= page_size <= 500:
+            raise ValueError("limit must be 1..5000 and page_size must be 1..500")
+
+        import ccxt
+        exchange = getattr(ccxt, self.venue)({
+            "enableRateLimit": True, "options": {"defaultType": self.market_type},
+        })
+        try:
+            markets = exchange.load_markets()
+            market = markets.get(symbol)
+            if not market or not market.get(self.market_type, False):
+                raise ValueError(f"Unknown {self.market_type} market for {self.venue}: {symbol}")
+            if not exchange.has.get("fetchFundingRateHistory"):
+                raise NotImplementedError(f"{self.venue} does not expose fetchFundingRateHistory")
+            observed_ms = int(exchange.milliseconds())
+            if until_ms > observed_ms:
+                raise ValueError("funding history end cannot be in the future")
+
+            by_timestamp: dict[int, float] = {}
+            cursor = since_ms
+            page_count = 0
+            while cursor <= until_ms and len(by_timestamp) < limit:
+                page_count += 1
+                if page_count > 100:
+                    raise RuntimeError("funding history pagination exceeded 100 pages")
+                requested = min(page_size, limit - len(by_timestamp))
+                rows = exchange.fetch_funding_rate_history(
+                    symbol, since=cursor, limit=requested,
+                )
+                if not rows:
+                    break
+                page_max = cursor - 1
+                for index, row in enumerate(rows):
+                    if not isinstance(row, dict):
+                        raise ValueError(f"funding history row {index} is not an object")
+                    timestamp = row.get("timestamp")
+                    rate = row.get("fundingRate")
+                    if (isinstance(timestamp, bool) or not isinstance(timestamp, (int, float))
+                            or not math.isfinite(timestamp) or int(timestamp) != timestamp):
+                        raise ValueError(f"funding history row {index} has an invalid timestamp")
+                    if isinstance(rate, bool) or not isinstance(rate, (int, float)) or not math.isfinite(rate):
+                        raise ValueError(f"funding history row {index} has an invalid funding rate")
+                    stamp = int(timestamp)
+                    page_max = max(page_max, stamp)
+                    if stamp < since_ms:
+                        raise ValueError("funding history returned an event before requested coverage")
+                    if stamp > until_ms:
+                        continue
+                    value = float(rate)
+                    previous = by_timestamp.get(stamp)
+                    if previous is not None and not math.isclose(previous, value, rel_tol=0, abs_tol=1e-12):
+                        raise ValueError("funding history returned conflicting rates for one settlement timestamp")
+                    by_timestamp[stamp] = value
+                next_cursor = page_max + 1
+                if next_cursor <= cursor:
+                    raise RuntimeError("funding history pagination did not advance")
+                cursor = next_cursor
+                if page_max >= until_ms:
+                    break
+
+            events = [{
+                "timestamp": pd.to_datetime(stamp, unit="ms", utc=True).isoformat(),
+                "rate": rate, "rate_bps": rate * 10_000.0,
+            } for stamp, rate in sorted(by_timestamp.items())]
+            public_api = (exchange.urls.get("api", {}) if isinstance(exchange.urls, dict) else {})
+            endpoint_uri = public_api.get("public") if isinstance(public_api, dict) else public_api
+            return {
+                "venue": self.venue, "symbol": symbol, "market_type": self.market_type,
+                "requested_since": pd.to_datetime(since_ms, unit="ms", utc=True).isoformat(),
+                "requested_until": pd.to_datetime(until_ms, unit="ms", utc=True).isoformat(),
+                "observed_at": pd.to_datetime(observed_ms, unit="ms", utc=True).isoformat(),
+                "events": events, "event_count": len(events), "page_count": page_count,
+                "endpoint_uri": endpoint_uri if isinstance(endpoint_uri, str) and endpoint_uri.startswith("https://") else None,
+                "history_completeness": "unverified",
+                "evidence_eligible": False,
+                "warning": (
+                    "Raw CCXT venue funding history only. Pagination and returned timestamps are recorded, "
+                    "but the venue response does not independently prove that every settlement event in "
+                    "the requested interval was returned. Do not use as validated funding-cost evidence."
+                ),
+                "contract_metadata": {
+                    "base": market.get("base"), "quote": market.get("quote"),
+                    "settle": market.get("settle"), "linear": market.get("linear"),
+                    "inverse": market.get("inverse"), "contract_size": market.get("contractSize"),
+                    "active": market.get("active"),
+                },
+            }
+        finally:
+            close = getattr(exchange, "close", None)
+            if callable(close):
+                close()
 
     def fetch_derivatives_context(
         self, symbol: str, timeframe: str = "1h", limit: int = 100
