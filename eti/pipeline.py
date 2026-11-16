@@ -12,7 +12,7 @@ from sklearn.metrics import accuracy_score, balanced_accuracy_score
 
 from .data import drop_incomplete_candles, fetch_ohlcv, fetch_ohlcv_auto, validate_ohlcv
 from .features import BASE_FEATURE_COLUMNS, FEATURE_COLUMNS, build_features, feature_columns_for_frame, make_labels
-from .model import BaselineModel
+from .model import BaselineModel, CLASSES, _reliability_diagnostics
 from .artifacts import ModelArtifactStore
 from .simulator import simulate_long_flat
 from .performance import evaluate_predictions
@@ -73,39 +73,95 @@ def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h")
 
 
 
-def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[BaselineModel, dict]:
-    """Fit on earlier rows and calibrate only on a later, held-out time segment.
+def _probability_validation(probabilities: np.ndarray, labels: np.ndarray) -> dict:
+    """Evaluate probabilities on a chronological sample not used to fit temperature."""
+    probabilities = np.asarray(probabilities, dtype=float)
+    labels = np.asarray(labels, dtype=int)
+    if (
+        probabilities.shape != (len(labels), len(CLASSES))
+        or len(labels) == 0 or not np.isfinite(probabilities).all()
+        or (probabilities < 0).any() or (probabilities > 1).any()
+        or (probabilities.sum(axis=1) <= 0).any()
+        or not np.isin(labels, CLASSES).all()
+    ):
+        raise ValueError("Independent probability-validation inputs are invalid")
+    probabilities = probabilities / probabilities.sum(axis=1, keepdims=True)
+    one_hot = np.eye(len(CLASSES), dtype=float)[labels]
+    chosen = probabilities[np.arange(len(labels)), labels]
+    return {
+        "sample_count": int(len(labels)),
+        "class_counts": {str(int(cls)): int(np.sum(labels == cls)) for cls in CLASSES},
+        "negative_log_likelihood": float(-np.log(np.clip(chosen, 1e-12, 1.0)).mean()),
+        "brier_score": float(np.mean(np.sum((probabilities - one_hot) ** 2, axis=1))),
+        "reliability": _reliability_diagnostics(probabilities, labels),
+    }
 
-    The final export is opt-in. The calibration window is never used to fit the
-    classifier, preventing in-sample confidence estimates from being treated as
-    calibration evidence.
+
+def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[BaselineModel, dict]:
+    """Fit, calibrate and independently validate probabilities on three chronological blocks.
+
+    The classifier is fitted on the first 60%, temperature is fitted on the next
+    20%, and the final 20% is reserved for independent probability validation.
+    Label-horizon purge gaps separate all three blocks. The final block never
+    influences model fitting or temperature selection.
     """
     frame = validate_ohlcv(frame)
     features = build_features(frame)
     feature_columns = feature_columns_for_frame(frame)
     labels = make_labels(frame, horizon=horizon)
     dataset = features.join(labels.rename("label")).dropna(subset=feature_columns + ["label"])
-    if len(dataset) < 250:
+    if len(dataset) < 350:
         raise ValueError(
-            f"Need at least 250 usable rows for a 200-row fit and 30-row calibration; got {len(dataset)}"
+            f"Need at least 350 usable rows for a purged 60/20/20 fit, calibration "
+            f"and independent-validation split; got {len(dataset)}"
         )
-    split = int(len(dataset) * 0.8)
-    training_end = split - int(horizon)
+    calibration_start = int(len(dataset) * 0.60)
+    validation_start = int(len(dataset) * 0.80)
+    training_end = calibration_start - int(horizon)
+    calibration_end = validation_start - int(horizon)
     training = dataset.iloc[:training_end]
-    calibration = dataset.iloc[split:]
-    purged_rows = split - training_end
-    if len(training) < 200 or len(calibration) < 30:
+    calibration = dataset.iloc[calibration_start:calibration_end]
+    validation = dataset.iloc[validation_start:]
+    purged_rows = (calibration_start - training_end) + (validation_start - calibration_end)
+    if len(training) < 200 or len(calibration) < 30 or len(validation) < 30:
         raise ValueError(
-            "Export split must contain at least 200 training rows and 30 calibration rows "
-            "after purging the label horizon"
+            "Export split requires at least 200 training, 30 calibration and 30 "
+            "independent-validation rows after label-horizon purging"
         )
 
     x_train = training[feature_columns]
     y_train = training["label"].astype(int)
+    x_calibration = calibration[feature_columns]
+    y_calibration = calibration["label"].astype(int)
+    x_validation = validation[feature_columns]
+    y_validation = validation["label"].astype(int)
     model = BaselineModel().fit(x_train, y_train)
-    calibration_report = model.fit_temperature_calibration(
-        calibration[feature_columns], calibration["label"].astype(int)
+    calibration_report = model.fit_temperature_calibration(x_calibration, y_calibration)
+
+    raw_validation = model.predict_proba_raw(x_validation)
+    calibrated_validation = model.predict_proba(x_validation)
+    raw_metrics = _probability_validation(raw_validation, y_validation.to_numpy())
+    calibrated_metrics = _probability_validation(calibrated_validation, y_validation.to_numpy())
+    independent_passed = bool(
+        model.calibration_status == "calibrated"
+        and calibrated_metrics["negative_log_likelihood"]
+            <= raw_metrics["negative_log_likelihood"] + 1e-9
     )
+    independent_report = {
+        "passed": independent_passed,
+        "method": "untouched_chronological_holdout",
+        "raw": raw_metrics,
+        "temperature_scaled": calibrated_metrics,
+        "calibration_applied_to_export": independent_passed,
+    }
+    if model.calibration_status == "calibrated" and not independent_passed:
+        model.calibration_status = "uncalibrated"
+        calibration_report["passed"] = False
+        calibration_report["temperature"] = 1.0
+        calibration_report["reason"] = "temperature_scaling_failed_independent_holdout_nll"
+    calibration_report["independent_validation"] = independent_report
+    model.calibration_report = calibration_report
+
     dataset_sha256 = hashlib.sha256(
         pd.util.hash_pandas_object(dataset, index=True).values.tobytes()
     ).hexdigest()
@@ -115,16 +171,19 @@ def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[Baselin
         "feature_version": "eti.features.v2" if feature_columns != BASE_FEATURE_COLUMNS else "eti.features.v1",
         "training_rows": int(len(training)),
         "calibration_rows": int(len(calibration)),
+        "independent_validation_rows": int(len(validation)),
         "purged_rows": int(purged_rows),
         "training_end": training.index[-1].isoformat() if hasattr(training.index[-1], "isoformat") else str(training.index[-1]),
         "calibration_start": calibration.index[0].isoformat() if hasattr(calibration.index[0], "isoformat") else str(calibration.index[0]),
         "calibration_end": calibration.index[-1].isoformat() if hasattr(calibration.index[-1], "isoformat") else str(calibration.index[-1]),
+        "independent_validation_start": validation.index[0].isoformat() if hasattr(validation.index[0], "isoformat") else str(validation.index[0]),
+        "independent_validation_end": validation.index[-1].isoformat() if hasattr(validation.index[-1], "isoformat") else str(validation.index[-1]),
         "label_horizon_bars": int(horizon),
         "calibration_status": model.calibration_status,
         "calibration_report": calibration_report,
+        "independent_probability_validation": independent_report,
     }
     return model, schema
-
 
 def export_deployable_model(
     frame: pd.DataFrame, model_id: str, version: str, training_data_ref: str,
