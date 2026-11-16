@@ -279,7 +279,11 @@ def test_forward_label_coverage_separates_immature_and_mature_without_target():
         _snapshot("base-4", "2026-01-01T00:28:00Z", 1.0),
     ]
     now = datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc)
-    labels = [{"baseline_snapshot_id": "base-1", "target_snapshot_id": "target-1", "horizon_seconds": 300}]
+    labels = [{
+        "baseline_snapshot_id": "base-1", "target_snapshot_id": "target-1",
+        "horizon_seconds": 300, "mint": "A" * 40, "pool_address": "Pool111",
+        "sampled_price_return_pct": 10.0,
+    }]
     report = evaluate_forward_label_coverage(
         rows, labels, now=now, horizons_seconds=(300,)
     )
