@@ -408,7 +408,7 @@ def test_worker_executes_paper_allocator_with_bound_account_snapshot(tmp_path):
     snapshot = store.record_paper_portfolio_snapshot(
         "owner-1", workspace["id"], account["id"], now.isoformat(),
         10000, 6000,
-        [{"symbol": "BTC/USD", "notional": 4000, "correlation_group": "crypto_major"}],
+        [{"symbol": "BTC/USD", "notional": 1000, "correlation_group": "crypto_major"}],
     )
     store.create_agent_task(
         "owner-1", workspace["id"], "owner", "portfolio.allocate",
