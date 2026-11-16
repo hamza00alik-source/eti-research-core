@@ -806,3 +806,36 @@ def test_snapshot_validation_row_issue_limit_only_caps_detail_not_counts():
     complete = validate_snapshot_rows(rows, row_issue_limit=len(rows))
     assert len(complete["row_issues"]) == 501
     assert complete["row_issue_list_truncated"] is False
+
+
+
+def test_snapshot_validator_reports_non_object_rows_without_crashing():
+    rows = [
+        None,
+        ["not", "a", "snapshot"],
+        "malformed",
+        {
+            "id": "valid-audit", "capability": "solana.token.audit",
+            "mint": "MintA", "pool_address": "PoolA", "schema_version": 1,
+            "fetched_at": "2026-01-01T00:00:00Z", "payload": {"passed": True},
+        },
+    ]
+    report = validate_snapshot_rows(rows)
+    assert report["rows_checked"] == 4
+    assert report["issue_counts"]["malformed_snapshot_row"] == 3
+    assert report["rows_with_issues"] == 3
+    assert len(report["row_issues"]) == 3
+    assert all(row["issues"] == ["malformed_snapshot_row"] for row in report["row_issues"])
+
+
+def test_training_preparation_excludes_non_object_snapshot_rows():
+    from eti.solana_dataset import prepare_solana_training_rows
+
+    exported = {
+        "schema": "eti.solana.research_dataset.v1",
+        "snapshots": [None, ["malformed"]],
+        "labels": [],
+    }
+    result = prepare_solana_training_rows(exported)
+    assert result["eligible_row_count"] == 0
+    assert result["excluded_label_count"] == 0
