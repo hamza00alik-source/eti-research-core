@@ -38,11 +38,24 @@ def market_with_calibration_evidence():
     report["folds"] = []
     for index in range(count):
         report["folds"].append({
+            "test_actual": [0, 1, 2],
             "probability_calibration": {
                 "status": "calibrated_and_outer_test_confirmed",
-                "calibration_fit": {"status": "fit"},
-                "raw": {"negative_log_likelihood": 1.2, "brier_score": 0.6},
-                "temperature_scaled": {"negative_log_likelihood": 1.1, "brier_score": 0.55},
+                "outer_test_confirmation": "calibration_confirmed_on_outer_test",
+                "outer_test_class_coverage_passed": True,
+                "outer_test_nll_not_worse": True,
+                "outer_test_brier_not_worse": True,
+                "calibration_fit": {
+                    "status": "fit", "passed": True, "method": "temperature_scaling"
+                },
+                "raw": {
+                    "sample_count": 3, "class_counts": {"0": 1, "1": 1, "2": 1},
+                    "negative_log_likelihood": 1.2, "brier_score": 0.6
+                },
+                "temperature_scaled": {
+                    "sample_count": 3, "class_counts": {"0": 1, "1": 1, "2": 1},
+                    "negative_log_likelihood": 1.1, "brier_score": 0.55
+                },
             }
         })
     report["probability_calibration"] = {
@@ -161,3 +174,27 @@ def test_quality_report_rejects_fabricated_calibration_aggregate_counts():
 def test_legacy_quality_report_marks_probability_calibration_unavailable():
     metric = summarize_market_research("venue:spot:ABC/USD", market_result())
     assert metric["probability_calibration"]["status"] == "not_available"
+
+
+def test_calibration_confirmation_requires_a_real_passed_temperature_fit():
+    market = market_with_calibration_evidence()
+    fold = market["report"]["folds"][0]["probability_calibration"]
+    fold["calibration_fit"]["passed"] = False
+    with pytest.raises(ValueError, match="without a passed temperature fit"):
+        summarize_market_research("venue:spot:ABC/USD", market)
+
+
+def test_calibration_metrics_must_match_outer_test_sample_count():
+    market = market_with_calibration_evidence()
+    fold = market["report"]["folds"][0]
+    fold["probability_calibration"]["temperature_scaled"]["sample_count"] = 2
+    with pytest.raises(ValueError, match="sample/class counts are invalid"):
+        summarize_market_research("venue:spot:ABC/USD", market)
+
+
+def test_calibration_confirmation_flags_must_be_consistent():
+    market = market_with_calibration_evidence()
+    fold = market["report"]["folds"][0]["probability_calibration"]
+    fold["outer_test_brier_not_worse"] = False
+    with pytest.raises(ValueError, match="confirmation flags are inconsistent"):
+        summarize_market_research("venue:spot:ABC/USD", market)
