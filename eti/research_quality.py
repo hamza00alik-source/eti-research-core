@@ -43,16 +43,22 @@ def _probability_calibration_evidence(report: dict[str, Any], fold_count: int) -
                 "outer_test_assessed_folds": 0, "outer_test_confirmed_folds": 0}
     if not isinstance(aggregate, dict) or aggregate.get("method") != "fold_local_temperature_scaling":
         raise ValueError("unsupported probability-calibration evidence")
+    declared_folds = aggregate.get("fold_count")
+    if isinstance(declared_folds, bool) or not isinstance(declared_folds, int) or declared_folds != fold_count:
+        raise ValueError("aggregate probability-calibration fold_count does not match trading folds")
     folds = report.get("folds")
     if not isinstance(folds, list) or len(folds) != fold_count:
         raise ValueError("fold-level probability-calibration records must match trading folds")
 
     raw_nll, raw_brier, calibrated_nll, calibrated_brier = [], [], [], []
-    assessed = confirmed = 0
+    assessed = confirmed = attempted = 0
     for index, fold in enumerate(folds):
         item = fold.get("probability_calibration") if isinstance(fold, dict) else None
         if not isinstance(item, dict):
             raise ValueError(f"fold {index} is missing probability-calibration evidence")
+        fit = item.get("calibration_fit")
+        if isinstance(fit, dict) and fit.get("status") in ("fit", "not_calibrated"):
+            attempted += 1
         raw = item.get("raw")
         scaled = item.get("temperature_scaled")
         if raw is not None:
@@ -78,6 +84,10 @@ def _probability_calibration_evidence(report: dict[str, Any], fold_count: int) -
     def mean(values: list[float]) -> float | None:
         return float(sum(values) / len(values)) if values else None
 
+    supplied_attempted = aggregate.get("calibration_attempted_folds")
+    if (isinstance(supplied_attempted, bool) or not isinstance(supplied_attempted, int)
+            or supplied_attempted != attempted):
+        raise ValueError("aggregate calibration_attempted_folds does not match fold evidence")
     expected = {
         "outer_test_assessed_folds": assessed,
         "outer_test_confirmed_folds": confirmed,
