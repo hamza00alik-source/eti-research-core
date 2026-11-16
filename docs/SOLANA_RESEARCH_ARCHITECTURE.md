@@ -717,6 +717,8 @@ values, zero price or liquidity, invalid timestamps, duplicate entity
 timestamps, non-increasing entity time, and duplicate snapshot IDs. The report
 uses the full workspace market-scan snapshot set rather than the bounded
 dataset export. These issue counts describe evidence quality; they do not
-repair records, infer provider failure, or authorize model training. Feature
-coverage counts remain a separate measure of finite values present and should
-be read alongside validation issues.
+repair records, infer provider failure, or authorize model training. In
+`feature_coverage`, `count`/`fraction` measure finite-value presence, while
+`valid_count`/`valid_fraction` additionally exclude negative values and zero
+price/liquidity. This prevents malformed-but-finite values from appearing as
+usable feature coverage.
