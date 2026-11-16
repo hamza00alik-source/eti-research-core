@@ -11,7 +11,16 @@ from eti.intelligence import (
 
 def model(*, department="prediction", lifecycle="approved", classes=None,
           market_types=None, timeframes=None, version="1.0.0"):
-    schema = {"department": department}
+    default_roles = {
+        "prediction": "direction_classifier",
+        "strategy": "strategy_selector",
+        "risk": "risk_forecast_optional",
+        "market_intelligence": "regime_classifier",
+        "macro": "macro_regime",
+        "execution": "slippage_estimator",
+        "learning": "drift_detector_optional",
+    }
+    schema = {"department": department, "model_role": default_roles.get(department)}
     if market_types is not None:
         schema["market_types"] = market_types
     if timeframes is not None:
@@ -177,3 +186,11 @@ def test_specialist_selection_requires_an_explicit_role():
     candidate["input_schema"]["model_role"] = "direction_classifier"
     with pytest.raises(ValueError, match="model_role is required"):
         select_specialist_models([candidate], "prediction", asset_class="crypto", market_type="spot")
+
+
+def test_roleless_approved_model_does_not_mark_department_ready():
+    item = model()
+    item["input_schema"].pop("model_role")
+    manifest = build_intelligence_manifest([item])
+    assert manifest["departments"]["prediction"]["status"] == "not_configured"
+    assert manifest["departments"]["prediction"]["unassigned_role_models"] == 1
