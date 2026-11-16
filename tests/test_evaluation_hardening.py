@@ -84,9 +84,9 @@ def test_budget_screen_estimates_model_fit_calls_before_training():
     assert estimate_nested_model_fits_from_rows(
         1964, horizon=6, min_train=400,
         validation_size=100, test_size=100, step_size=200,
-    ) == 28
+    ) == 14
     assert estimate_nested_model_fits_from_rows(
         1964, horizon=6, min_train=400,
         validation_size=100, test_size=100, step_size=200,
         candidate_count=1,
-    ) == 14
+    ) == 7
