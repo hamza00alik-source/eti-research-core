@@ -381,6 +381,36 @@ def test_forward_label_coverage_rejects_label_with_wrong_mint_or_pool_identity()
         assert coverage["stale_label_target_conflict_count"] == 1
 
 
+def test_forward_label_coverage_rejects_missing_or_tampered_sampled_return():
+    from eti.solana_labels import evaluate_forward_label_coverage
+
+    rows = [
+        _snapshot("base", "2026-01-01T00:00:00Z", 1.0),
+        _snapshot("target", "2026-01-01T00:06:00Z", 1.1),
+    ]
+    now = datetime(2026, 1, 1, 0, 20, tzinfo=timezone.utc)
+    for label in (
+        {"sampled_price_return_pct": None},
+        {"sampled_price_return_pct": 999.0},
+    ):
+        report = evaluate_forward_label_coverage(
+            rows,
+            [{
+                "baseline_snapshot_id": "base",
+                "target_snapshot_id": "target",
+                "horizon_seconds": 300,
+                "mint": "A" * 40,
+                "pool_address": "Pool111",
+                **label,
+            }],
+            now=now,
+            horizons_seconds=(300,),
+        )
+        coverage = report["by_horizon_seconds"]["300"]
+        assert coverage["label_record_count"] == 0
+        assert coverage["stale_label_target_conflict_count"] == 1
+
+
 def test_forward_label_coverage_flags_duplicate_persisted_label_keys():
     from eti.solana_labels import evaluate_forward_label_coverage
 
