@@ -33,6 +33,93 @@ def _scenario(scenarios: list[dict[str, Any]], multiplier: float) -> dict[str, A
     return matches[0]
 
 
+
+
+def _probability_calibration_evidence(report: dict[str, Any], fold_count: int) -> dict[str, Any]:
+    """Validate fold-level calibration diagnostics against the aggregate summary."""
+    aggregate = report.get("probability_calibration")
+    if aggregate is None:
+        return {"status": "not_available", "method": None,
+                "outer_test_assessed_folds": 0, "outer_test_confirmed_folds": 0}
+    if not isinstance(aggregate, dict) or aggregate.get("method") != "fold_local_temperature_scaling":
+        raise ValueError("unsupported probability-calibration evidence")
+    declared_folds = aggregate.get("fold_count")
+    if isinstance(declared_folds, bool) or not isinstance(declared_folds, int) or declared_folds != fold_count:
+        raise ValueError("aggregate probability-calibration fold_count does not match trading folds")
+    folds = report.get("folds")
+    if not isinstance(folds, list) or len(folds) != fold_count:
+        raise ValueError("fold-level probability-calibration records must match trading folds")
+
+    raw_nll, raw_brier, calibrated_nll, calibrated_brier = [], [], [], []
+    assessed = confirmed = attempted = 0
+    for index, fold in enumerate(folds):
+        item = fold.get("probability_calibration") if isinstance(fold, dict) else None
+        if not isinstance(item, dict):
+            raise ValueError(f"fold {index} is missing probability-calibration evidence")
+        fit = item.get("calibration_fit")
+        if isinstance(fit, dict) and fit.get("status") in ("fit", "not_calibrated"):
+            attempted += 1
+        raw = item.get("raw")
+        scaled = item.get("temperature_scaled")
+        if raw is not None:
+            if not isinstance(raw, dict):
+                raise ValueError(f"fold {index} raw probability metrics must be an object")
+            raw_nll.append(_finite_number(raw.get("negative_log_likelihood"), f"fold {index} raw NLL"))
+            raw_brier.append(_finite_number(raw.get("brier_score"), f"fold {index} raw Brier score"))
+        if scaled is not None:
+            if not isinstance(scaled, dict):
+                raise ValueError(f"fold {index} calibrated probability metrics must be an object")
+            calibrated_nll.append(_finite_number(
+                scaled.get("negative_log_likelihood"), f"fold {index} calibrated NLL"
+            ))
+            calibrated_brier.append(_finite_number(
+                scaled.get("brier_score"), f"fold {index} calibrated Brier score"
+            ))
+            assessed += 1
+        if item.get("status") == "calibrated_and_outer_test_confirmed":
+            if scaled is None:
+                raise ValueError(f"fold {index} claims calibration confirmation without test metrics")
+            confirmed += 1
+
+    def mean(values: list[float]) -> float | None:
+        return float(sum(values) / len(values)) if values else None
+
+    supplied_attempted = aggregate.get("calibration_attempted_folds")
+    if (isinstance(supplied_attempted, bool) or not isinstance(supplied_attempted, int)
+            or supplied_attempted != attempted):
+        raise ValueError("aggregate calibration_attempted_folds does not match fold evidence")
+    expected = {
+        "outer_test_assessed_folds": assessed,
+        "outer_test_confirmed_folds": confirmed,
+        "mean_raw_outer_test_nll": mean(raw_nll),
+        "mean_raw_outer_test_brier": mean(raw_brier),
+        "mean_calibrated_outer_test_nll": mean(calibrated_nll),
+        "mean_calibrated_outer_test_brier": mean(calibrated_brier),
+    }
+    for key, actual in expected.items():
+        supplied = aggregate.get(key)
+        if isinstance(actual, int):
+            if isinstance(supplied, bool) or not isinstance(supplied, int) or supplied != actual:
+                raise ValueError(f"aggregate probability-calibration field {key} does not match fold evidence")
+        elif actual is None:
+            if supplied is not None:
+                raise ValueError(f"aggregate probability-calibration field {key} must be null")
+        else:
+            value = _finite_number(supplied, f"aggregate {key}")
+            if not math.isclose(value, actual, rel_tol=1e-9, abs_tol=1e-12):
+                raise ValueError(f"aggregate probability-calibration field {key} does not match fold evidence")
+
+    if confirmed == fold_count and assessed == fold_count:
+        status = "confirmed_all_folds"
+    elif confirmed:
+        status = "partial_confirmation"
+    elif assessed:
+        status = "not_confirmed"
+    else:
+        status = "no_independent_assessment"
+    return {"status": status, "method": aggregate["method"], **expected}
+
+
 def summarize_market_research(market_key: str, market_result: dict[str, Any],
                               *, minimum_folds: int = 5) -> dict[str, Any]:
     """Summarize strictly validated outer-test folds for one evaluated instrument."""
@@ -109,8 +196,11 @@ def summarize_market_research(market_key: str, market_result: dict[str, Any],
     else:
         evidence_status = "human_review_required"
 
+    calibration_evidence = _probability_calibration_evidence(report, len(folds))
+
     return {
         "market_key": market_key,
+        "probability_calibration": calibration_evidence,
         "outer_test_fold_count": len(folds),
         "mean_net_return": sum(net_returns) / len(net_returns),
         "median_net_return": median(net_returns),
