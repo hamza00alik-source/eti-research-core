@@ -96,3 +96,17 @@ def test_queen_default_workers_are_scoped_to_owner_workspace(tmp_path):
     assert result["id"] == own["id"]
     assert result["status"] == "failed"
     assert store.get_agent_task("owner-b", other["id"], foreign["id"])["status"] == "queued"
+
+
+def test_queen_exposes_read_only_department_readiness_manifest(tmp_path):
+    from eti.storage import MemoryStore
+
+    store = MemoryStore(tmp_path / "queen-intelligence.sqlite3")
+    workspace = store.create_workspace("owner", "intelligence")
+    queen = QueenOrchestrator("owner", workspace["id"], store=store)
+    manifest = queen.intelligence_manifest()
+    assert manifest["schema"] == "eti.shared_intelligence_architecture.v1"
+    assert manifest["departments"]["prediction"]["status"] == "not_configured"
+    assert manifest["execution_authority"] is False
+    assert QueenOrchestrator._task_department("model.train_research") == "prediction"
+    assert QueenOrchestrator._task_department("unregistered.capability") == "unmapped"

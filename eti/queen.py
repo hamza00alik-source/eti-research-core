@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .colony_intelligence import build_colony_intelligence
+from .intelligence import build_intelligence_manifest, department_for_capability
 from .storage import MemoryStore
 from .worker import AgentWorker
 
@@ -111,6 +112,19 @@ class QueenOrchestrator:
     def _emit(event: str, **fields: object) -> None:
         print(json.dumps({"event": event, **fields}, separators=(",", ":")), flush=True)
 
+    @staticmethod
+    def _task_department(capability: object) -> str:
+        if not isinstance(capability, str):
+            return "unmapped"
+        try:
+            return department_for_capability(capability)
+        except LookupError:
+            return "unmapped"
+
+    def intelligence_manifest(self) -> dict:
+        """Return a read-only inventory of department and specialist readiness."""
+        return build_intelligence_manifest(self.store.list_model_versions())
+
     def _schedule_due_work(self) -> int:
         """Use existing owner-authorized schedules; never invent new permissions."""
         return (
@@ -138,6 +152,7 @@ class QueenOrchestrator:
                         slot_id=slot_id,
                         task_id=result.get("id"),
                         capability=result.get("target_capability"),
+                        department=self._task_department(result.get("target_capability")),
                         status=result.get("status"),
                     )
             except Exception as exc:
@@ -214,6 +229,15 @@ class QueenOrchestrator:
 
     def run_forever(self) -> None:
         """Schedule approved work and elastically scale the colony until stopped."""
+        manifest = self.intelligence_manifest()
+        self._emit(
+            "queen.intelligence.architecture",
+            schema=manifest["schema"],
+            departments={key: value["status"] for key, value in manifest["departments"].items()},
+            registered_model_versions=manifest["registered_model_versions"],
+            unassigned_legacy_model_versions=manifest["unassigned_legacy_model_versions"],
+            authority="observational_only",
+        )
         self._emit(
             "queen.started",
             owner_id=self.owner_id,
