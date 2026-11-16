@@ -321,7 +321,11 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
         registered = client.post("/v1/models", headers=trainer_headers, json={
             "model_id": "eti-inference-test", "version": "0.1.0",
             "artifact_uri": uri, "artifact_sha256": digest,
-            "input_schema": {"features": ["feature_a", "feature_b"]},
+            "input_schema": {
+                "features": ["feature_a", "feature_b"],
+                "department": "prediction", "model_role": "direction_classifier",
+                "market_types": ["spot"], "timeframes": ["1h"],
+            },
             "supported_classes": ["crypto_spot"],
             "training_data_ref": "synthetic-fixture",
             "evaluation_report": {"passed": True},
@@ -334,8 +338,11 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
         )
         assert approved.status_code == 200
 
-        body = {"asset_class": "crypto_spot",
-                "features": {"feature_a": 0.15, "feature_b": 0.7}}
+        body = {
+            "asset_class": "crypto_spot", "model_role": "direction_classifier",
+            "market_type": "spot", "timeframe": "1h",
+            "features": {"feature_a": 0.15, "feature_b": 0.7},
+        }
         response = client.post(
             "/v1/inference/eti-inference-test/0.1.0",
             headers=user_headers, json=body,
@@ -346,23 +353,39 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
             "short": 0.2, "flat": 0.5, "long": 0.3
         }
 
+        wrong_role = client.post(
+            "/v1/inference/eti-inference-test/0.1.0",
+            headers=user_headers, json={**body, "model_role": "volatility_forecast"},
+        )
+        assert wrong_role.status_code == 422
+        wrong_market_type = client.post(
+            "/v1/inference/eti-inference-test/0.1.0",
+            headers=user_headers, json={**body, "market_type": "swap"},
+        )
+        assert wrong_market_type.status_code == 422
+        wrong_timeframe = client.post(
+            "/v1/inference/eti-inference-test/0.1.0",
+            headers=user_headers, json={**body, "timeframe": "4h"},
+        )
+        assert wrong_timeframe.status_code == 422
+
         unsupported = client.post(
             "/v1/inference/eti-inference-test/0.1.0",
             headers=user_headers,
-            json={"asset_class": "forex", "features": body["features"]},
+            json={**body, "asset_class": "forex"},
         )
         assert unsupported.status_code == 422
         wrong_schema = client.post(
             "/v1/inference/eti-inference-test/0.1.0",
             headers=user_headers,
-            json={"asset_class": "crypto_spot", "features": {"feature_a": 1.0}},
+            json={**body, "features": {"feature_a": 1.0}},
         )
         assert wrong_schema.status_code == 422
 
         non_finite_input = client.post(
             "/v1/inference/eti-inference-test/0.1.0",
             headers={**user_headers, "Content-Type": "application/json"},
-            content='{"asset_class":"crypto_spot","features":{"feature_a":NaN,"feature_b":0.7}}',
+            content='{"asset_class":"crypto_spot","model_role":"direction_classifier","market_type":"spot","timeframe":"1h","features":{"feature_a":NaN,"feature_b":0.7}}',
         )
         assert non_finite_input.status_code == 422
 
