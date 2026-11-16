@@ -143,6 +143,34 @@ jobs:
           if not isinstance(metrics, dict):
               raise SystemExit(f"ETI report must be a JSON object: {report_path}")
 
+          # Reject stale, scan-only, partial, or over-budget output before
+          # presenting it as a completed training run.
+          if metrics.get("training_performed") is not True:
+              raise SystemExit("ETI report does not confirm that model fitting completed.")
+          if metrics.get("execution_enabled") is not False:
+              raise SystemExit("ETI research artifact must explicitly keep execution disabled.")
+          folds = metrics.get("folds")
+          fold_count = metrics.get("fold_count")
+          if not isinstance(folds, list) or not isinstance(fold_count, int) or fold_count < 1 or len(folds) != fold_count:
+              raise SystemExit("ETI outer-test fold evidence is missing or inconsistent.")
+          budget = metrics.get("compute_budget")
+          if not isinstance(budget, dict):
+              raise SystemExit("ETI compute-budget evidence is missing.")
+          total_fits = budget.get("total_estimated_model_fit_calls")
+          fit_cap = budget.get("max_model_fit_calls")
+          if not isinstance(total_fits, int) or isinstance(total_fits, bool) or not 1 <= total_fits <= 32:
+              raise SystemExit("ETI model-fit count is missing or exceeds the hard 32-fit cap.")
+          if not isinstance(fit_cap, int) or isinstance(fit_cap, bool) or fit_cap > 32 or total_fits > fit_cap:
+              raise SystemExit("ETI model-fit cap is invalid or exceeded.")
+          source = metrics.get("market_data")
+          if not isinstance(source, dict) or source.get("provider") not in {"coinbaseexchange", "kraken"}:
+              raise SystemExit("ETI output does not identify the expected Coinbase/Kraken public data source.")
+          if source.get("returned_candles", 0) < 662 or metrics.get("rows", 0) < 662:
+              raise SystemExit("ETI output contains fewer than 662 candles/usable research rows.")
+          scenarios = (metrics.get("cost_sensitivity") or {}).get("scenarios", [])
+          if not any(isinstance(item, dict) and item.get("cost_multiplier") == 2.0 and item.get("fold_count") == fold_count for item in scenarios):
+              raise SystemExit("ETI output is missing matching 2x-cost outer-test evidence.")
+
           exported = metrics.get("exported_model")
           if not isinstance(exported, dict):
               raise SystemExit("No exported_model manifest. Re-run the canonical Kaggle notebook with model export enabled.")
