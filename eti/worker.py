@@ -227,6 +227,11 @@ class AgentWorker:
         owner_id, workspace_id = task.get("owner_id"), task.get("workspace_id")
         if not isinstance(owner_id, str) or not isinstance(workspace_id, str):
             raise ValueError("portfolio allocation task is missing owner/workspace scope")
+        account = self.store.get_paper_portfolio_account(owner_id, workspace_id, account_id)
+        if not isinstance(account, dict):
+            raise ValueError("paper portfolio account is not owned by this task workspace")
+        if account.get("base_currency") != "USD":
+            raise ValueError("portfolio allocation currently requires a USD base-currency account; FX conversion is not implemented")
         snapshot = self.store.get_latest_paper_portfolio_snapshot(
             owner_id, workspace_id, account_id
         )
@@ -274,8 +279,9 @@ class AgentWorker:
         bound["current_positions"] = current_positions
         bound["correlated_group_exposure"] = group_exposure
         bound["_eti_validated_portfolio_snapshot"] = {
-            "account_id": account_id, "snapshot_id": snapshot["id"],
-            "as_of": snapshot["as_of"], "source": "owner_attested",
+            "account_id": account_id, "base_currency": account["base_currency"],
+            "snapshot_id": snapshot["id"], "as_of": snapshot["as_of"],
+            "source": "owner_attested",
             "freshness_seconds": max(0, int(age_seconds)),
         }
         return bound
