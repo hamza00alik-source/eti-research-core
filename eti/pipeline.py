@@ -142,14 +142,26 @@ def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[Baselin
     calibrated_validation = model.predict_proba(x_validation)
     raw_metrics = _probability_validation(raw_validation, y_validation.to_numpy())
     calibrated_metrics = _probability_validation(calibrated_validation, y_validation.to_numpy())
+    independent_class_coverage = all(
+        count >= 5 for count in calibrated_metrics["class_counts"].values()
+    ) and all(
+        calibrated_metrics["class_counts"][str(int(cls))] >= 5 for cls in CLASSES
+    )
+    independent_nll_not_worse = (
+        calibrated_metrics["negative_log_likelihood"]
+        <= raw_metrics["negative_log_likelihood"] + 1e-9
+    )
     independent_passed = bool(
         model.calibration_status == "calibrated"
-        and calibrated_metrics["negative_log_likelihood"]
-            <= raw_metrics["negative_log_likelihood"] + 1e-9
+        and independent_class_coverage
+        and independent_nll_not_worse
     )
     independent_report = {
         "passed": independent_passed,
         "method": "untouched_chronological_holdout",
+        "minimum_samples_per_class": 5,
+        "class_coverage_passed": independent_class_coverage,
+        "nll_not_worse_than_raw": independent_nll_not_worse,
         "raw": raw_metrics,
         "temperature_scaled": calibrated_metrics,
         "calibration_applied_to_export": independent_passed,
@@ -158,7 +170,11 @@ def fit_deployable_model(frame: pd.DataFrame, horizon: int = 6) -> tuple[Baselin
         model.calibration_status = "uncalibrated"
         calibration_report["passed"] = False
         calibration_report["temperature"] = 1.0
-        calibration_report["reason"] = "temperature_scaling_failed_independent_holdout_nll"
+        calibration_report["reason"] = (
+            "independent_holdout_missing_class_coverage"
+            if not independent_class_coverage
+            else "temperature_scaling_failed_independent_holdout_nll"
+        )
     calibration_report["independent_validation"] = independent_report
     model.calibration_report = calibration_report
 
