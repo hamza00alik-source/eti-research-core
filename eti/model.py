@@ -203,13 +203,24 @@ class BaselineModel:
         except RuntimeError:
             return False
 
-    def predict_proba(self, x) -> np.ndarray:
+    def predict_proba_raw(self, x) -> np.ndarray:
+        """Return class-aligned estimator probabilities without temperature scaling."""
         if self.classes_ is None:
             raise RuntimeError("Model has not been fitted")
         raw = self.estimator.predict_proba(x)
         aligned = np.zeros((len(raw), len(CLASSES)), dtype=float)
         for i, cls in enumerate(self.classes_):
             aligned[:, int(cls)] = raw[:, i]
+        if (
+            aligned.ndim != 2 or aligned.shape[1] != len(CLASSES)
+            or not np.isfinite(aligned).all() or (aligned < 0).any()
+            or (aligned > 1).any() or (aligned.sum(axis=1) <= 0).any()
+        ):
+            raise ValueError("Estimator returned invalid class probabilities")
+        return aligned / aligned.sum(axis=1, keepdims=True)
+
+    def predict_proba(self, x) -> np.ndarray:
+        aligned = self.predict_proba_raw(x)
         temperature = self.calibration_temperature()
         if temperature is not None:
             logits = np.log(np.clip(aligned, 1e-12, 1.0)) / temperature
