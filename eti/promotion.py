@@ -125,7 +125,9 @@ def assess_challenger_promotion(
 
     champ = _folds(champion, "champion")
     chall = _folds(challenger, "challenger")
-    for field in ("evaluation_data_sha256", "cost_model_sha256"):
+    if champion["model_sha256"] == challenger["model_sha256"]:
+        raise ValueError("champion and challenger must have distinct model hashes")
+    for field in ("training_data_sha256", "evaluation_data_sha256", "cost_model_sha256"):
         if champion[field] != challenger[field]:
             raise ValueError(f"champion and challenger must share {field}")
     if len(champ) != len(chall):
