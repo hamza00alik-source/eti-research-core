@@ -65,3 +65,20 @@ exposure, position size and the configured per-trade risk limit. This remains
 a paper proposal only. The current correlation-group label is still an
 operator-supplied classification, not a covariance estimate, and must be
 reviewed before any future portfolio automation.
+
+
+## Binding allocations to a durable paper account
+
+Worker-executed `portfolio.allocate` tasks must provide `portfolio_account_id`.
+The worker resolves that account's latest snapshot using the task's owner and
+workspace; caller-supplied equity, current positions and correlation-group
+exposure are ignored and replaced with snapshot values. Missing, foreign,
+malformed, future-dated, or older-than-24-hour snapshots are rejected.
+
+Snapshots are created through the authenticated `/v1/paper/portfolios` and
+`/snapshots` APIs. Their source is explicitly `owner_attested`: they are
+simulation inputs entered by the owner, not exchange-verified balances, fills,
+or market prices. This binding improves consistency of paper proposals; it
+does not connect a portfolio to a broker, refresh prices, submit orders, or
+grant the Queen execution authority. The result records the exact snapshot
+identifier and timestamp used.
