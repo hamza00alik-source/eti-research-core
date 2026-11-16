@@ -68,3 +68,12 @@ def test_provider_health_is_unavailable_when_both_venues_fail():
     })
     assert report["status"] == "unavailable"
     assert report["healthy_provider_count"] == 0
+
+
+
+def test_provider_probe_rejects_incomplete_last_candle():
+    data = frame()
+    now_ms = int((data.timestamp.iloc[-1] + pd.Timedelta(minutes=30)).timestamp() * 1000)
+    import pytest
+    with pytest.raises(ValueError, match="incomplete"):
+        probe_provider("kraken", FakeProvider(data), now_ms=now_ms)
