@@ -342,6 +342,7 @@ def test_portfolio_allocation_uses_fresh_owner_scoped_snapshot_not_caller_exposu
     }, now=now)
 
     assert bound["equity"] == 10000
+    assert bound["available_cash"] == 7000
     assert bound["current_positions"] == {"BTC/USD": 2000.0, "ETH/USD": 1000.0}
     assert bound["correlated_group_exposure"] == {"crypto_major": 3000.0}
     assert bound["_eti_validated_portfolio_snapshot"]["source"] == "owner_attested"
