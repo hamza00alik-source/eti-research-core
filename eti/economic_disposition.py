@@ -51,21 +51,28 @@ def assess_economic_viability(report: dict[str, Any]) -> dict[str, Any]:
             "live_execution_eligible": False,
         }
 
+    one_x = [
+        item for item in scenarios
+        if isinstance(item, dict) and item.get("cost_multiplier") == 1.0
+    ]
     two_x = [
         item for item in scenarios
         if isinstance(item, dict) and item.get("cost_multiplier") == 2.0
     ]
-    if len(two_x) != 1 or two_x[0].get("fold_count") != fold_count:
+    if (
+        len(one_x) != 1 or one_x[0].get("fold_count") != fold_count
+        or len(two_x) != 1 or two_x[0].get("fold_count") != fold_count
+    ):
         return {
             "status": "insufficient_evidence",
-            "reasons": ["a unique 2x-cost scenario matching all folds is required"],
+            "reasons": ["unique 1x- and 2x-cost scenarios matching all folds are required"],
             "live_execution_eligible": False,
         }
 
     try:
         mean_net = _number(summary.get("mean_net_return"), "mean_net_return")
         folds_beating_no_trade = summary.get("folds_beating_no_trade")
-        positive_folds = two_x[0].get("positive_return_folds")
+        positive_folds = one_x[0].get("positive_return_folds")
         two_x_net = _number(two_x[0].get("mean_net_return"), "2x mean_net_return")
         two_x_positive = two_x[0].get("positive_return_folds")
     except ValueError as exc:
