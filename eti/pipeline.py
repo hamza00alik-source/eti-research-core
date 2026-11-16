@@ -18,6 +18,7 @@ from .simulator import simulate_long_flat
 from .performance import evaluate_predictions
 from .regimes import classify_market_regime
 from .universe import scan_market_universe
+from .calibrated_evaluation import run_nested_calibrated_walk_forward
 
 
 def run_experiment(frame: pd.DataFrame, horizon: int = 6, timeframe: str = "1h") -> dict:
@@ -235,7 +236,7 @@ def estimate_nested_model_fits_from_rows(n_rows: int, horizon: int = 6,
                                           test_size: int = 100,
                                           step_size: int = 200,
                                           candidate_count: int = 2) -> int:
-    """Estimate model fit calls before training; each candidate fits on validation and test."""
+    """Estimate model fit calls before training; each candidate is fitted once per fold."""
     from .evaluation import walk_forward_folds
     if isinstance(candidate_count, bool) or not isinstance(candidate_count, int) or candidate_count < 1:
         raise ValueError("candidate_count must be a positive integer")
@@ -243,7 +244,7 @@ def estimate_nested_model_fits_from_rows(n_rows: int, horizon: int = 6,
         n_rows, min_train=min_train, validation_size=validation_size,
         test_size=test_size, step_size=step_size, purge_bars=horizon,
     )
-    return len(folds) * candidate_count * 2
+    return len(folds) * candidate_count
 
 
 def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
@@ -256,7 +257,7 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
                           funding_events: list[dict] | None = None) -> dict:
     """Train candidates inside purged folds; configure long/short and explicit derivative cost assumptions."""
     from sklearn.dummy import DummyClassifier
-    from .evaluation import run_nested_walk_forward, walk_forward_folds
+    from .evaluation import walk_forward_folds
     frame = validate_ohlcv(frame)
     if funding_events and funding_bps_per_bar != 0:
         raise ValueError("Use either event-timed funding or legacy per-bar funding, not both")
@@ -272,7 +273,7 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
         len(dataset), min_train=min_train, validation_size=validation_size,
         test_size=test_size, step_size=step_size, purge_bars=horizon,
     )
-    estimated_model_fits = len(planned_folds) * 2 * 2
+    estimated_model_fits = len(planned_folds) * 2
     if max_model_fits is not None:
         if isinstance(max_model_fits, bool) or not isinstance(max_model_fits, int) or max_model_fits < 1:
             raise ValueError("max_model_fits must be a positive integer")
@@ -281,15 +282,15 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
                 f"Training stopped before fitting: estimated {estimated_model_fits} model fits "
                 f"exceed the configured cap of {max_model_fits}. Increase step_size or reduce data/folds."
             )
-    def fit_baseline(train_x, train_y, eval_x):
-        return BaselineModel().fit(train_x, train_y).predict(eval_x)
-    def fit_majority(train_x, train_y, eval_x):
-        return DummyClassifier(strategy="most_frequent").fit(train_x, train_y).predict(eval_x)
-    report = run_nested_walk_forward(
+    report = run_nested_calibrated_walk_forward(
         dataset, feature_columns, "label",
-        {"hist_gradient_boosting": fit_baseline, "majority_class": fit_majority},
+        {
+            "hist_gradient_boosting": BaselineModel,
+            "majority_class": lambda: DummyClassifier(strategy="most_frequent"),
+        },
         min_train=min_train, validation_size=validation_size,
-        test_size=test_size, step_size=step_size, purge_bars=horizon)
+        test_size=test_size, step_size=step_size, purge_bars=horizon,
+    )
     bars_per_year = 365.25 * 24 * 60 * 60 / _timeframe_seconds(timeframe)
     # Causal regimes are aligned to the exact cleaned dataset rows.
     regime_frame = classify_market_regime(frame)
