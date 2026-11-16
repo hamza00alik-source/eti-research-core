@@ -49,6 +49,30 @@ jobs:
           printf '%s' "$KAGGLE_API_TOKEN" > "$HOME/.kaggle/access_token"
           chmod 600 "$HOME/.kaggle/access_token"
 
+      - name: Wait for the latest Kaggle execution to finish
+        env:
+          KERNEL: ${{ inputs.kernel || 'hamza00alik/eti-first-training-kaggle' }}
+        run: |
+          # Kaggle output is only downloadable after the pushed kernel version completes.
+          # Poll status rather than racing the asynchronous Kaggle worker.
+          for attempt in $(seq 1 30); do
+            status="$(kaggle kernels status "$KERNEL" 2>&1)" || status="status unavailable: $status"
+            echo "Kaggle status check $attempt/30: $status"
+            case "$status" in
+              *COMPLETE*|*Complete*|*complete*)
+                echo "Kaggle execution completed."
+                exit 0
+                ;;
+              *ERROR*|*Error*|*error*|*CANCELLED*|*Cancelled*|*cancelled*)
+                echo "::error::Kaggle reports a failed or cancelled execution: $status"
+                exit 1
+                ;;
+            esac
+            sleep 30
+          done
+          echo "::error::Kaggle execution did not reach a completed state within 15 minutes."
+          exit 1
+
       - name: Verify remote Kaggle source matches canonical repository notebook
         env:
           KERNEL: ${{ inputs.kernel || 'hamza00alik/eti-first-training-kaggle' }}
