@@ -433,7 +433,7 @@ $('#authorize-live-execution')?.addEventListener('click',async()=>{
  if(!confirmations.confirm_live_trading||!confirmations.confirm_spot_trading_permission||!confirmations.confirm_withdrawals_disabled||!confirmations.confirm_ip_restrictions){
   $('#live-execution-status').textContent='Complete all four one-time safety confirmations first.';return;
  }
- if(!window.confirm('Authorize ETI to place real Binance/MEXC spot orders automatically within your saved capital and risk limits? Individual trades will not require confirmation.'))return;
+ if(!window.confirm('ETI live order submission is currently blocked by a code-level hard kill switch. This authorization cannot enable real orders. Continue only to save the owner confirmations?'))return;
  const button=$('#authorize-live-execution');button.disabled=true;
  try{
   const result=await api('/v1/execution/authorize',{method:'POST',body:JSON.stringify(confirmations)});
@@ -441,7 +441,7 @@ $('#authorize-live-execution')?.addEventListener('click',async()=>{
  }catch(error){$('#live-execution-status').textContent='Live authorization failed: '+error.message;button.disabled=false}
 });
 $('#live-kill-switch')?.addEventListener('click',async()=>{
- if(!window.confirm('Stop all new ETI live trading tasks immediately? Open exchange orders may still need reconciliation at the exchange.'))return;
+ if(!window.confirm('Disable new ETI live order scheduling? Existing exchange orders and open positions will NOT be automatically canceled or liquidated. You must check them directly at the exchange.'))return;
  const button=$('#live-kill-switch');button.disabled=true;
  try{
   const result=await api('/v1/execution/kill-switch',{method:'POST'});
