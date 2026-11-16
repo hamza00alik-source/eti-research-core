@@ -409,6 +409,7 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
                                         "funding_model": "timestamped_settlement_events" if funding_events else "none_or_legacy_per_bar",
                                         "allow_short": bool(allow_short)},
                    "training_performed": True,
+                   "execution_enabled": False,
                    "compute_budget": {
                        "estimated_model_fit_calls": estimated_model_fits,
                        "max_model_fit_calls": max_model_fits,
