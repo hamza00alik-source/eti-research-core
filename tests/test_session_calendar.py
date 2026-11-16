@@ -144,7 +144,7 @@ def test_allocator_uses_session_coverage_when_calendar_evidence_exists():
             "yahoo:spot:SPY": {
                 "schema_version": "eti.transaction_cost_model.v1",
                 "instrument_identity": "yahoo:spot:SPY",
-                "quote_currency": "USD", "settlement_currency": "USD",
+                "quote_currency": "USD", "settlement_currency": "USD", "fee_basis": "taker",
                 "fee_bps": 0, "spread_bps": 1, "slippage_bps": 1,
                 "market_impact_bps": 0, "funding_bps_per_bar": 0,
                 "borrow_bps_per_bar": 0, "contract_multiplier": 1,
@@ -157,7 +157,7 @@ def test_allocator_uses_session_coverage_when_calendar_evidence_exists():
                     "license_status": "open",
                     "observed_at": "2026-01-01T00:00:00Z",
 
-                    "covers": ["fee_bps", "spread_bps", "slippage_bps", "market_impact_bps", "funding_bps_per_bar", "borrow_bps_per_bar", "contract_multiplier"],
+                    "covers": ["fee_bps", "spread_bps", "slippage_bps", "market_impact_bps", "funding_bps_per_bar", "borrow_bps_per_bar", "contract_multiplier", "fee_basis"],
                 }],
             }
         },

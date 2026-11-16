@@ -40,6 +40,9 @@ def validate_transaction_cost_model(
         value = model.get(field)
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{field} must be explicitly supplied")
+    fee_basis = model.get("fee_basis")
+    if fee_basis != "taker":
+        raise ValueError("fee_basis must be 'taker' for the market-order cost evaluator")
     numeric = {}
     for field in NUMERIC_FIELDS:
         value = model.get(field)
@@ -69,7 +72,7 @@ def validate_transaction_cost_model(
         raise ValueError("at least one evidence record is required")
     normalized_evidence = []
     covered_fields: set[str] = set()
-    allowed_coverage = set(NUMERIC_FIELDS)
+    allowed_coverage = set(NUMERIC_FIELDS) | {"fee_basis"}
     for index, item in enumerate(evidence):
         if not isinstance(item, dict):
             raise ValueError(f"evidence[{index}] must be an object")
@@ -175,6 +178,7 @@ def validate_transaction_cost_model(
         "instrument_identity": identity,
         "quote_currency": model["quote_currency"].strip().upper(),
         "settlement_currency": model["settlement_currency"].strip().upper(),
+        "fee_basis": fee_basis,
         **numeric,
         "funding_schedule": normalized_schedule,
         "funding_schedule_coverage": normalized_coverage,
