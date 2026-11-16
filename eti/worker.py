@@ -230,6 +230,8 @@ class AgentWorker:
         account = self.store.get_paper_portfolio_account(owner_id, workspace_id, account_id)
         if not isinstance(account, dict):
             raise ValueError("paper portfolio account is not owned by this task workspace")
+        if account.get("status") != "active":
+            raise ValueError("paper portfolio account is not active")
         if account.get("base_currency") != "USD":
             raise ValueError("portfolio allocation currently requires a USD base-currency account; FX conversion is not implemented")
         snapshot = self.store.get_latest_paper_portfolio_snapshot(
