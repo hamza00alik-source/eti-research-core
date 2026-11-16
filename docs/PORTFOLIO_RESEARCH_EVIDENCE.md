@@ -16,8 +16,8 @@ python -m eti.portfolio_quality artifacts/multi-market-research-result.json \
 
 The remaining 20% is held as cash in this example. Weights are never
 automatically normalized to 100%. For timestamps when a venue has no bar,
-that instrument contributes zero return and zero exposure; its weight remains
-cash rather than being silently reallocated.
+that instrument contributes zero incremental return while its last known
+position is carried forward; weights are never silently reallocated.
 
 ## Reported evidence
 
