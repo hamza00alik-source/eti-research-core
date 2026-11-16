@@ -236,7 +236,7 @@ def estimate_nested_model_fits_from_rows(n_rows: int, horizon: int = 6,
                                           test_size: int = 100,
                                           step_size: int = 200,
                                           candidate_count: int = 2) -> int:
-    """Estimate model fit calls before training; each candidate fits on validation and test."""
+    """Estimate model fit calls before training; each candidate is fitted once per fold."""
     from .evaluation import walk_forward_folds
     if isinstance(candidate_count, bool) or not isinstance(candidate_count, int) or candidate_count < 1:
         raise ValueError("candidate_count must be a positive integer")
@@ -244,7 +244,7 @@ def estimate_nested_model_fits_from_rows(n_rows: int, horizon: int = 6,
         n_rows, min_train=min_train, validation_size=validation_size,
         test_size=test_size, step_size=step_size, purge_bars=horizon,
     )
-    return len(folds) * candidate_count * 2
+    return len(folds) * candidate_count
 
 
 def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
