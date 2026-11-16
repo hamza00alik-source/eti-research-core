@@ -107,3 +107,15 @@ All handlers are allowlisted, accept data-only payloads, and return
 `execution_enabled=false`. The cost service estimates costs only; it never
 places orders. Strategy selection uses validation data only; callers must
 preserve a separate untouched test window.
+
+
+## Approved inference boundaries
+
+The authenticated inference endpoint now requires an explicit model role, market
+type and timeframe. It rejects a model unless its approved registry metadata
+declares `department=prediction`, the exact requested role, and exact supported
+market-type/timeframe values. The current probability response contract supports
+only `direction_classifier`; other specialist roles cannot be routed through
+that three-class output by assumption. Legacy approved records without these
+metadata fields fail closed until reviewed and re-registered with explicit
+scope.
