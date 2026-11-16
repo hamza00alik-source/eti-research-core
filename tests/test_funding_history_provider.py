@@ -104,3 +104,18 @@ def test_funding_history_rejects_future_coverage_before_api_call(monkeypatch):
             "BTC/USDT:USDT", 1000, 6000,
         )
     assert exchange.closed is True
+
+
+
+def test_funding_history_reports_when_requested_event_limit_truncates_interval(monkeypatch):
+    exchange = FakeExchange(rows=[
+        [row(1000, 0.0001), row(2000, 0.0002)],
+    ])
+    monkeypatch.setitem(sys.modules, "ccxt", SimpleNamespace(binance=lambda config: exchange))
+    result = CcxtPublicProvider("binance", "swap").fetch_funding_rate_history(
+        "BTC/USDT:USDT", 1000, 3000, limit=2, page_size=2,
+    )
+    assert result["event_count"] == 2
+    assert result["limit_reached"] is True
+    assert result["history_completeness"] == "unverified"
+    assert result["evidence_eligible"] is False
