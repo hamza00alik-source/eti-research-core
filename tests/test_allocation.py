@@ -7,6 +7,10 @@ def research_report(*, mean_return=0.04, two_x_return=0.02,
                     positive_folds=5, two_x_positive_folds=5, beating_no_trade=5):
     return {
         "training_performed": True, "execution_enabled": False,
+        "kind": "legacy_model_research_report",
+        "venue": "binance", "asset_class": "crypto", "market_type": "spot",
+        "symbol": "BTC/USD", "timeframe": "1h",
+        "latest_price": 100.0, "data_end": "2026-11-16T00:00:00+00:00",
         "fold_count": 5, "folds": [{}, {}, {}, {}, {}],
         "trading_performance": {"summary": {
             "mean_net_return": mean_return,
@@ -24,7 +28,12 @@ def research_report(*, mean_return=0.04, two_x_return=0.02,
 def candidate(symbol="BTC/USD", group="crypto_major", **overrides):
     item = {
         "symbol": symbol, "strategy": "momentum", "correlation_group": group,
-        "mean_max_drawdown": 0.08, "stop_distance_fraction": 0.04,
+        "mean_max_drawdown": 0.08,
+        "risk_evidence": {
+            "symbol": symbol, "venue": "binance", "timeframe": "1h",
+            "price_as_of": "2026-11-16T00:00:00+00:00",
+            "source": "owner_defined_stop", "entry_price": 100.0, "stop_price": 96.0,
+        },
         "research_report": research_report(),
     }
     item.update(overrides)
@@ -147,3 +156,27 @@ def test_allocator_uses_original_budget_for_proportional_targets():
     assert len(amounts) == 2
     assert amounts[0] == pytest.approx(amounts[1])
     assert sum(amounts) == pytest.approx(2000.0)
+
+
+
+def test_allocator_rejects_report_for_a_different_instrument():
+    item = candidate("ETH/USD")
+    result = plan_paper_allocations({"equity": 10000, "candidates": [item]})
+    assert result["allocations"] == []
+    assert result["rejected"][0]["reason"] == "research_instrument_identity_mismatch"
+
+
+def test_allocator_requires_stop_provenance_bound_to_research_price_and_candle():
+    item = candidate()
+    item["risk_evidence"]["stop_price"] = 101.0
+    result = plan_paper_allocations({"equity": 10000, "candidates": [item]})
+    assert result["allocations"] == []
+    assert result["rejected"][0]["reason"] == "invalid_allocation_evidence"
+
+
+def test_allocator_uses_independent_risk_gate_and_remains_paper_only():
+    item = candidate()
+    result = plan_paper_allocations({"equity": 10000, "candidates": [item]})
+    assert result["status"] == "proposals_ready"
+    assert result["allocations"][0]["risk_budget_fraction"] <= 0.005 + 1e-12
+    assert result["execution_enabled"] is False
