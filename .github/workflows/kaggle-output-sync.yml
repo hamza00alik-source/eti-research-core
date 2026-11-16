@@ -43,6 +43,48 @@ jobs:
           printf '%s' "$KAGGLE_API_TOKEN" > "$HOME/.kaggle/access_token"
           chmod 600 "$HOME/.kaggle/access_token"
 
+      - name: Verify remote Kaggle source matches canonical repository notebook
+        env:
+          KERNEL: ${{ inputs.kernel || 'hamza00alik/eti-first-training-kaggle' }}
+        run: |
+          mkdir -p remote_kernel
+          kaggle kernels pull "$KERNEL" -p remote_kernel
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          canonical = json.loads(Path("notebooks/ETI_v0_1_Training.ipynb").read_text())
+          remote_paths = list(Path("remote_kernel").rglob("*.ipynb"))
+          if len(remote_paths) != 1:
+              raise SystemExit(
+                  f"Expected one remote Kaggle notebook source; found {[str(p) for p in remote_paths]}"
+              )
+          remote = json.loads(remote_paths[0].read_text())
+
+          def code_cells(notebook):
+              return [
+                  "\n".join(cell.get("source", []))
+                  if isinstance(cell.get("source", []), list)
+                  else cell.get("source", "")
+                  for cell in notebook.get("cells", [])
+                  if cell.get("cell_type") == "code"
+              ]
+
+          expected = code_cells(canonical)
+          actual = code_cells(remote)
+          if expected != actual:
+              raise SystemExit(
+                  "Kaggle kernel source is stale or differs from the canonical "
+                  "notebooks/ETI_v0_1_Training.ipynb. Do not trust its cached output. "
+                  "Run 'ETI Kaggle Training Dispatch' with confirm_run=yes to push "
+                  "the reviewed main-branch notebook, then wait for that run to finish."
+              )
+          print(
+              f"Verified {len(actual)} code cells match canonical ETI notebook "
+              f"for {Path('notebooks/ETI_v0_1_Training.ipynb')}."
+          )
+          PY
+
       - name: Download latest Kaggle notebook output
         env:
           KERNEL: ${{ inputs.kernel || 'hamza00alik/eti-first-training-kaggle' }}
