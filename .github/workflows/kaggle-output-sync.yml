@@ -277,6 +277,8 @@ jobs:
           import os
           from pathlib import Path
 
+          from eti.economic_disposition import assess_economic_viability
+
           root = Path("downloaded")
           report_names = {"eti_budget_screen.json", "eti_training_metrics.json", "baseline_metrics.json"}
           reports = [p for p in root.rglob("*.json") if p.name in report_names]
@@ -362,7 +364,9 @@ jobs:
           trading = metrics.get("trading_performance") or {}
           trading_summary = trading.get("summary", trading) if isinstance(trading, dict) else trading
           cost = metrics.get("cost_sensitivity") or {}
+          economic_assessment = assess_economic_viability(metrics)
           summary = {
+              "economic_assessment": economic_assessment,
               "source_report": str(report_path),
               "training_performed": metrics.get("training_performed"),
               "rows": metrics.get("rows"),
