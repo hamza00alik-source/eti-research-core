@@ -707,3 +707,16 @@ baseline/horizon no longer has any qualifying future target in the full
 observed snapshot set. Such a record is not counted as matched coverage. This
 can reveal orphaned label references or changed evidence history; it does not
 establish why the supporting observation is absent.
+
+### Workspace snapshot-quality diagnostics
+
+The full-workspace dataset report exposes `snapshot_validation` using the same
+non-mutating checks as dataset export validation. It reports malformed
+payloads, unsupported schema versions, missing/non-finite/negative feature
+values, zero price or liquidity, invalid timestamps, duplicate entity
+timestamps, non-increasing entity time, and duplicate snapshot IDs. The report
+uses the full workspace market-scan snapshot set rather than the bounded
+dataset export. These issue counts describe evidence quality; they do not
+repair records, infer provider failure, or authorize model training. Feature
+coverage counts remain a separate measure of finite values present and should
+be read alongside validation issues.
