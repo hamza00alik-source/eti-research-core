@@ -34,6 +34,10 @@ def result_for(market):
     return {
         "schema_version": "eti.multi_market_research_result.v1",
         "execution_enabled": False,
+        "training_performed": True,
+        "planned_model_fit_calls": 10,
+        "model_fit_cap": 32,
+        "market_count": 1,
         "markets": {"coinbase:spot:BTC/USD": market},
     }
 
@@ -87,5 +91,23 @@ def test_invalid_or_incomplete_evidence_fails_closed(mutate):
 def test_execution_must_remain_disabled():
     source = result_for(market_result())
     source["execution_enabled"] = True
+    with pytest.raises(ValueError):
+        build_research_quality_report(source)
+
+def test_source_artifact_must_confirm_training_was_performed():
+    source = result_for(market_result())
+    source["training_performed"] = False
+    with pytest.raises(ValueError, match="training_performed=true"):
+        build_research_quality_report(source)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("market_count", 2),
+    ("planned_model_fit_calls", 33),
+    ("model_fit_cap", 2),
+])
+def test_source_artifact_fit_and_market_counts_are_validated(field, value):
+    source = result_for(market_result())
+    source[field] = value
     with pytest.raises(ValueError):
         build_research_quality_report(source)

@@ -140,9 +140,20 @@ def build_research_quality_report(result: dict[str, Any], *,
         raise ValueError("unsupported multi-market research result schema")
     if result.get("execution_enabled") is not False:
         raise ValueError("research result must explicitly keep execution disabled")
+    if result.get("training_performed") is not True:
+        raise ValueError("source artifact must explicitly confirm training_performed=true")
     markets = result.get("markets")
     if not isinstance(markets, dict) or not markets:
         raise ValueError("research result must contain market results")
+    declared_count = result.get("market_count")
+    if isinstance(declared_count, bool) or not isinstance(declared_count, int) or declared_count != len(markets):
+        raise ValueError("source market_count must match the markets mapping")
+    planned_fits = result.get("planned_model_fit_calls")
+    fit_cap = result.get("model_fit_cap")
+    if (isinstance(planned_fits, bool) or not isinstance(planned_fits, int) or planned_fits < 1
+            or isinstance(fit_cap, bool) or not isinstance(fit_cap, int)
+            or fit_cap < planned_fits or fit_cap > 32):
+        raise ValueError("source model-fit counts are missing or exceed the governed cap")
     summaries = {}
     for key, market in sorted(markets.items()):
         if isinstance(market, dict) and market.get("status") == "evaluation_failed":
