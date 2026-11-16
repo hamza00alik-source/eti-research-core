@@ -2560,6 +2560,7 @@ class MemoryStore:
                 "price_usd": 0, "liquidity_usd": 0, "volume_h24_usd": 0,
                 "txns_h1_buys": 0, "txns_h1_sells": 0,
             }
+            valid_feature_counts = {key: 0 for key in feature_counts}
             first_at: datetime | None = None
             last_at: datetime | None = None
             malformed_payloads = 0
@@ -2608,6 +2609,8 @@ class MemoryStore:
                     value = evidence.get(key)
                     if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
                         feature_counts[key] += 1
+                        if value >= 0 and (value > 0 or key not in {"price_usd", "liquidity_usd"}):
+                            valid_feature_counts[key] += 1
             label_rows = conn.execute(
                 "SELECT id,mint,pool_address,baseline_snapshot_id,target_snapshot_id,horizon_seconds,label_json FROM solana_research_labels "
                 "WHERE owner_id=? AND workspace_id=? ORDER BY horizon_seconds",
@@ -2701,7 +2704,12 @@ class MemoryStore:
                 "malformed_payloads": malformed_payloads,
             },
             "feature_coverage": {
-                key: {"count": feature_counts[key], "fraction": coverage[key]}
+                key: {
+                    "count": feature_counts[key],
+                    "fraction": coverage[key],
+                    "valid_count": valid_feature_counts[key],
+                    "valid_fraction": round(valid_feature_counts[key] / market_count, 6) if market_count else 0.0,
+                }
                 for key in feature_counts
             },
             "snapshot_validation": snapshot_validation,
