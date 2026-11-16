@@ -372,3 +372,24 @@ def test_portfolio_allocation_rejects_stale_or_foreign_account_snapshot(tmp_path
             {"owner_id": "owner-2", "workspace_id": workspace["id"]},
             {"portfolio_account_id": account["id"]}, now=now,
         )
+
+
+def test_portfolio_allocation_rejects_non_usd_account_without_fx_conversion(tmp_path):
+    from datetime import datetime, timezone
+
+    store = MemoryStore(tmp_path / "allocation-fx-scope.sqlite3")
+    workspace = _workspace(store)
+    account = store.create_paper_portfolio_account(
+        "owner-1", workspace["id"], "pkr-paper", "PKR", 100000
+    )
+    now = datetime(2026, 11, 16, 17, 0, tzinfo=timezone.utc)
+    store.record_paper_portfolio_snapshot(
+        "owner-1", workspace["id"], account["id"], now.isoformat(),
+        100000, 100000, [],
+    )
+    worker = AgentWorker(store)
+    with pytest.raises(ValueError, match="FX conversion is not implemented"):
+        worker._bind_paper_portfolio_snapshot(
+            {"owner_id": "owner-1", "workspace_id": workspace["id"]},
+            {"portfolio_account_id": account["id"]}, now=now,
+        )
