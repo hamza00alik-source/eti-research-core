@@ -123,6 +123,7 @@ def select_specialist_models(
     asset_class: str | None = None,
     market_type: str | None = None,
     timeframe: str | None = None,
+    model_role: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return approved, explicitly assigned models compatible with the request.
 
@@ -134,6 +135,9 @@ def select_specialist_models(
         raise ValueError("unknown department")
     if not isinstance(model_versions, list):
         raise ValueError("model_versions must be a list")
+    allowed_roles = DEPARTMENTS[department]["model_roles"]
+    if model_role is not None and model_role not in allowed_roles:
+        raise ValueError("model_role is not registered for the selected department")
     expected_class = (
         f"{asset_class}_{market_type}"
         if asset_class is not None and market_type is not None else None
@@ -153,6 +157,11 @@ def select_specialist_models(
             continue
         schema = model.get("input_schema")
         schema = schema if isinstance(schema, dict) else {}
+        declared_role = schema.get("model_role")
+        if declared_role is not None and declared_role not in allowed_roles:
+            raise ValueError("model has a model_role not registered for its department")
+        if model_role is not None and declared_role != model_role:
+            continue
         market_types = schema.get("market_types")
         timeframes = schema.get("timeframes")
         if market_type is not None and isinstance(market_types, list) and market_type not in market_types:
@@ -188,10 +197,28 @@ def build_intelligence_manifest(
         items = [model for key, model in registered if key == department]
         approved = sum(model.get("lifecycle") == "approved" for model in items)
         candidates = sum(model.get("lifecycle") == "candidate" for model in items)
+        role_readiness = {}
+        for role in spec["model_roles"]:
+            role_items = [
+                model for model in items
+                if isinstance(model.get("input_schema"), dict)
+                and model["input_schema"].get("model_role") == role
+            ]
+            role_approved = sum(model.get("lifecycle") == "approved" for model in role_items)
+            role_candidates = sum(model.get("lifecycle") == "candidate" for model in role_items)
+            role_readiness[role] = {
+                "registered_models": len(role_items),
+                "approved_models": role_approved,
+                "candidate_models": role_candidates,
+                "status": "ready" if role_approved else (
+                    "candidate_review" if role_candidates else "not_configured"
+                ),
+            }
         departments[department] = {
             **spec,
             "capabilities": list(spec["capabilities"]),
             "model_roles": list(spec["model_roles"]),
+            "role_readiness": role_readiness,
             "registered_models": len(items),
             "approved_models": approved,
             "candidate_models": candidates,
