@@ -16,6 +16,11 @@ from .data import assess_ohlcv_quality
 from .features import build_features
 from .providers import CcxtPublicProvider, YahooFinanceProvider, enrich_ohlcv_with_derivatives
 from .opportunities import rank_spot_opportunity
+from .specialists import (
+    execution_cost_specialist, learning_economic_assessment_specialist,
+    macro_as_of_specialist, market_regime_specialist,
+    risk_assessment_specialist, strategy_selection_specialist,
+)
 from .strategy_evaluation import run_strategy_walk_forward
 
 
@@ -510,4 +515,10 @@ def default_capabilities() -> AgentCapabilityRegistry:
     registry.register("derivatives.context", derivatives_market_context)
     registry.register("strategy.walk_forward", strategy_walk_forward)
     registry.register("model.train_research", model_training_research)
+    registry.register("market.regime", market_regime_specialist)
+    registry.register("strategy.select", strategy_selection_specialist)
+    registry.register("risk.assess", risk_assessment_specialist)
+    registry.register("macro.as_of", macro_as_of_specialist)
+    registry.register("execution.cost_estimate", execution_cost_specialist)
+    registry.register("learning.economic_assess", learning_economic_assessment_specialist)
     return registry
