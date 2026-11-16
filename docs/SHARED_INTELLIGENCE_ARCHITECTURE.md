@@ -50,11 +50,14 @@ selection rules, readiness reporting and Queen observability. It does not
 pretend every department already has a trained model or autonomous agent.
 Departments with no implementation are reported as `not_configured`.
 
-The current BTC baseline is not silently relabelled as a universal model.
-It remains unassigned until its metadata and scope are explicitly reviewed.
-Separate specialist training pipelines, richer model metadata, and model
-families for additional asset classes/timeframes are subsequent implementation
-steps.
+The BTC deployable classifier is explicitly assigned to the prediction
+department as a direction-classifier candidate. Each exported artifact receives
+a content-addressed immutable version, experiment ID, and code/config/dataset
+lineage hashes. Registry metadata preserves the department, role, experiment ID
+and lineage in the input-schema record without changing the existing feature
+contract. Legacy registry entries remain unassigned until reviewed. Separate
+trained specialists for additional departments, roles, asset classes and
+timeframes remain subsequent implementation steps.
 
 ## Authority boundaries
 

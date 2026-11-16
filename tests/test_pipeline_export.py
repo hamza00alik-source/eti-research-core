@@ -67,7 +67,9 @@ def test_deployable_fit_uses_exact_feature_schema_and_only_completed_rows(monkey
 
 
 def test_exported_model_is_explicitly_marked_uncalibrated(monkeypatch):
-    schema = {"features": list(FEATURE_COLUMNS)}
+    schema = {"features": list(FEATURE_COLUMNS), "dataset_sha256": "a" * 64,
+              "feature_version": "eti.features.v1",
+              "independent_validation_end": "2025-01-10T00:00:00+00:00"}
     class UncalibratedStub:
         calibration_status = "uncalibrated"
         calibration_report = None
@@ -88,6 +90,14 @@ def test_exported_model_is_explicitly_marked_uncalibrated(monkeypatch):
     )
     assert exported["calibration_status"] == "uncalibrated"
     assert exported["supported_classes"] == ["crypto_spot"]
+    assert exported["base_version"] == "0.1.0"
+    assert exported["version"] == "0.1.0+" + "c" * 12
+    assert exported["department"] == "prediction"
+    assert exported["model_role"] == "direction_classifier"
+    assert exported["input_schema"]["department"] == "prediction"
+    assert exported["input_schema"]["experiment_id"].startswith("eti-exp-")
+    assert len(exported["input_schema"]["lineage"]["code_sha256"]) == 64
+    assert len(exported["input_schema"]["lineage"]["config_sha256"]) == 64
 
 def test_training_cli_does_not_export_models_by_default(tmp_path, monkeypatch):
     import json
