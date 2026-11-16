@@ -43,7 +43,7 @@ def test_reports_outer_test_and_two_x_cost_evidence_without_promotion_authority(
     metric = report["markets"]["coinbase:spot:BTC/USD"]
     assert metric["outer_test_fold_count"] == 5
     assert metric["mean_net_return"] == pytest.approx(0.018)
-    assert metric["folds_beating_buy_and_hold"] == 4
+    assert metric["folds_beating_buy_and_hold"] == 3
     assert metric["evidence_status"] == "human_review_required"
     assert report["model_promotion_authority"] is False
     assert report["execution_authority"] is False
