@@ -722,3 +722,12 @@ repair records, infer provider failure, or authorize model training. In
 `valid_count`/`valid_fraction` additionally exclude negative values and zero
 price/liquidity. This prevents malformed-but-finite values from appearing as
 usable feature coverage.
+
+
+### Malformed snapshot-row handling
+
+Dataset validation treats non-object snapshot entries as explicit
+`malformed_snapshot_row` diagnostics rather than raising an exception. The
+aggregate row count and issue totals include these entries; bounded diagnostic
+output remains capped independently. Training preparation fails closed because
+a malformed row cannot provide a valid referenced snapshot.
