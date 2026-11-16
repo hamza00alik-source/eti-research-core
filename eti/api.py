@@ -1,4 +1,4 @@
-"""Research API and PWA host. No live order placement routes exist."""
+"""Research API and PWA host. Live order submission remains hard-disabled."""
 from __future__ import annotations
 from pathlib import Path
 import math
