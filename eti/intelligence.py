@@ -239,6 +239,8 @@ def build_intelligence_manifest(
                     "candidate_review" if role_candidates else "not_configured"
                 ),
             }
+        role_approved_total = sum(item["approved_models"] for item in role_readiness.values())
+        role_candidate_total = sum(item["candidate_models"] for item in role_readiness.values())
         departments[department] = {
             **spec,
             "capabilities": list(spec["capabilities"]),
