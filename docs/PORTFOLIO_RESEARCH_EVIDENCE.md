@@ -17,12 +17,13 @@ python -m eti.portfolio_quality artifacts/multi-market-research-result.json \
 The remaining 20% is held as cash in this example. Weights are never
 automatically normalized to 100%. For timestamps when a venue has no bar,
 that instrument contributes zero incremental return while its last known
-position is carried forward; weights are never silently reallocated.
+position is carried forward; weights are never silently reallocated. The
+portfolio window is restricted to the calendar span shared by all assets.
 
 ## Reported evidence
 
 - Per-fold compounded portfolio return and maximum drawdown.
-- Annualized Sharpe using the configured bars-per-year assumption.
+- Annualized Sharpe derived from the shared fixed-duration timeframe (or an explicit operator override).
 - Mean and maximum gross exposure, mean net exposure.
 - Active-weight concentration (HHI), cross-instrument correlation matrix,
   and covariance-based variance risk contributions.
