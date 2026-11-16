@@ -116,6 +116,28 @@ def _declared_department(model: dict[str, Any]) -> str | None:
     return department
 
 
+def _declared_model_role(model: dict[str, Any], department: str) -> str | None:
+    """Read and validate explicit role metadata across registry evidence."""
+    schema = model.get("input_schema")
+    report = model.get("evaluation_report")
+    values = []
+    if isinstance(schema, dict) and "model_role" in schema:
+        values.append(schema["model_role"])
+    if isinstance(report, dict) and "model_role" in report:
+        values.append(report["model_role"])
+    if any(not isinstance(value, str) or not value for value in values):
+        raise ValueError("model role declarations must be non-empty strings")
+    declared = set(values)
+    if len(declared) > 1:
+        raise ValueError("model has conflicting model_role declarations")
+    if not declared:
+        return None
+    role = next(iter(declared))
+    if role not in DEPARTMENTS[department]["model_roles"]:
+        raise ValueError("model has a model_role not registered for its department")
+    return role
+
+
 def select_specialist_models(
     model_versions: list[dict[str, Any]],
     department: str,
@@ -159,9 +181,7 @@ def select_specialist_models(
             continue
         schema = model.get("input_schema")
         schema = schema if isinstance(schema, dict) else {}
-        declared_role = schema.get("model_role")
-        if declared_role is not None and declared_role not in allowed_roles:
-            raise ValueError("model has a model_role not registered for its department")
+        declared_role = _declared_model_role(model, department)
         if model_role is not None and declared_role != model_role:
             continue
         market_types = schema.get("market_types")
@@ -200,11 +220,14 @@ def build_intelligence_manifest(
         approved = sum(model.get("lifecycle") == "approved" for model in items)
         candidates = sum(model.get("lifecycle") == "candidate" for model in items)
         role_readiness = {}
+        unassigned_role_models = 0
+        for model in items:
+            if _declared_model_role(model, department) is None:
+                unassigned_role_models += 1
         for role in spec["model_roles"]:
             role_items = [
                 model for model in items
-                if isinstance(model.get("input_schema"), dict)
-                and model["input_schema"].get("model_role") == role
+                if _declared_model_role(model, department) == role
             ]
             role_approved = sum(model.get("lifecycle") == "approved" for model in role_items)
             role_candidates = sum(model.get("lifecycle") == "candidate" for model in role_items)
@@ -222,11 +245,12 @@ def build_intelligence_manifest(
             "model_roles": list(spec["model_roles"]),
             "role_readiness": role_readiness,
             "registered_models": len(items),
+            "unassigned_role_models": unassigned_role_models,
             "approved_models": approved,
             "candidate_models": candidates,
             "status": (
-                "ready" if approved else
-                "candidate_review" if candidates else
+                "ready" if role_approved_total else
+                "candidate_review" if role_candidate_total else
                 "not_configured" if spec["model_required"] else
                 "deterministic_foundation_available"
             ),
