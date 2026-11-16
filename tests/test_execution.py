@@ -87,7 +87,7 @@ def test_authorized_live_tick_places_one_risk_gated_order_and_is_candle_idempote
     tmp_path, monkeypatch
 ):
     import eti.execution as execution
-    execution.LIVE_ORDER_EXECUTION_ENABLED = True  # test-only exercise of the otherwise gated order path
+    monkeypatch.setattr(execution, "LIVE_ORDER_EXECUTION_ENABLED", True)  # test-only order-path exercise
     store = _live_store(tmp_path)
     calls = {"orders": 0}
     now = pd.Timestamp.now(tz="UTC").floor("h")
@@ -162,7 +162,7 @@ def test_authorized_live_tick_places_one_risk_gated_order_and_is_candle_idempote
 
 def test_uncertain_exchange_order_response_triggers_kill_switch(tmp_path, monkeypatch):
     import eti.execution as execution
-    execution.LIVE_ORDER_EXECUTION_ENABLED = True  # test-only exercise of the otherwise gated order path
+    monkeypatch.setattr(execution, "LIVE_ORDER_EXECUTION_ENABLED", True)  # test-only order-path exercise
     store = _live_store(tmp_path)
     now = pd.Timestamp.now(tz="UTC").floor("h")
     timestamps = [int((now - pd.Timedelta(hours=80 - i)).timestamp() * 1000) for i in range(80)]
