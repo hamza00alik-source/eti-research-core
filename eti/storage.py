@@ -2573,6 +2573,7 @@ class MemoryStore:
                     coverage_snapshots.append({
                         "id": row["id"], "capability": row["capability"],
                         "mint": row["mint"], "pool_address": row["pool_address"],
+                        "schema_version": row["schema_version"],
                         "fetched_at": row["fetched_at"], "payload": coverage_payload,
                     })
                 if row["capability"] == "solana.token.audit":
@@ -2675,6 +2676,8 @@ class MemoryStore:
             key: round(count / market_count, 6) if market_count else 0.0
             for key, count in feature_counts.items()
         }
+        from .solana_dataset import validate_snapshot_rows
+        snapshot_validation = validate_snapshot_rows(coverage_snapshots)
         from .solana_labels import evaluate_forward_label_coverage
         forward_label_coverage = evaluate_forward_label_coverage(
             coverage_snapshots, coverage_labels,
@@ -2701,6 +2704,7 @@ class MemoryStore:
                 key: {"count": feature_counts[key], "fraction": coverage[key]}
                 for key in feature_counts
             },
+            "snapshot_validation": snapshot_validation,
             "labels_by_horizon_seconds": label_counts,
             "forward_label_coverage": forward_label_coverage,
             "training_gate": {
