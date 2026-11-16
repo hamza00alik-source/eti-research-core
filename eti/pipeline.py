@@ -312,17 +312,19 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
         prediction_test = pd.Series(fold["test_predictions"], index=test_timestamps, dtype=int)
         fold_funding_events = [event for event in (funding_events or [])
                                if test_timestamps[0] <= pd.Timestamp(event["timestamp"]) <= test_timestamps[-1]]
+        evaluation = evaluate_predictions(
+            close_test, actual_test, prediction_test,
+            fee_bps=fee_bps, slippage_bps=slippage_bps,
+            funding_bps_per_bar=funding_bps_per_bar,
+            funding_events=fold_funding_events,
+            allow_short=allow_short, bars_per_year=bars_per_year,
+        )
+        evaluation["timestamps"] = [timestamp.isoformat() for timestamp in test_timestamps]
         performance_folds.append({
             "fold": fold["fold"],
             "selected_candidate": fold["selected_candidate"],
             "market_regimes": regime_diagnostics,
-            **evaluate_predictions(
-                close_test, actual_test, prediction_test,
-                fee_bps=fee_bps, slippage_bps=slippage_bps,
-                funding_bps_per_bar=funding_bps_per_bar,
-                funding_events=fold_funding_events,
-                allow_short=allow_short, bars_per_year=bars_per_year,
-            ),
+            **evaluation,
         })
     # Re-run the same frozen outer-test predictions under harsher execution costs.
     # These scenarios are sensitivity diagnostics, not additional model selection.

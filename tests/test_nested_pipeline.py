@@ -46,3 +46,8 @@ def test_nested_training_pipeline_orchestrates_market_folds(monkeypatch):
         and "mean_max_drawdown" in item
         for item in scenarios
     )
+    outer_fold = result["trading_performance"]["folds"][0]
+    model_stream = outer_fold["trading"]["model"]
+    assert len(outer_fold["timestamps"]) == model_stream["bars"]
+    assert len(model_stream["bar_returns"]) == model_stream["bars"]
+    assert len(model_stream["positions"]) == model_stream["bars"]

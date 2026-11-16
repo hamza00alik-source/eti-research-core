@@ -83,6 +83,9 @@ def _strategy_metrics(close: pd.Series, signals: pd.Series, fee_bps: float,
     result["short_exposure"] = float((-position.clip(upper=0)).mean())
     result.update(_trade_statistics(position, bar_returns))
     result["equity_curve"] = [float(value) for value in equity.to_numpy()]
+    # Preserve synchronized outer-test streams for portfolio-level evaluation.
+    result["bar_returns"] = [float(value) for value in bar_returns.to_numpy()]
+    result["positions"] = [float(value) for value in position.to_numpy()]
     return result
 
 
