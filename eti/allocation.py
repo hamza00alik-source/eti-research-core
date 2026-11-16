@@ -140,15 +140,21 @@ def plan_paper_allocations(payload: dict[str, Any]) -> dict[str, Any]:
     selected = eligible[:slots]
     score_total = sum(row["score"] for row in selected)
     allocations = []
+    planned_by_group: dict[str, float] = {}
+    planned_total = 0.0
     for row in selected:
-        target = total_budget * row["score"] / score_total if score_total > 0 else 0.0
+        remaining_budget = max(0.0, total_budget - planned_total)
+        target = remaining_budget * row["score"] / score_total if score_total > 0 else 0.0
         risk_cap = equity * risk_per_trade / row["stop_distance"]
         single_room = max(0.0, equity * max_single - positions.get(row["symbol"], 0.0))
-        group_room = max(0.0, equity * max_group - group_exposure.get(row["group"], 0.0))
+        group_room = max(0.0, equity * max_group - group_exposure.get(row["group"], 0.0)
+                         - planned_by_group.get(row["group"], 0.0))
         notional = max(0.0, min(target, risk_cap, single_room, group_room))
         if notional <= 0:
             rejected.append({"symbol": row["symbol"], "reason": "no_remaining_risk_or_exposure_capacity"})
             continue
+        planned_total += notional
+        planned_by_group[row["group"]] = planned_by_group.get(row["group"], 0.0) + notional
         allocations.append({
             "symbol": row["symbol"], "strategy": row["strategy"],
             "correlation_group": row["group"],
