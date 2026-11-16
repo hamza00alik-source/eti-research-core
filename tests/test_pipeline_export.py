@@ -46,7 +46,7 @@ def test_deployable_fit_uses_exact_feature_schema_and_only_completed_rows(monkey
     monkeypatch.setattr(BaselineModel, "predict_proba", fake_raw_probabilities)
     monkeypatch.setattr(BaselineModel, "fit_temperature_calibration", fake_calibration)
     model, schema = fit_deployable_model(frame, horizon=6)
-    assert model.classes_.tolist() == [0, 1]
+    assert model.classes_.tolist() == [0, 1, 2]
     assert seen["rows"] == 230
     assert seen["columns"] == FEATURE_COLUMNS
     assert seen["calibration_rows"] == 73
