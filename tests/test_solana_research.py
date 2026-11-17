@@ -47,6 +47,15 @@ def test_scan_pair_keeps_missing_data_unknown_not_pass():
     assert result["verdict"] == "UNKNOWN"
 
 
+def test_scan_pair_treats_oversized_provider_integer_as_unknown():
+    pair = _pair()
+    pair["liquidity"]["usd"] = 10 ** 10000
+    result = scan_pair("Mint111", pair, now_ms=1_800_000_000_000)
+    assert result["verdict"] == "UNKNOWN"
+    assert result["evidence"]["liquidity_usd"] is None
+    assert "liquidity unavailable" in result["reason"]
+
+
 def test_scan_pair_waits_when_no_pair_is_indexed():
     result = scan_pair("Mint111", None)
     assert result["verdict"] == "WAIT"
