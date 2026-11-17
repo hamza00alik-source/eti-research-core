@@ -74,3 +74,30 @@ def test_invalid_time_order_and_invalid_budget_fail_closed():
         train_market_intelligence_specialists(frame, min_train=300, validation_size=60, test_size=60)
     with pytest.raises(ValueError, match="max_model_fits"):
         train_market_intelligence_specialists(make_frame(), max_model_fits=0)
+
+
+def test_single_class_outer_test_reports_undefined_balanced_accuracy_without_warning():
+    from eti.market_intelligence_training import _classification_metrics
+
+    metrics = _classification_metrics(pd.Series(["range"] * 8), np.array(["range"] * 7 + ["uptrend"]))
+    assert metrics["accuracy"] == pytest.approx(7 / 8)
+    assert metrics["balanced_accuracy"] is None
+    assert metrics["balanced_accuracy_status"] == "insufficient_test_class_coverage"
+    assert metrics["observed_test_classes"] == ["range"]
+    assert metrics["test_class_count"] == 1
+    assert metrics["per_class"]["range"]["support"] == 8
+    assert metrics["per_class"]["uptrend"]["support"] == 0
+    assert metrics["per_class"]["uptrend"]["recall"] is None
+
+
+def test_multiclass_outer_test_balanced_accuracy_uses_observed_classes_only():
+    from eti.market_intelligence_training import _classification_metrics
+
+    truth = pd.Series(["range", "range", "uptrend", "uptrend", "downtrend"])
+    predicted = np.array(["range", "uptrend", "uptrend", "uptrend", "range"])
+    metrics = _classification_metrics(truth, predicted)
+    assert metrics["balanced_accuracy"] == pytest.approx((0.5 + 1.0 + 0.0) / 3)
+    assert metrics["balanced_accuracy_status"] == "ok"
+    assert metrics["observed_test_classes"] == ["downtrend", "range", "uptrend"]
+    assert metrics["test_class_count"] == 3
+    assert metrics["class_coverage"] == pytest.approx(0.75)
