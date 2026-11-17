@@ -879,3 +879,47 @@ def test_snapshot_validator_detects_same_instant_with_different_timezone_offsets
         "snapshot_id": "offset-b",
         "issues": ["duplicate_entity_timestamp", "non_increasing_entity_time"],
     }]
+
+def test_snapshot_validator_rejects_non_integer_schema_version():
+    row = {
+        "id": "float-schema", "capability": "solana.token.audit",
+        "mint": "MintA", "pool_address": "PoolA", "schema_version": 1.0,
+        "fetched_at": "2026-01-01T00:00:00Z", "payload": {},
+    }
+    report = validate_snapshot_rows([row])
+    assert report["issue_counts"]["unsupported_schema_version"] == 1
+    assert report["row_issues"] == [{
+        "snapshot_id": "float-schema", "issues": ["unsupported_schema_version"],
+    }]
+
+
+def test_training_preparation_rejects_float_schema_version():
+    from copy import deepcopy
+    from eti.solana_dataset import prepare_solana_training_rows
+
+    baseline = {
+        "id": "base", "capability": "solana.market.scan", "mint": "A" * 40,
+        "pool_address": "PoolA", "schema_version": 1.0,
+        "fetched_at": "2026-01-01T00:00:00Z",
+        "payload": {"evidence": {
+            "price_usd": 1.0, "liquidity_usd": 100.0, "volume_h24_usd": 20.0,
+            "txns_h1_buys": 3, "txns_h1_sells": 2,
+        }},
+    }
+    target = deepcopy(baseline)
+    target.update({"id": "target", "schema_version": 1,
+                   "fetched_at": "2026-01-01T00:06:00Z"})
+    exported = {
+        "schema": "eti.solana.research_dataset.v1",
+        "snapshots": [baseline, target],
+        "labels": [{
+            "id": "label-1", "mint": "A" * 40, "pool_address": "PoolA",
+            "baseline_snapshot_id": "base", "target_snapshot_id": "target",
+            "baseline_snapshot_in_export": True, "target_snapshot_in_export": True,
+            "horizon_seconds": 300, "label_parse_error": False,
+            "reference_issues": [], "label": {"sampled_price_return_pct": 0.0},
+        }],
+    }
+    result = prepare_solana_training_rows(exported)
+    assert result["eligible_row_count"] == 0
+    assert result["exclusion_counts"] == {"snapshot_validation_issues": 1}
