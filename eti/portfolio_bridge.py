@@ -93,6 +93,22 @@ def allocate_from_persisted_snapshot(
             or not 0 <= float(requested_buffer) <= 0.95):
         raise ValueError("cash_buffer_fraction must be between 0 and 0.95")
     actual_cash_floor = 1.0 - float(snapshot["cash"]) / float(snapshot["equity"])
+    if actual_cash_floor > 0.95:
+        return {
+            "kind": "paper_portfolio_allocation_plan",
+            "status": "blocked",
+            "reason": "snapshot_cash_below_minimum_supported_buffer",
+            "allocations": [],
+            "rejected": [],
+            "portfolio_provenance": {
+                "account_id": account_id, "snapshot_id": snapshot["id"],
+                "snapshot_as_of": snapshot["as_of"], "snapshot_age_seconds": round(age, 3),
+                "snapshot_source": "owner_attested", "base_currency": account["base_currency"],
+                "exchange_verified": False,
+            },
+            "owner_review_required": True, "orders_submitted": False,
+            "paper_only": True, "execution_enabled": False,
+        }
     limits["cash_buffer_fraction"] = max(float(requested_buffer), actual_cash_floor)
     plan = plan_paper_allocations({
         **limits,
