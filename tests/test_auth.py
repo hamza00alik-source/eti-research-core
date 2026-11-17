@@ -122,3 +122,23 @@ def test_password_change_rejects_wrong_or_reused_password_without_revoking_token
     with pytest.raises(ValueError, match="must differ"):
         auth.change_password(account["id"], "old-password-123", "old-password-123")
     assert auth.verify_token(token, now=1001) == account
+
+
+def test_existing_account_database_gets_token_version_migration(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "legacy-auth.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE auth_accounts (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, "
+            "password_salt BLOB NOT NULL, password_hash BLOB NOT NULL, created_at INTEGER NOT NULL)"
+        )
+    auth = AuthManager(path, secret="s" * 40, registration_key="invite-key-123456")
+    account = auth.register("trader01", "a-long-password-123", "invite-key-123456")
+    token = auth.issue_token(account, now=1000)
+    assert auth.verify_token(token, now=1001) == account
+    with sqlite3.connect(path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(auth_accounts)")}
+        version = conn.execute("SELECT token_version FROM auth_accounts WHERE id = ?", (account["id"],)).fetchone()[0]
+    assert "token_version" in columns
+    assert version == 0
