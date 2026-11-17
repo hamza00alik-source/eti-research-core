@@ -48,6 +48,8 @@ def test_multi_market_validation_keeps_markets_separate_and_reports_lineage():
     assert result["market_count"] == 3
     assert result["independent_market_count"] == 3
     assert result["summary"]["status"] == "cross_market_evidence_available"
+    assert result["summary"]["common_outer_test_windows"]
+    assert result["summary"]["markets_with_common_test_windows"] == 3
     assert len({row["lineage"]["dataset_sha256"] for row in result["markets"]}) == 3
     assert all(row["status"] == "research_candidate_only" for row in result["markets"])
     assert result["compute_budget"]["preflight_completed_before_any_fit"] is True
