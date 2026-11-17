@@ -39,7 +39,7 @@ DEPARTMENTS: dict[str, dict[str, Any]] = {
         "name": "Strategy Intelligence",
         "mode": "rules_plus_specialist_models",
         "purpose": "Generate, compare and select strategies using locked, cost-adjusted evidence.",
-        "capabilities": ("strategy.walk_forward", "strategy.select", "portfolio.allocate", "paper.tick"),
+        "capabilities": ("strategy.walk_forward", "strategy.select", "portfolio.allocate", "portfolio.allocate_from_account", "paper.tick"),
         "model_required": True,
         "model_roles": ("strategy_selector", "portfolio_optimizer"),
     },
