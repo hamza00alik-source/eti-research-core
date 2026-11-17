@@ -160,12 +160,38 @@ def prepare_solana_training_rows(dataset_export: dict[str, Any]) -> dict[str, An
     def reject(reason: str) -> None:
         excluded[reason] = excluded.get(reason, 0) + 1
 
+    # The durable label key is (baseline_snapshot_id, horizon_seconds).
+    # Exclude every occurrence of a duplicate key so an inconsistent export
+    # cannot silently overweight one baseline or choose an arbitrary target.
+    label_key_counts: dict[tuple[str, int], int] = {}
+    for candidate in labels:
+        if not isinstance(candidate, dict):
+            continue
+        if candidate.get("label_parse_error") or not isinstance(candidate.get("label"), dict):
+            continue
+        baseline_key = candidate.get("baseline_snapshot_id")
+        horizon_key = candidate.get("horizon_seconds")
+        if (
+            isinstance(baseline_key, str) and baseline_key
+            and isinstance(horizon_key, int) and not isinstance(horizon_key, bool)
+            and horizon_key > 0
+        ):
+            key = (baseline_key, horizon_key)
+            label_key_counts[key] = label_key_counts.get(key, 0) + 1
+    duplicate_label_keys = {
+        key for key, count in label_key_counts.items() if count > 1
+    }
+
     for label in labels:
         if not isinstance(label, dict):
             reject("malformed_label")
             continue
         if label.get("label_parse_error") or not isinstance(label.get("label"), dict):
             reject("malformed_label")
+            continue
+        duplicate_key = (label.get("baseline_snapshot_id"), label.get("horizon_seconds"))
+        if duplicate_key in duplicate_label_keys:
+            reject("duplicate_label_key")
             continue
         if label.get("reference_issues") != []:
             reject("label_reference_issues")
