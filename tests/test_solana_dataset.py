@@ -923,3 +923,32 @@ def test_training_preparation_rejects_float_schema_version():
     result = prepare_solana_training_rows(exported)
     assert result["eligible_row_count"] == 0
     assert result["exclusion_counts"] == {"snapshot_validation_issues": 1}
+
+
+
+def test_snapshot_validator_rejects_timestamp_that_overflows_utc_range():
+    row = {
+        "id": "utc-underflow", "capability": "solana.token.audit",
+        "mint": "MintA", "pool_address": "PoolA", "schema_version": 1,
+        "fetched_at": "0001-01-01T00:00:00+23:59", "payload": {},
+    }
+    report = validate_snapshot_rows([row])
+    assert report["issue_counts"]["invalid_timestamp"] == 1
+    assert report["rows_with_issues"] == 1
+    assert report["row_issues"] == [{
+        "snapshot_id": "utc-underflow", "issues": ["invalid_timestamp"],
+    }]
+
+
+@pytest.mark.parametrize("schema_version", [True, False])
+def test_snapshot_validator_rejects_boolean_schema_version(schema_version):
+    row = {
+        "id": "boolean-schema", "capability": "solana.token.audit",
+        "mint": "MintA", "pool_address": "PoolA", "schema_version": schema_version,
+        "fetched_at": "2026-01-01T00:00:00Z", "payload": {},
+    }
+    report = validate_snapshot_rows([row])
+    assert report["issue_counts"]["unsupported_schema_version"] == 1
+    assert report["row_issues"] == [{
+        "snapshot_id": "boolean-schema", "issues": ["unsupported_schema_version"],
+    }]
