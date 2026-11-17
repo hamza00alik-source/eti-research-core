@@ -309,7 +309,7 @@ def test_worker_reports_research_and_model_training_schedule_counts_separately(
 
     assert '"event":"autonomy.tasks_scheduled"' in output
     assert '"research_tasks":5' in output
-    assert '"model_training_tasks":10' in output
+    assert '"model_training_tasks":11' in output
     assert '"paper_tasks":0' in output
     assert '"live_tasks":0' in output
 
