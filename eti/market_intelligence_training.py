@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -71,7 +72,7 @@ def _fingerprint(dataset: pd.DataFrame, columns: list[str], horizon: int) -> dic
     config = {"horizon": horizon, "features": columns, "roles": ["regime_classifier", "volatility_estimator"],
               "estimator_family": "HistGradientBoosting", "split": "expanding_purged_chronological"}
     config_digest = hashlib.sha256(json.dumps(config, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    code_digest = hashlib.sha256(__file__.encode() + b"eti.market_intelligence_training.v1").hexdigest()
+    code_digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     experiment = hashlib.sha256(f"{code_digest}:{config_digest}:{data_digest}".encode()).hexdigest()
     return {"dataset_sha256": data_digest, "config_sha256": config_digest,
             "code_sha256": code_digest, "experiment_id": "eti-exp-" + experiment[:16]}
