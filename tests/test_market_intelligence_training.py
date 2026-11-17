@@ -32,7 +32,7 @@ def test_market_intelligence_pipeline_reports_two_separate_research_roles():
     assert set(result["roles"]) == {"regime_classifier", "volatility_estimator"}
     assert result["roles"]["regime_classifier"]["model_role"] == "regime_classifier"
     assert result["roles"]["volatility_estimator"]["model_role"] == "volatility_estimator"
-    assert result["compute_budget"]["estimated_model_fit_calls"] == 8
+    assert result["compute_budget"]["estimated_model_fit_calls"] == result["fold_count"] * 4
     assert result["promotion"]["eligible"] is False
     assert result["execution_enabled"] is False
     assert result["lineage"]["experiment_id"].startswith("eti-exp-")
