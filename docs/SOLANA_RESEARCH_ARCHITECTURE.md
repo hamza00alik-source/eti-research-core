@@ -718,7 +718,7 @@ establish why the supporting observation is absent.
 
 The full-workspace dataset report exposes `snapshot_validation` using the same
 non-mutating checks as dataset export validation. It reports malformed
-payloads, unsupported schema versions, missing/non-finite/negative feature
+payloads, unsupported schema versions (the version must be an integer, not a numerically equal float), missing/non-finite/negative feature
 values, zero price or liquidity, invalid timestamps, duplicate entity
 timestamps, non-increasing entity time, and duplicate snapshot IDs. The report
 uses the full workspace market-scan snapshot set rather than the bounded
