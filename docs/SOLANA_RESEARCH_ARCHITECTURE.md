@@ -322,12 +322,16 @@ The research-only `prepare_solana_training_rows` helper builds a conservative
 baseline-feature matrix only when both referenced snapshots are present in the
 export, pass snapshot validation, match the label's mint/pool identity, and the
 label has no reference-integrity issues and a finite sampled-return outcome.
-Malformed labels, invalid baseline features, unsupported snapshots and targets
-omitted by bounded exports are excluded with reason counts. The helper copies
-features only from the baseline snapshot; target observations contribute only
-the already-computed outcome. Its status is always `PREPARATION_ONLY` and
-`training_authorized` is always false. It does not fit or approve a model, and
-sampled returns are not executable returns or net P&L.
+Malformed labels, duplicate durable label keys (baseline snapshot plus
+horizon), invalid baseline features, unsupported snapshots and targets omitted
+by bounded exports are excluded with reason counts. Every occurrence of a
+duplicate key is excluded, including conflicting target references, so an
+inconsistent export cannot silently overweight a baseline or select an
+arbitrary target. The helper copies features only from the baseline snapshot;
+target observations contribute only the already-computed outcome. Its status
+is always `PREPARATION_ONLY` and `training_authorized` is always false. It does
+not fit or approve a model, and sampled returns are not executable returns or
+net P&L.
 
 
 ## Fixed benchmark diagnostics (implemented; no fitting)
