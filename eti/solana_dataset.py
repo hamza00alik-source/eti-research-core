@@ -169,6 +169,12 @@ def prepare_solana_training_rows(dataset_export: dict[str, Any]) -> dict[str, An
             continue
         if candidate.get("label_parse_error") or not isinstance(candidate.get("label"), dict):
             continue
+        if (
+            candidate.get("reference_issues") != []
+            or not candidate.get("baseline_snapshot_in_export")
+            or not candidate.get("target_snapshot_in_export")
+        ):
+            continue
         baseline_key = candidate.get("baseline_snapshot_id")
         horizon_key = candidate.get("horizon_seconds")
         if (
