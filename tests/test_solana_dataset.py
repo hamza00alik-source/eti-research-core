@@ -533,6 +533,7 @@ def test_training_preparation_binds_label_times_and_outcome_to_snapshot_evidence
         ("baseline_at", "2026-01-01T00:01:00Z", "label_snapshot_timestamp_mismatch"),
         ("target_at", "2026-01-01T00:07:00Z", "label_snapshot_timestamp_mismatch"),
         ("actual_elapsed_seconds", 999.0, "label_elapsed_time_mismatch"),
+        ("horizon_seconds", [], "invalid_horizon"),
         ("sampled_price_return_pct", 99.0, "label_outcome_snapshot_mismatch"),
     ]
     for field, value, reason in mutations:
