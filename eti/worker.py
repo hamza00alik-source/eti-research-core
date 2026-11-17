@@ -7,7 +7,9 @@ implicitly; operators control worker processes separately.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
+import math
 import sqlite3
 import threading
 import time
@@ -212,6 +214,81 @@ class AgentWorker:
         result["lifecycle"] = registered["lifecycle"]
         return result
 
+    def _bind_paper_portfolio_snapshot(
+        self, task: dict[str, Any], payload: dict[str, Any],
+        *, now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Replace caller-supplied exposure with a fresh owner-scoped paper snapshot."""
+        if not isinstance(payload, dict):
+            raise ValueError("portfolio allocation input must be an object")
+        account_id = payload.get("portfolio_account_id")
+        if not isinstance(account_id, str) or not account_id.strip():
+            raise ValueError("portfolio.allocate requires portfolio_account_id")
+        owner_id, workspace_id = task.get("owner_id"), task.get("workspace_id")
+        if not isinstance(owner_id, str) or not isinstance(workspace_id, str):
+            raise ValueError("portfolio allocation task is missing owner/workspace scope")
+        account = self.store.get_paper_portfolio_account(owner_id, workspace_id, account_id)
+        if not isinstance(account, dict):
+            raise ValueError("paper portfolio account is not owned by this task workspace")
+        if account.get("status") != "active":
+            raise ValueError("paper portfolio account is not active")
+        if account.get("base_currency") != "USD":
+            raise ValueError("portfolio allocation currently requires a USD base-currency account; FX conversion is not implemented")
+        snapshot = self.store.get_latest_paper_portfolio_snapshot(
+            owner_id, workspace_id, account_id
+        )
+        if not isinstance(snapshot, dict) or snapshot.get("source") != "owner_attested":
+            raise ValueError("a saved owner-attested paper portfolio snapshot is required")
+        try:
+            as_of = datetime.fromisoformat(str(snapshot["as_of"]).replace("Z", "+00:00"))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("paper portfolio snapshot timestamp is invalid") from exc
+        if as_of.tzinfo is None or as_of.utcoffset() is None:
+            raise ValueError("paper portfolio snapshot timestamp must include a timezone")
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None or current.utcoffset() is None:
+            raise ValueError("worker time must include a timezone")
+        age_seconds = (current.astimezone(timezone.utc) - as_of.astimezone(timezone.utc)).total_seconds()
+        if age_seconds < -30:
+            raise ValueError("paper portfolio snapshot is future-dated")
+        if age_seconds > 86400:
+            raise ValueError("paper portfolio snapshot is stale; refresh it within 24 hours")
+
+        positions = snapshot.get("positions")
+        if not isinstance(positions, list):
+            raise ValueError("paper portfolio snapshot positions are invalid")
+        current_positions: dict[str, float] = {}
+        group_exposure: dict[str, float] = {}
+        for position in positions:
+            if not isinstance(position, dict):
+                raise ValueError("paper portfolio snapshot contains an invalid position")
+            symbol, group, notional = (
+                position.get("symbol"), position.get("correlation_group"), position.get("notional")
+            )
+            if (not isinstance(symbol, str) or not symbol
+                    or not isinstance(group, str) or not group
+                    or isinstance(notional, bool) or not isinstance(notional, (int, float))
+                    or not math.isfinite(float(notional)) or float(notional) <= 0):
+                raise ValueError("paper portfolio snapshot contains invalid position evidence")
+            if symbol in current_positions:
+                raise ValueError("paper portfolio snapshot contains duplicate symbols")
+            current_positions[symbol] = float(notional)
+            group_exposure[group] = group_exposure.get(group, 0.0) + float(notional)
+
+        bound = dict(payload)
+        # Never trust caller-provided equity or exposure when an account snapshot exists.
+        bound["equity"] = snapshot["equity"]
+        bound["available_cash"] = snapshot["cash"]
+        bound["current_positions"] = current_positions
+        bound["correlated_group_exposure"] = group_exposure
+        bound["_eti_validated_portfolio_snapshot"] = {
+            "account_id": account_id, "base_currency": account["base_currency"],
+            "snapshot_id": snapshot["id"], "as_of": snapshot["as_of"],
+            "source": "owner_attested",
+            "freshness_seconds": max(0, int(age_seconds)),
+        }
+        return bound
+
     def run_once(self) -> dict[str, Any] | None:
         # Seed public research, simulated paper and owner-authorized live spot tasks.
         # Live orders are reachable only through the supervisor-gated live.tick capability.
@@ -253,6 +330,8 @@ class AgentWorker:
         error_type = None
         try:
             task_input = task["input"]
+            if capability == "portfolio.allocate":
+                task_input = self._bind_paper_portfolio_snapshot(task, task_input)
             if capability == "live.tick":
                 if (task.get("requester") != "eti.live.supervisor"
                         or not isinstance(task_input, dict)
@@ -260,6 +339,8 @@ class AgentWorker:
                     raise ValueError("live execution tasks must be created by the owner-authorized supervisor")
                 task_input = {**task_input, "owner_id": task["owner_id"], "task_id": task["id"]}
             result = self.registry.execute(capability, task_input)
+            if capability == "portfolio.allocate" and isinstance(result, dict):
+                result["portfolio_snapshot"] = task_input["_eti_validated_portfolio_snapshot"]
             if capability == "model.train_research":
                 result = self._register_model_candidate(result)
             status, retryable = "completed", False
