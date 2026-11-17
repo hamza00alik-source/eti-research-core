@@ -862,12 +862,12 @@ def test_snapshot_validator_detects_same_instant_with_different_timezone_offsets
     rows = [
         {
             "id": "offset-a", "capability": "solana.token.audit",
-            "mint": "MintA", "pool_address": "PoolA",
+            "mint": "MintA", "pool_address": "PoolA", "schema_version": 1,
             "fetched_at": "2026-01-01T00:00:00Z", "payload": {},
         },
         {
             "id": "offset-b", "capability": "solana.token.audit",
-            "mint": "MintA", "pool_address": "PoolA",
+            "mint": "MintA", "pool_address": "PoolA", "schema_version": 1,
             "fetched_at": "2026-01-01T01:00:00+01:00", "payload": {},
         },
     ]
