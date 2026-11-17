@@ -163,17 +163,48 @@ def train_multi_market_intelligence_specialists(
             "status": "research_candidate_only",
         })
 
-    regime_values = [
-        row["roles"]["regime_classifier"]["mean_outer_test_balanced_accuracy"]
-        for row in market_reports
-        if row["roles"]["regime_classifier"]["mean_outer_test_balanced_accuracy"] is not None
-    ]
-    volatility_improvements = [
-        row["roles"]["volatility_estimator"]["mae_improvement_over_baseline"]
-        for row in market_reports
-    ]
+    # Only compare metrics from exactly aligned outer-test windows. Markets
+    # with different trading calendars/history remain individually reportable,
+    # but do not contribute to a cross-market aggregate.
+    common_windows = None
+    for row in market_reports:
+        intervals = {
+            (fold["test_start"], fold["test_end"])
+            for fold in row["roles"]["regime_classifier"]["folds"]
+        }
+        common_windows = intervals if common_windows is None else common_windows & intervals
+    common_windows = sorted(common_windows or set())
+    regime_values = []
+    volatility_improvements = []
+    for row in market_reports:
+        aligned_regime = [
+            fold for fold in row["roles"]["regime_classifier"]["folds"]
+            if (fold["test_start"], fold["test_end"]) in common_windows
+        ]
+        aligned_volatility = [
+            fold for fold in row["roles"]["volatility_estimator"]["folds"]
+            if (fold["test_start"], fold["test_end"]) in common_windows
+        ]
+        row["common_window_fold_count"] = len(aligned_regime)
+        regime_scores = [
+            fold["model"]["balanced_accuracy"] for fold in aligned_regime
+            if fold["model"]["balanced_accuracy"] is not None
+        ]
+        if regime_scores:
+            regime_values.append(float(sum(regime_scores) / len(regime_scores)))
+        if aligned_volatility:
+            model_mae = sum(fold["model"]["mae"] for fold in aligned_volatility) / len(aligned_volatility)
+            baseline_mae = sum(fold["median_baseline"]["mae"] for fold in aligned_volatility) / len(aligned_volatility)
+            volatility_improvements.append(baseline_mae - model_mae)
     independent_count = len(groups)
-    sufficient = independent_count >= minimum_independent_markets
+    enough_markets = independent_count >= minimum_independent_markets
+    sufficient = enough_markets and bool(common_windows)
+    if not enough_markets:
+        summary_status = "insufficient_independent_markets"
+    elif not common_windows:
+        summary_status = "no_common_outer_test_windows"
+    else:
+        summary_status = "cross_market_evidence_available"
     lineage_payload = [
         {
             "identity": row["instrument"],
@@ -182,6 +213,7 @@ def train_multi_market_intelligence_specialists(
             "dataset_sha256": row["lineage"]["dataset_sha256"],
             "code_sha256": row["lineage"]["code_sha256"],
             "source_provenance": row["lineage"]["source_provenance"],
+            "data_quality": row["lineage"]["data_quality"],
         }
         for row in market_reports
     ]
@@ -199,8 +231,14 @@ def train_multi_market_intelligence_specialists(
         "independence_groups": sorted(groups),
         "minimum_independent_markets": minimum_independent_markets,
         "summary": {
-            "status": "cross_market_evidence_available" if sufficient
-                      else "insufficient_independent_markets",
+            "status": summary_status,
+            "common_outer_test_windows": [
+                {"test_start": start, "test_end": end}
+                for start, end in common_windows
+            ],
+            "markets_with_common_test_windows": sum(
+                row["common_window_fold_count"] > 0 for row in market_reports
+            ),
             "median_market_regime_balanced_accuracy":
                 median(regime_values) if regime_values else None,
             "markets_with_defined_regime_balanced_accuracy": len(regime_values),
@@ -209,8 +247,8 @@ def train_multi_market_intelligence_specialists(
             "markets_beating_volatility_baseline":
                 sum(value > 0 for value in volatility_improvements),
             "interpretation": (
-                "Descriptive cross-market medians only; not a confidence interval, "
-                "profitability result, or model-promotion decision."
+                "Descriptive medians of per-market metrics on exactly aligned outer-test windows only; "
+                "not a confidence interval, profitability result, or model-promotion decision."
             ),
         },
         "markets": market_reports,
