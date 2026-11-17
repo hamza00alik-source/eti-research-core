@@ -46,7 +46,7 @@ def _number(value: Any) -> float | None:
         return None
     try:
         result = float(value)
-    except (TypeError, ValueError):
+    except (OverflowError, TypeError, ValueError):
         return None
     return result if result == result and abs(result) != float("inf") else None
 
