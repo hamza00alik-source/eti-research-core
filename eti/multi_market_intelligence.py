@@ -80,11 +80,6 @@ def train_multi_market_intelligence_specialists(
         if identity in identities:
             raise ValueError(f"Duplicate market identity: {identity}")
         identities.add(identity)
-        if group.strip() in groups:
-            raise ValueError(
-                f"Independence group {group.strip()!r} is repeated; "
-                "multiple venues for one underlying are not independent markets"
-            )
         groups.add(group.strip())
         timeframes.add(snapshot.timeframe)
 
@@ -94,6 +89,11 @@ def train_multi_market_intelligence_specialists(
             validation_size=validation_size, test_size=test_size,
             step_size=step_size, purge_bars=horizon,
         )
+        for fold_number, fold in enumerate(folds):
+            if dataset.iloc[:fold.train_end]["future_regime"].nunique() < 2:
+                raise ValueError(
+                    f"Market {identity} fold {fold_number} training has fewer than two regime classes"
+                )
         estimated_fits += len(folds) * 4
         prepared.append({
             "snapshot": snapshot, "group": group.strip(),
@@ -196,6 +196,7 @@ def train_multi_market_intelligence_specialists(
         "horizon_bars": horizon,
         "market_count": len(market_reports),
         "independent_market_count": independent_count,
+        "independence_groups": sorted(groups),
         "minimum_independent_markets": minimum_independent_markets,
         "summary": {
             "status": "cross_market_evidence_available" if sufficient
