@@ -56,12 +56,13 @@ def test_multi_market_validation_keeps_markets_separate_and_reports_lineage():
 
 
 def test_duplicate_underlying_is_not_counted_as_independent_replication():
-    markets = [
+    result = run([
         make_snapshot("AAA/USDT", 1, "AAA"),
         make_snapshot("AAA/USD", 2, "AAA"),
-    ]
-    with pytest.raises(ValueError, match="Independence group"):
-        run(markets)
+    ])
+    assert result["market_count"] == 2
+    assert result["independent_market_count"] == 1
+    assert result["summary"]["status"] == "insufficient_independent_markets"
 
 
 def test_global_fit_budget_fails_before_any_estimator_fit(monkeypatch):
