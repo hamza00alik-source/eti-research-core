@@ -533,7 +533,6 @@ def test_training_preparation_binds_label_times_and_outcome_to_snapshot_evidence
         ("baseline_at", "2026-01-01T00:01:00Z", "label_snapshot_timestamp_mismatch"),
         ("target_at", "2026-01-01T00:07:00Z", "label_snapshot_timestamp_mismatch"),
         ("actual_elapsed_seconds", 999.0, "label_elapsed_time_mismatch"),
-        ("horizon_seconds", [], "invalid_horizon"),
         ("sampled_price_return_pct", 99.0, "label_outcome_snapshot_mismatch"),
     ]
     for field, value, reason in mutations:
@@ -542,6 +541,12 @@ def test_training_preparation_binds_label_times_and_outcome_to_snapshot_evidence
         result = prepare_solana_training_rows(corrupted)
         assert result["eligible_row_count"] == 0
         assert result["exclusion_counts"] == {reason: 1}
+
+    malformed_horizon = deepcopy(valid_export)
+    malformed_horizon["labels"][0]["horizon_seconds"] = []
+    malformed_horizon_result = prepare_solana_training_rows(malformed_horizon)
+    assert malformed_horizon_result["eligible_row_count"] == 0
+    assert malformed_horizon_result["exclusion_counts"] == {"invalid_horizon": 1}
 
     corrupted_target = deepcopy(valid_export)
     corrupted_target["snapshots"][1]["payload"]["evidence"]["price_usd"] = 3.0
