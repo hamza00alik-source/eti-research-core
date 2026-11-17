@@ -89,6 +89,7 @@ def _ohlcv_fetch_diagnostics(provider: Any, frame: pd.DataFrame, timeframe: str,
     return {
         "provider": getattr(provider, "provider_name", type(provider).__name__),
         "provider_class": type(provider).__name__,
+        "source_metadata": dict(frame.attrs.get("source_metadata") or {}),
         "venue": getattr(provider, "venue", "yahoo" if isinstance(provider, YahooFinanceProvider) else None),
         "timeframe": timeframe,
         "requested_candles": requested,
