@@ -14,9 +14,11 @@ snapshots must use the same timeframe.
 The total fit-call budget is preflighted across every market before the first
 estimator fit. Per-market results retain their own fold metrics, class support,
 coverage, baseline comparisons, source provenance and quality metadata.
-Cross-market summaries are descriptive medians of per-market metrics; folds
-are not pooled, and no confidence interval is calculated from overlapping
-folds. A caller-declared underlying group is the replication unit. The default
+Cross-market summaries use only exactly aligned outer-test windows and
+are descriptive medians of per-market metrics; folds are not pooled, and no
+confidence interval is calculated from overlapping folds. If no common outer
+test windows exist, the report withholds the cross-market aggregate and reports
+`no_common_outer_test_windows`. A caller-declared underlying group is the replication unit. The default
 minimum is three independent groups; below that threshold the report states
 `insufficient_independent_markets`.
 
