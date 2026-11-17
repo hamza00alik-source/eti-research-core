@@ -655,7 +655,9 @@ label results do not depend on export iteration order. Distinct snapshots with
 the same entity timestamp are still separately reported as duplicate
 entity/timestamp observations. Timestamps are normalized to UTC before identity
 comparison, so equivalent instants expressed with different offsets are detected;
-they are not silently collapsed.
+they are not silently collapsed. UTC conversion is performed during parsing, and
+an otherwise parseable timestamp whose UTC value falls outside Python's datetime
+range is reported as invalid rather than aborting the dataset audit.
 
 The non-increasing entity-time diagnostic describes the supplied row order.
 It is not evidence of provider clock failure or a missing observation.
