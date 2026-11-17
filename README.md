@@ -4,8 +4,8 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 
 ## Safety status
 
-- Live spot execution is available but disabled by default. It requires owner-managed credentials, saved capital/risk limits and explicit one-time owner authorization; no per-trade approval is required.
-- Live execution remains Binance/MEXC spot only and disabled by default. Research data now distinguishes crypto spot, perpetual swaps and dated futures where each exchange lists the requested contract. Derivative execution is not implemented.
+- Live order submission is hard-disabled in code (`LIVE_ORDER_EXECUTION_ENABLED = False`). Owner settings or authorization cannot override this kill switch. No real-money orders can be submitted by this deployment.
+- The execution implementation is research-stage scaffolding for Binance/MEXC spot only; derivatives execution is not implemented. Market-data research may cover crypto spot, perpetual swaps and dated futures where supported.
 - Public Yahoo Finance OHLCV research adapter is available for forex, equities, indices and commodities (Yahoo ticker notation such as EURUSD=X, AAPL, ^GSPC and GC=F). The owner-controlled autonomous loop discovers active crypto spot, perpetual-swap and dated-future listings across Binance/MEXC each day, then queues up to one top-ranked instrument per discovery. It also schedules forex, equity, commodity and index reference models, for up to ten candidate-training runs per daily cycle. This is public market-data access, not an authenticated broker feed; history and interval coverage vary. Validated CSV remains available as a fallback.
 - Derivative and non-crypto candidate training is exploratory: historical funding and open-interest features are used when supplied, but liquidation data is not yet a model feature and side-aware funding settlement, financing, corporate actions, futures rolls and contract-specific margin/fee schedules remain incomplete. A quality gate prevents unsupported candidates from passing approval.
 - Training does not run on application startup or in CI. It can be launched manually through the research capability/CLI or scheduled by the owner in the autonomous research settings; scheduled candidates remain subject to the same quality gates.
@@ -22,14 +22,13 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 - Use exchange keys with withdrawals disabled and IP restrictions enabled. Do not paste exchange keys into chat.
 - This vault supplies the owner-managed connection layer. Live execution remains off until separately configured and explicitly authorized by the owner.
 
-## Autonomous live spot execution
+## Live execution status: hard-disabled
 
-- Live execution is off by default. The owner must connect a Binance/MEXC key, configure a USDT spot watchlist and capital allocation, then complete a one-time authorization with explicit confirmations for spot trading permission, disabled withdrawals and exchange IP restrictions.
-- After authorization, the worker schedules one evaluation per completed candle. It selects the latest approved, calibrated model for each eligible market and executes model-driven entries/exits automatically; there is no per-trade approval prompt.
-- The first release is spot-only and long/flat, with at most one ETI-managed position open across the watchlist: no shorts, margin, leverage or withdrawals. Hard risk ceilings are enforced server-side: max 0.5% equity risk per trade, 10% single-position size, 25% gross exposure, 2% daily loss stop and 8% drawdown stop. Owner settings may be lower, never higher.
-- Every order starts with a durable client-order intent. Duplicate task retries are blocked; uncertain exchange responses trigger a fail-closed stop rather than resubmitting blindly. Open orders are reconciled before another signal can trade. The owner kill switch stops new scheduling; an order already accepted by an exchange may still need exchange-side cancellation/reconciliation.
-- The initial watchlist is owner-bounded. ETI only trades symbols with an approved, calibrated model; symbols without one are skipped. Candidate model approval remains a separate model-governance step.
-- Market orders can experience slippage and losses. This is an execution system, not a profitability guarantee. Start with a small allocation and verify exchange permissions and order history before increasing capital.
+- The production code-level kill switch is `LIVE_ORDER_EXECUTION_ENABLED = False`. The `/v1/execution/authorize` endpoint returns HTTP 409 while it is disabled; owner authorization cannot override it.
+- The worker may schedule public market research and simulated paper tasks. It cannot submit real-money orders while the hard kill switch is false.
+- Binance/MEXC credentials, saved risk limits, approved calibrated models and the durable order-intent machinery are not evidence that live execution is safe or enabled.
+- Before any future change to this switch, ETI requires independently reviewed, cost-adjusted out-of-sample evidence, paper execution and reconciliation evidence, risk/operational/security review, and an explicit separately reviewed code change.
+- Market orders can experience slippage and losses. Backtests and paper results do not guarantee future performance.
 
 ## Market coverage diagnostics
 
