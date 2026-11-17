@@ -653,7 +653,9 @@ creating labels, because persisted baseline/target references would otherwise
 be ambiguous. Unique-ID inputs are sorted by observed timestamp and ID, so
 label results do not depend on export iteration order. Distinct snapshots with
 the same entity timestamp are still separately reported as duplicate
-entity/timestamp observations; they are not silently collapsed.
+entity/timestamp observations. Timestamps are normalized to UTC before identity
+comparison, so equivalent instants expressed with different offsets are detected;
+they are not silently collapsed.
 
 The non-increasing entity-time diagnostic describes the supplied row order.
 It is not evidence of provider clock failure or a missing observation.
