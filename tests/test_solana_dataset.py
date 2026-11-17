@@ -517,6 +517,18 @@ def test_training_preparation_binds_label_times_and_outcome_to_snapshot_evidence
     }
     assert prepare_solana_training_rows(valid_export)["eligible_row_count"] == 1
 
+    # A duplicated durable label key must not create duplicate training rows.
+    # This also covers conflicting target references for the same baseline/horizon.
+    duplicate_export = deepcopy(valid_export)
+    conflicting_label = deepcopy(label)
+    conflicting_label["id"] = "label-2"
+    conflicting_label["target_snapshot_id"] = "other-target"
+    duplicate_export["labels"].append(conflicting_label)
+    duplicate_result = prepare_solana_training_rows(duplicate_export)
+    assert duplicate_result["eligible_row_count"] == 0
+    assert duplicate_result["excluded_label_count"] == 2
+    assert duplicate_result["exclusion_counts"] == {"duplicate_label_key": 2}
+
     mutations = [
         ("baseline_at", "2026-01-01T00:01:00Z", "label_snapshot_timestamp_mismatch"),
         ("target_at", "2026-01-01T00:07:00Z", "label_snapshot_timestamp_mismatch"),
