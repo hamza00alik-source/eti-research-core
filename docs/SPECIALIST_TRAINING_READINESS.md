@@ -12,7 +12,7 @@ remain authoritative where they are safer and more auditable than a prediction.
 | Department | Active foundation | Learned-model status | Additional evidence required |
 |---|---|---|---|
 | Market data | Instrument discovery, provenance, candle quality, session-aware validation | No ML model required for core controls | More verified venue/session calendars and licensed data adapters |
-| Market intelligence | Causal regime diagnostics and derivative context | `regime_classifier`, `volatility_estimator` not yet trained/validated as independent specialists | Point-in-time multi-market histories, purged walk-forward tests and benchmark comparisons |
+| Market intelligence | Causal regime diagnostics and derivative context; research-only training/evaluation pipeline for two distinct roles | `regime_classifier` and `volatility_estimator` have candidate training/evaluation pipelines; no promoted or inference-enabled models | Multi-market replication, robust per-class coverage, calibration/uncertainty review, baseline superiority and independent approval |
 | Prediction | BTC spot direction classifier, immutable artifact lineage and scoped inference contract | One research candidate; not economically viable in the first recovered run | Fresh post-lineage run, multi-instrument evidence, positive cost-adjusted OOS results and independent review |
 | Strategy | Validation-only strategy selection and evidence-gated paper portfolio allocation | No separately trained strategy selector yet | Multiple independent instruments, untouched tests, stable performance after costs and regime stratification |
 | Risk | Independent deterministic risk gate | Optional risk forecast is not required and cannot override the gate | Only consider a forecast model after enough independently observed risk/outcome samples |
@@ -47,6 +47,19 @@ remain authoritative where they are safer and more auditable than a prediction.
 6. A candidate is not a champion. Require independent evidence and human
    approval before approved inference. No result in this plan enables live
    trading.
+
+## Market-intelligence specialist pipeline
+
+PR #203 adds a research-only training/evaluation pipeline for `regime_classifier`
+and `volatility_estimator`. It constructs causal features, forward regime and
+forward realized-volatility targets, expanding chronological outer folds with
+horizon-sized purge gaps, and naive baselines. The fit-call cap is checked
+before fitting, and reports include code/config/data lineage. The pipeline
+returns metrics only: it does not serialize or register models, promote
+candidates, enable inference, or grant Queen authority. Adjacent expanding
+folds may overlap and are not independent replications. Single-instrument
+results are insufficient for promotion; class coverage and calibration /
+uncertainty must be reviewed across multiple eligible instruments and regimes.
 
 ## Current first-run evidence
 
