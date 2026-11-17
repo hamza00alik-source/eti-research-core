@@ -17,11 +17,13 @@ def _timestamp(value: Any) -> datetime | None:
         return None
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            return None
+        # Normalize once so comparisons and identities use the same instant.
+        # Extreme year/offset combinations can overflow datetime's UTC range.
+        return parsed.astimezone(timezone.utc)
+    except (OverflowError, ValueError):
         return None
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        return None
-    return parsed
 
 
 def _is_supported_schema_version(value: Any) -> bool:
@@ -108,7 +110,7 @@ def validate_snapshot_rows(
             problems.append("invalid_timestamp")
         else:
             entity = (str(row.get("mint", "")), str(row.get("pool_address", "")))
-            identity = (*entity, stamp.astimezone(timezone.utc).isoformat())
+            identity = (*entity, stamp.isoformat())
             if identity in seen:
                 issue_counts["duplicate_entity_timestamp"] += 1
                 problems.append("duplicate_entity_timestamp")
