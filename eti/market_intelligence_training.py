@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, mean_absolute_error, mean_squared_error
+from sklearn.metrics import accuracy_score, mean_absolute_error, mean_squared_error
 
 from .evaluation import walk_forward_folds
 from .features import build_features, feature_columns_for_frame
@@ -29,6 +29,37 @@ def _positive_int(value: Any, name: str, minimum: int = 1) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise ValueError(f"{name} must be an integer >= {minimum}")
     return value
+
+
+def _classification_metrics(y_true: pd.Series, y_pred: np.ndarray) -> dict[str, Any]:
+    """Return class-aware metrics without inventing balanced accuracy on one class."""
+    truth = y_true.astype(str).to_numpy()
+    predicted = np.asarray(y_pred).astype(str)
+    observed = [name for name in REGIME_CLASSES if np.any(truth == name)]
+    per_class: dict[str, dict[str, float | int | None]] = {}
+    for name in REGIME_CLASSES:
+        mask = truth == name
+        support = int(mask.sum())
+        per_class[name] = {
+            "support": support,
+            "predicted_count": int(np.sum(predicted == name)),
+            "recall": float(np.mean(predicted[mask] == name)) if support else None,
+        }
+    balanced = float(np.mean([per_class[name]["recall"] for name in observed])) if len(observed) >= 2 else None
+    return {
+        "accuracy": float(accuracy_score(truth, predicted)),
+        "balanced_accuracy": balanced,
+        "balanced_accuracy_status": "ok" if balanced is not None else "insufficient_test_class_coverage",
+        "observed_test_classes": observed,
+        "test_class_count": len(observed),
+        "class_coverage": float(len(observed) / len(REGIME_CLASSES)),
+        "per_class": per_class,
+    }
+
+
+def _mean_defined(values: list[float | None]) -> float | None:
+    defined = [value for value in values if value is not None and np.isfinite(value)]
+    return float(np.mean(defined)) if defined else None
 
 
 def _prepare_dataset(frame: pd.DataFrame, horizon: int) -> tuple[pd.DataFrame, list[str]]:
@@ -130,20 +161,16 @@ def train_market_intelligence_specialists(
         regime_baseline = DummyClassifier(strategy="most_frequent").fit(x_train, y_regime_train)
         pred = regime_model.predict(x_test)
         baseline_pred = regime_baseline.predict(x_test)
+        model_metrics = _classification_metrics(y_regime_test, pred)
+        baseline_metrics = _classification_metrics(y_regime_test, baseline_pred)
         regime_results.append({
             "fold": fold_number,
             "train_rows": len(train), "test_rows": len(test),
             "test_start": test["timestamp"].iloc[0].isoformat(),
             "test_end": test["timestamp"].iloc[-1].isoformat(),
             "class_counts": {name: int((y_regime_test == name).sum()) for name in REGIME_CLASSES},
-            "model": {
-                "accuracy": float(accuracy_score(y_regime_test, pred)),
-                "balanced_accuracy": float(balanced_accuracy_score(y_regime_test, pred)),
-            },
-            "majority_baseline": {
-                "accuracy": float(accuracy_score(y_regime_test, baseline_pred)),
-                "balanced_accuracy": float(balanced_accuracy_score(y_regime_test, baseline_pred)),
-            },
+            "model": model_metrics,
+            "majority_baseline": baseline_metrics,
         })
 
         y_vol_train = train["future_volatility"].astype(float)
@@ -184,8 +211,10 @@ def train_market_intelligence_specialists(
             "regime_classifier": {
                 "model_role": "regime_classifier",
                 "outer_test_folds": regime_results,
-                "mean_outer_test_balanced_accuracy": float(np.mean([x["model"]["balanced_accuracy"] for x in regime_results])),
-                "mean_baseline_balanced_accuracy": float(np.mean([x["majority_baseline"]["balanced_accuracy"] for x in regime_results])),
+                "mean_outer_test_balanced_accuracy": _mean_defined([x["model"]["balanced_accuracy"] for x in regime_results]),
+                "mean_baseline_balanced_accuracy": _mean_defined([x["majority_baseline"]["balanced_accuracy"] for x in regime_results]),
+                "balanced_accuracy_evaluated_folds": sum(x["model"]["balanced_accuracy"] is not None for x in regime_results),
+                "folds_with_insufficient_class_coverage": sum(x["model"]["balanced_accuracy"] is None for x in regime_results),
                 "status": "research_candidate_only",
             },
             "volatility_estimator": {
