@@ -361,9 +361,10 @@ def test_autonomy_schedules_separate_daily_model_training_tasks(tmp_path):
     ) == {"research_tasks": 5, "model_training_tasks": 0}
     assert store.enqueue_due_autonomy_tasks(
         datetime(2026, 1, 2, tzinfo=timezone.utc)
-    ) == {"research_tasks": 5, "model_training_tasks": 10}
+    ) == {"research_tasks": 5, "model_training_tasks": 11}
     all_tasks = store.list_agent_tasks("owner-a", workspace["id"])
     assert sum(t["target_capability"] == "model.train_research" for t in all_tasks) == 8
+    assert sum(t["target_capability"] == "market.intelligence.multi_validate" for t in all_tasks) == 2
     assert sum(t["target_capability"] == "market.discover" for t in all_tasks) == 12
 
 
