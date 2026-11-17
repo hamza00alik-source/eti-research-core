@@ -23,6 +23,8 @@ from .specialists import (
     risk_assessment_specialist, strategy_selection_specialist,
 )
 from .strategy_evaluation import run_strategy_walk_forward
+from .market_data_hub import build_public_market_hub
+from .multi_market_intelligence import train_multi_market_intelligence_specialists
 
 
 AgentHandler = Callable[[dict[str, Any]], dict[str, Any]]
@@ -510,11 +512,99 @@ def derivatives_market_context(payload: dict[str, Any]) -> dict[str, Any]:
     context["timeframe"] = timeframe
     return context
 
+
+def multi_market_intelligence_validation(payload: dict[str, Any]) -> dict[str, Any]:
+    """Discover and independently validate three liquid crypto spot underlyings."""
+    if not isinstance(payload, dict):
+        raise ValueError("multi-market validation input must be an object")
+    timeframe = payload.get("timeframe", "1h")
+    limit, min_rows = payload.get("limit", 1000), payload.get("min_rows", 750)
+    max_markets, max_model_fits = payload.get("max_markets", 3), payload.get("max_model_fits", 48)
+    horizon, min_train = payload.get("horizon", 6), payload.get("min_train", 500)
+    validation_size, test_size = payload.get("validation_size", 100), payload.get("test_size", 100)
+    step_size = payload.get("step_size", 100)
+    if timeframe not in {"1h", "4h", "1d"}:
+        raise ValueError("timeframe must be 1h, 4h, or 1d")
+    for name, value, lower, upper in (
+        ("limit", limit, 800, 2000), ("min_rows", min_rows, 700, 1800),
+        ("max_markets", max_markets, 3, 6), ("max_model_fits", max_model_fits, 1, 96),
+        ("horizon", horizon, 1, 24), ("min_train", min_train, 500, 1200),
+        ("validation_size", validation_size, 50, 300), ("test_size", test_size, 50, 300),
+        ("step_size", step_size, 25, 300),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or not lower <= value <= upper:
+            raise ValueError(f"{name} must be an integer from {lower} to {upper}")
+    if min_rows > limit:
+        raise ValueError("min_rows cannot exceed limit")
+
+    hub = build_public_market_hub(include_yahoo=False)
+    discovery = hub.discover(asset_class="crypto", market_type="spot")
+    stable_quotes = {"USD", "USDT", "USDC"}
+    excluded_bases = {"USDT", "USDC", "BUSD", "DAI", "TUSD", "FDUSD", "USDE", "WBTC", "WETH", "STETH", "BETH"}
+    preferred_bases = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "LTC"]
+    venue_priority = {"coinbaseexchange": 0, "kraken": 1, "binance": 2, "mexc": 3}
+    preference = {symbol: index for index, symbol in enumerate(preferred_bases)}
+    eligible = [
+        item for item in discovery.get("instruments", [])
+        if item.active and item.market_type == "spot"
+        and item.quote_currency and item.quote_currency.upper() in stable_quotes
+        and item.base_currency and item.base_currency.upper() not in excluded_bases
+    ]
+    eligible.sort(key=lambda item: (
+        preference.get(item.base_currency.upper(), len(preference)),
+        venue_priority.get(item.venue, 99), item.symbol,
+    ))
+    selected, seen_groups = [], set()
+    for instrument in eligible:
+        group = instrument.base_currency.upper()
+        if group not in seen_groups:
+            selected.append((instrument, group))
+            seen_groups.add(group)
+        if len(selected) >= max_markets:
+            break
+    if len(selected) < 3:
+        raise ValueError(f"Only {len(selected)} independent crypto spot underlyings were discovered; 3 required")
+
+    snapshots, fetch_failures = [], []
+    for instrument, group in selected:
+        try:
+            snapshot = hub.fetch(instrument, timeframe, limit, min_rows=min_rows)
+            snapshots.append({"snapshot": snapshot, "independence_group": group})
+        except Exception as exc:
+            fetch_failures.append({
+                "venue": instrument.venue, "symbol": instrument.symbol,
+                "independence_group": group, "error_type": type(exc).__name__,
+                "message": str(exc)[:300],
+            })
+    if len(snapshots) < 3:
+        raise ValueError(
+            f"Only {len(snapshots)} independent markets passed data validation; 3 required. "
+            f"Fetch failures: {fetch_failures}"
+        )
+    report = train_multi_market_intelligence_specialists(
+        snapshots, minimum_independent_markets=3, horizon=horizon,
+        min_train=min_train, validation_size=validation_size,
+        test_size=test_size, step_size=step_size, max_model_fits=max_model_fits,
+    )
+    report["discovery"] = {
+        "source_errors": discovery.get("source_errors", []),
+        "selected_instruments": [
+            {"venue": item.venue, "symbol": item.symbol, "independence_group": group}
+            for item, group in selected
+        ],
+        "fetch_failures": fetch_failures,
+    }
+    report["scheduled_research"] = True
+    report["execution_enabled"] = False
+    return report
+
+
 def default_capabilities() -> AgentCapabilityRegistry:
     registry = AgentCapabilityRegistry()
     registry.register("market.snapshot", market_snapshot)
     registry.register("market.discover", discover_market_universe)
     registry.register("market.coverage", market_coverage_report)
+    registry.register("market.intelligence.multi_validate", multi_market_intelligence_validation)
     registry.register("derivatives.context", derivatives_market_context)
     registry.register("strategy.walk_forward", strategy_walk_forward)
     registry.register("model.train_research", model_training_research)

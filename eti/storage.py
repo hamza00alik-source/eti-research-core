@@ -596,6 +596,33 @@ class MemoryStore:
                              _encode_json({"task_id": task_id, **payload}), now_text),
                         )
                         training_queued += 1
+                    # Bounded local multi-market intelligence validation; no paid training or execution.
+                    intelligence_task_id = str(uuid4())
+                    intelligence_payload = {
+                        "timeframe": timeframes[0], "limit": 1000, "min_rows": 750,
+                        "max_markets": 3, "horizon": 6, "min_train": 500,
+                        "validation_size": 100, "test_size": 100, "step_size": 100,
+                        "max_model_fits": 48, "scheduled_by": "eti.autonomy.model_training",
+                    }
+                    conn.execute(
+                        """INSERT INTO agent_tasks
+                        (id,owner_id,workspace_id,requester,target_capability,status,input_json,
+                         max_attempts,created_at,updated_at)
+                        VALUES(?,?,?,?,?,'queued',?,2,?,?)""",
+                        (intelligence_task_id, row["owner_id"], row["workspace_id"],
+                         "eti.autonomy.model_training", "market.intelligence.multi_validate",
+                         _encode_json(intelligence_payload), now_text, now_text),
+                    )
+                    conn.execute(
+                        """INSERT INTO audit_events
+                        (id,owner_id,workspace_id,event_type,payload_json,created_at)
+                        VALUES(?,?,?,?,?,?)""",
+                        (str(uuid4()), row["owner_id"], row["workspace_id"],
+                         "autonomy.multi_market_intelligence.scheduled",
+                         _encode_json({"task_id": intelligence_task_id, **intelligence_payload}),
+                         now_text),
+                    )
+                    training_queued += 1
                     # Four cross-asset reference models complement the dynamically discovered crypto candidates.
                     training_jobs = [
                         {"venue": "yahoo", "asset_class": "forex", "market_type": "spot", "symbol": "EURUSD=X"},

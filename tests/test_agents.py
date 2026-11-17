@@ -586,3 +586,60 @@ def test_market_coverage_report_rejects_non_object_payload():
     from eti.agents import market_coverage_report
     with pytest.raises(ValueError, match="JSON object"):
         market_coverage_report(["not", "an", "object"])
+
+
+def test_multi_market_intelligence_capability_discovers_and_validates_independent_markets(monkeypatch):
+    import pandas as pd
+    import eti.agents as agents
+    from eti.instruments import InstrumentSpec
+    from eti.market_data_hub import MarketDataSnapshot
+
+    instruments = [
+        InstrumentSpec(symbol=f"{base}/USDT", venue="mexc", asset_class="crypto",
+                       market_type="spot", base_currency=base, quote_currency="USDT")
+        for base in ("BTC", "ETH", "SOL")
+    ]
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=800, freq="h", tz="UTC"),
+        "open": [100.0] * 800, "high": [102.0] * 800,
+        "low": [99.0] * 800, "close": [101.0] * 800, "volume": [10.0] * 800,
+    })
+
+    class FakeHub:
+        def discover(self, **kwargs):
+            assert kwargs == {"asset_class": "crypto", "market_type": "spot"}
+            return {"instruments": instruments, "source_errors": []}
+
+        def fetch(self, instrument, timeframe, limit, min_rows):
+            assert timeframe == "1h" and limit == 1000 and min_rows == 750
+            return MarketDataSnapshot(instrument, timeframe, frame, {"venue": instrument.venue},
+                                      {"rows": len(frame), "ohlcv_validated": True})
+
+    captured = {}
+    monkeypatch.setattr(agents, "build_public_market_hub", lambda **kwargs: FakeHub())
+
+    def fake_train(snapshots, **kwargs):
+        captured["groups"] = [item["independence_group"] for item in snapshots]
+        captured["kwargs"] = kwargs
+        return {"schema": "eti.multi_market_intelligence_validation.v1",
+                "market_count": len(snapshots), "execution_enabled": False}
+
+    monkeypatch.setattr(agents, "train_multi_market_intelligence_specialists", fake_train)
+    result = agents.multi_market_intelligence_validation({})
+
+    assert result["market_count"] == 3
+    assert captured["groups"] == ["BTC", "ETH", "SOL"]
+    assert captured["kwargs"]["max_model_fits"] == 48
+    assert result["scheduled_research"] is True
+    assert result["execution_enabled"] is False
+
+
+def test_multi_market_intelligence_rejects_unsafe_compute_limits_before_discovery(monkeypatch):
+    import eti.agents as agents
+
+    monkeypatch.setattr(
+        agents, "build_public_market_hub",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("network discovery must not run")),
+    )
+    with pytest.raises(ValueError, match="max_model_fits"):
+        agents.multi_market_intelligence_validation({"max_model_fits": 10000})
