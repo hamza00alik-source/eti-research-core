@@ -24,6 +24,10 @@ def _timestamp(value: Any) -> datetime | None:
     return parsed
 
 
+def _is_supported_schema_version(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value == 1
+
+
 def _is_finite_number(value: int | float) -> bool:
     try:
         return math.isfinite(float(value))
@@ -68,7 +72,7 @@ def validate_snapshot_rows(
             issue_counts["duplicate_snapshot_id"] += 1
             problems.append("duplicate_snapshot_id")
         schema_version = row.get("schema_version")
-        if isinstance(schema_version, bool) or schema_version != 1:
+        if not _is_supported_schema_version(schema_version):
             issue_counts["unsupported_schema_version"] += 1
             problems.append("unsupported_schema_version")
         payload = row.get("payload")
@@ -228,10 +232,8 @@ def prepare_solana_training_rows(dataset_export: dict[str, Any]) -> dict[str, An
             reject("unsupported_snapshot_capability")
             continue
         if (
-            isinstance(baseline.get("schema_version"), bool)
-            or isinstance(target.get("schema_version"), bool)
-            or baseline.get("schema_version") != 1
-            or target.get("schema_version") != 1
+            not _is_supported_schema_version(baseline.get("schema_version"))
+            or not _is_supported_schema_version(target.get("schema_version"))
         ):
             reject("unsupported_snapshot_schema")
             continue
