@@ -620,7 +620,7 @@ class MemoryStore:
                         (str(uuid4()), row["owner_id"], row["workspace_id"],
                          "autonomy.multi_market_intelligence.scheduled",
                          _encode_json({"task_id": intelligence_task_id, **intelligence_payload}),
-                         now_text, now_text),
+                         now_text),
                     )
                     training_queued += 1
                     # Four cross-asset reference models complement the dynamically discovered crypto candidates.
