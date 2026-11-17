@@ -857,3 +857,25 @@ def test_training_preparation_excludes_non_object_snapshot_rows():
     result = prepare_solana_training_rows(exported)
     assert result["eligible_row_count"] == 0
     assert result["excluded_label_count"] == 0
+
+def test_snapshot_validator_detects_same_instant_with_different_timezone_offsets():
+    rows = [
+        {
+            "id": "offset-a", "capability": "solana.token.audit",
+            "mint": "MintA", "pool_address": "PoolA",
+            "fetched_at": "2026-01-01T00:00:00Z", "payload": {},
+        },
+        {
+            "id": "offset-b", "capability": "solana.token.audit",
+            "mint": "MintA", "pool_address": "PoolA",
+            "fetched_at": "2026-01-01T01:00:00+01:00", "payload": {},
+        },
+    ]
+    report = validate_snapshot_rows(rows)
+    assert report["issue_counts"]["duplicate_entity_timestamp"] == 1
+    assert report["issue_counts"]["non_increasing_entity_time"] == 1
+    assert report["rows_with_issues"] == 1
+    assert report["row_issues"] == [{
+        "snapshot_id": "offset-b",
+        "issues": ["duplicate_entity_timestamp", "non_increasing_entity_time"],
+    }]
