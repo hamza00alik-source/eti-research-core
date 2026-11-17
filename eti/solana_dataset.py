@@ -1,7 +1,7 @@
 """Validation diagnostics for exported Solana research observations."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import math
 from typing import Any
 
@@ -104,7 +104,7 @@ def validate_snapshot_rows(
             problems.append("invalid_timestamp")
         else:
             entity = (str(row.get("mint", "")), str(row.get("pool_address", "")))
-            identity = (*entity, stamp.isoformat())
+            identity = (*entity, stamp.astimezone(timezone.utc).isoformat())
             if identity in seen:
                 issue_counts["duplicate_entity_timestamp"] += 1
                 problems.append("duplicate_entity_timestamp")
