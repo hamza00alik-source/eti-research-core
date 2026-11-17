@@ -198,7 +198,6 @@ def train_multi_market_intelligence_specialists(
             volatility_improvements.append(baseline_mae - model_mae)
     independent_count = len(groups)
     enough_markets = independent_count >= minimum_independent_markets
-    sufficient = enough_markets and bool(common_windows)
     if not enough_markets:
         summary_status = "insufficient_independent_markets"
     elif not common_windows:
