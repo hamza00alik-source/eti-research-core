@@ -34,7 +34,7 @@ def _positive_int(value: Any, name: str, minimum: int = 1) -> int:
 def _classification_metrics(y_true: pd.Series, y_pred: np.ndarray) -> dict[str, Any]:
     """Return class-aware metrics without inventing balanced accuracy on one class."""
     truth = y_true.astype(str).to_numpy()
-    predicted = np.asarray(pred_pred := y_pred).astype(str)
+    predicted = np.asarray(y_pred).astype(str)
     observed = [name for name in REGIME_CLASSES if np.any(truth == name)]
     per_class: dict[str, dict[str, float | int | None]] = {}
     for name in REGIME_CLASSES:
