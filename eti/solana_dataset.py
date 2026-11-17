@@ -189,8 +189,14 @@ def prepare_solana_training_rows(dataset_export: dict[str, Any]) -> dict[str, An
         if label.get("label_parse_error") or not isinstance(label.get("label"), dict):
             reject("malformed_label")
             continue
-        duplicate_key = (label.get("baseline_snapshot_id"), label.get("horizon_seconds"))
-        if duplicate_key in duplicate_label_keys:
+        duplicate_baseline = label.get("baseline_snapshot_id")
+        duplicate_horizon = label.get("horizon_seconds")
+        if (
+            isinstance(duplicate_baseline, str) and duplicate_baseline
+            and isinstance(duplicate_horizon, int) and not isinstance(duplicate_horizon, bool)
+            and duplicate_horizon > 0
+            and (duplicate_baseline, duplicate_horizon) in duplicate_label_keys
+        ):
             reject("duplicate_label_key")
             continue
         if label.get("reference_issues") != []:
