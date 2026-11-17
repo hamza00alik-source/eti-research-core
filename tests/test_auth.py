@@ -87,3 +87,58 @@ def test_rate_limit_window_expires(tmp_path):
     with pytest.raises(RateLimitExceeded):
         auth.consume_rate_limit("login", "user-a", limit=1, window_seconds=60, now=120)
     auth.consume_rate_limit("login", "user-a", limit=1, window_seconds=60, now=161)
+
+
+def test_password_change_revokes_all_existing_tokens_and_new_login_works(tmp_path):
+    path = tmp_path / "auth.sqlite3"
+    auth = AuthManager(path, secret="s" * 40, registration_key="invite-key-123456")
+    account = auth.register("trader01", "old-password-123", "invite-key-123456")
+    first_token = auth.issue_token(account, now=1000)
+    second_token = auth.issue_token(account, now=1001)
+    assert auth.verify_token(first_token, now=1002) == account
+    auth.change_password(account["id"], "old-password-123", "new-password-456")
+    with pytest.raises(AuthenticationError, match="invalid or expired"):
+        auth.verify_token(first_token, now=1003)
+    with pytest.raises(AuthenticationError, match="invalid or expired"):
+        auth.verify_token(second_token, now=1003)
+    with pytest.raises(AuthenticationError):
+        auth.authenticate("trader01", "old-password-123")
+    assert auth.authenticate("trader01", "new-password-456") == account
+    fresh_token = auth.issue_token(account, now=1004)
+    assert auth.verify_token(fresh_token, now=1005) == account
+    reopened = AuthManager(path, secret="s" * 40, registration_key="invite-key-123456")
+    with pytest.raises(AuthenticationError, match="invalid or expired"):
+        reopened.verify_token(first_token, now=1006)
+    assert reopened.verify_token(fresh_token, now=1006) == account
+
+
+def test_password_change_rejects_wrong_or_reused_password_without_revoking_tokens(tmp_path):
+    auth = AuthManager(tmp_path / "auth.sqlite3", secret="s" * 40,
+                       registration_key="invite-key-123456")
+    account = auth.register("trader01", "old-password-123", "invite-key-123456")
+    token = auth.issue_token(account, now=1000)
+    with pytest.raises(AuthenticationError, match="current password"):
+        auth.change_password(account["id"], "wrong-password-123", "new-password-456")
+    with pytest.raises(ValueError, match="must differ"):
+        auth.change_password(account["id"], "old-password-123", "old-password-123")
+    assert auth.verify_token(token, now=1001) == account
+
+
+def test_existing_account_database_gets_token_version_migration(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "legacy-auth.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE auth_accounts (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, "
+            "password_salt BLOB NOT NULL, password_hash BLOB NOT NULL, created_at INTEGER NOT NULL)"
+        )
+    auth = AuthManager(path, secret="s" * 40, registration_key="invite-key-123456")
+    account = auth.register("trader01", "a-long-password-123", "invite-key-123456")
+    token = auth.issue_token(account, now=1000)
+    assert auth.verify_token(token, now=1001) == account
+    with sqlite3.connect(path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(auth_accounts)")}
+        version = conn.execute("SELECT token_version FROM auth_accounts WHERE id = ?", (account["id"],)).fetchone()[0]
+    assert "token_version" in columns
+    assert version == 0

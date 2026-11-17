@@ -88,9 +88,13 @@ class AuthManager:
                     username TEXT NOT NULL UNIQUE,
                     password_salt BLOB NOT NULL,
                     password_hash BLOB NOT NULL,
-                    created_at INTEGER NOT NULL
+                    created_at INTEGER NOT NULL,
+                    token_version INTEGER NOT NULL DEFAULT 0
                 )"""
             )
+            account_columns = {row[1] for row in conn.execute("PRAGMA table_info(auth_accounts)")}
+            if "token_version" not in account_columns:
+                conn.execute("ALTER TABLE auth_accounts ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
             conn.execute(
                 """CREATE TABLE IF NOT EXISTS auth_rate_limits (
                     bucket_key TEXT NOT NULL,
@@ -203,12 +207,45 @@ class AuthManager:
             raise AuthenticationError("invalid username or password")
         return {"id": row[0], "username": row[1]}
 
+    def change_password(self, account_id: str, current_password: str, new_password: str) -> None:
+        """Atomically change a password and revoke every previously issued token."""
+        current_bytes = self._password_bytes(current_password)
+        new_bytes = self._password_bytes(new_password)
+        with sqlite3.connect(self.database_path, timeout=10) as conn:
+            conn.execute("PRAGMA busy_timeout = 10000")
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT password_salt, password_hash FROM auth_accounts WHERE id = ?",
+                (account_id,),
+            ).fetchone()
+            if row is None:
+                raise AuthenticationError("invalid account credentials")
+            candidate = self._hash_password(current_bytes, row[0])
+            if not hmac.compare_digest(candidate, row[1]):
+                raise AuthenticationError("current password is incorrect")
+            if hmac.compare_digest(current_bytes, new_bytes):
+                raise ValueError("new password must differ from current password")
+            salt = secrets.token_bytes(16)
+            password_hash = self._hash_password(new_bytes, salt)
+            conn.execute(
+                "UPDATE auth_accounts SET password_salt = ?, password_hash = ?, "
+                "token_version = token_version + 1 WHERE id = ?",
+                (salt, password_hash, account_id),
+            )
+
     def issue_token(self, account: dict[str, str], *, now: int | None = None) -> str:
         issued = int(time.time()) if now is None else int(now)
+        with sqlite3.connect(self.database_path) as conn:
+            row = conn.execute(
+                "SELECT username, token_version FROM auth_accounts WHERE id = ?",
+                (account["id"],),
+            ).fetchone()
+        if row is None or row[0] != account["username"]:
+            raise AuthenticationError("invalid account credentials")
         header = {"alg": "HS256", "typ": "JWT"}
         payload = {
             "iss": _TOKEN_ISSUER, "sub": account["id"],
-            "username": account["username"], "iat": issued,
+            "username": account["username"], "ver": int(row[1]), "iat": issued,
             "exp": issued + self.token_ttl_seconds,
         }
         signing_input = _b64encode(_json_bytes(header)) + "." + _b64encode(_json_bytes(payload))
@@ -246,6 +283,16 @@ class AuthManager:
                 raise ValueError("expired or not-yet-valid token")
             if payload["exp"] - payload["iat"] > 3600:
                 raise ValueError("token lifetime exceeds policy")
+            version = payload.get("ver")
+            if isinstance(version, bool) or not isinstance(version, int) or version < 0:
+                raise ValueError("invalid token version")
+            with sqlite3.connect(self.database_path) as conn:
+                account_row = conn.execute(
+                    "SELECT username, token_version FROM auth_accounts WHERE id = ?",
+                    (payload["sub"],),
+                ).fetchone()
+            if account_row is None or account_row[0] != payload["username"] or account_row[1] != version:
+                raise ValueError("revoked token")
             return {"id": payload["sub"], "username": payload["username"]}
         except (ValueError, TypeError, KeyError, UnicodeError, json.JSONDecodeError) as exc:
             raise AuthenticationError("invalid or expired bearer token") from exc
