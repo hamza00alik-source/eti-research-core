@@ -17,6 +17,7 @@ from uuid import uuid4
 from .agents import AgentCapabilityRegistry, default_capabilities
 from .artifacts import ModelArtifactStore
 from .paper import run_paper_tick
+from .portfolio_bridge import allocate_from_persisted_snapshot
 from .execution import run_live_tick
 from .storage import MemoryStore
 
@@ -36,6 +37,15 @@ class AgentWorker:
             self.registry.register("paper.tick", lambda payload: run_paper_tick(payload, self.store))
         if "live.tick" not in self.registry.capabilities():
             self.registry.register("live.tick", lambda payload: run_live_tick(payload, self.store))
+        if "portfolio.allocate_from_account" not in self.registry.capabilities():
+            self.registry.register(
+                "portfolio.allocate_from_account",
+                lambda payload: allocate_from_persisted_snapshot(
+                    self.store, payload["__owner_id"], payload["__workspace_id"],
+                    {key: value for key, value in payload.items()
+                     if key not in {"__owner_id", "__workspace_id"}},
+                ),
+            )
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be an integer from 5 to 3600")
         if (owner_id is None) != (workspace_id is None):
@@ -253,6 +263,11 @@ class AgentWorker:
         error_type = None
         try:
             task_input = task["input"]
+            if capability == "portfolio.allocate_from_account":
+                if not isinstance(task_input, dict):
+                    raise ValueError("portfolio allocation input must be an object")
+                task_input = {**task_input, "__owner_id": task["owner_id"],
+                              "__workspace_id": task["workspace_id"]}
             if capability == "live.tick":
                 if (task.get("requester") != "eti.live.supervisor"
                         or not isinstance(task_input, dict)
