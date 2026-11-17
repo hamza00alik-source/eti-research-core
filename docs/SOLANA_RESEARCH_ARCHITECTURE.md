@@ -186,7 +186,7 @@ The scanner now records the DexScreener sampled `priceUsd`, USD liquidity,
 reported rolling 24-hour volume, 1-hour buy/sell counts, DEX identifier and
 quote-token address when supplied. Missing fields remain null. These are
 provider-reported sampled marks; they are not a continuous trade tape, OHLCV
-candles, order-book depth, or executable quotes. Pool identity is preserved so
+candles, order-book depth, or executable quotes. Numeric parsing treats oversized integers that cannot be represented as finite floats as unavailable evidence; the scanner reports `UNKNOWN` rather than aborting on malformed provider values. Pool identity is preserved so
 observations from different pools are never compared as if they were one market.
 
 The delayed label module supports 5-minute, 15-minute, 1-hour, 6-hour and
