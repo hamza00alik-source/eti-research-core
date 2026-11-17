@@ -8,7 +8,7 @@ It accepts validated `MarketDataSnapshot` objects and an explicit
 Each instrument receives its own feature/target construction, chronological
 purged folds, classifier, volatility estimator, naive baselines and data/code
 lineage. No observations or labels are pooled across instruments. Duplicate
-instrument identities and repeated underlying groups are rejected. All
+instrument identities are rejected. Repeated underlying groups may be included for venue comparison, but count only once toward independent replications. All
 snapshots must use the same timeframe.
 
 The total fit-call budget is preflighted across every market before the first
