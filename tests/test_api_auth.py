@@ -260,7 +260,8 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
         assert mismatched_evidence.status_code == 409
 
         approved = client.post(
-            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=_promotion_payload("a" * 64),
         )
         assert approved.status_code == 200, approved.text
         assert approved.json()["approved_by"] == "reviewer_admin"
