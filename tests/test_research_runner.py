@@ -244,6 +244,13 @@ def test_spot_short_economic_evaluation_is_blocked_until_borrow_costs_supported(
 
 def test_runner_records_every_candidate_in_the_trial_ledger(monkeypatch):
     import eti.research_runner as runner
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(runner, "estimate_nested_model_fits_from_rows", lambda *args, **kwargs: 4)
+    monkeypatch.setattr(
+        "eti.evaluation.walk_forward_folds",
+        lambda *args, **kwargs: [SimpleNamespace(train_end=400, test_start=600, test_end=700)],
+    )
 
     class FakeLedger:
         def __init__(self):

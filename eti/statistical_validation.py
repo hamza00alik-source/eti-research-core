@@ -116,7 +116,11 @@ def probability_of_backtest_overfitting(values: Any, *, n_splits: int = 8, metri
         logits.append(float(math.log(omega / (1.0 - omega))))
         selected_indices.append(selected)
         relative_ranks.append(omega)
-    pbo = float(np.mean(np.asarray(logits) <= 0.0))
+    # Exact median-rank ties carry half weight instead of being classified
+    # as fully overfit. This gives an all-tied family PBO of 0.5.
+    logit_array = np.asarray(logits, dtype=float)
+    tied = np.isclose(logit_array, 0.0, rtol=0.0, atol=1e-12)
+    pbo = float((np.sum(logit_array < -1e-12) + 0.5 * np.sum(tied)) / len(logit_array))
     return {
         "method": "combinatorially_symmetric_cross_validation", "metric": metric,
         "observations": int(returns.shape[0]), "strategy_count": int(returns.shape[1]),
