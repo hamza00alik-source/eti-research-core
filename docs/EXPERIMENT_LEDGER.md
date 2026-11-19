@@ -27,7 +27,7 @@ A trial ID cannot be reused. A completed or failed attempt cannot be restarted o
 
 Completion requires at least eight paired observations, identical lengths for timestamps and net differentials, timezone-aware ISO-8601 timestamps, strictly increasing unique observation times, and finite numeric differentials. The series is normalized to UTC and hashed with its family/trial identity and benchmark metadata.
 
-The family matrix accessor includes only completed trials and refuses to construct a matrix unless every completed trial has exactly the same timestamp vector. It returns an observations-by-trials matrix suitable for PBO, White Reality Check and SPA. It also returns the attempted-trial count (running + completed + failed), while separately reporting registered-but-not-started trials.
+The family matrix accessor includes only completed trials, recomputes each stored return-series digest before use, and refuses to construct a matrix unless every completed trial has exactly the same timestamp vector. A digest mismatch blocks the family assessment. It returns an observations-by-trials matrix suitable for PBO, White Reality Check and SPA. It also returns the attempted-trial count (running + completed + failed), while separately reporting registered-but-not-started trials.
 
 ## Statistical usage
 
