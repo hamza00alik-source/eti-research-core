@@ -14,7 +14,7 @@ The trial count is a governance input. Omitting abandoned or failed experiments 
 
 Call `probability_of_backtest_overfitting(returns_matrix, n_splits=8)` with a matrix shaped observations by strategies. The function partitions the timeline into equal contiguous blocks, enumerates half-block in-sample / complementary out-of-sample combinations, selects the in-sample winner, ranks that winner out of sample and calculates the fraction of logit ranks at or below zero.
 
-CSCV requires equal-sized blocks and aligned return series. The default split cap prevents accidental combinatorial explosion. PBO measures how often the selected in-sample winner falls below the OOS median across the symmetric partitions; it is not a probability that a live strategy will fail.
+CSCV requires equal-sized blocks and aligned return series. The default split cap prevents accidental combinatorial explosion. If the selected split count does not divide the observation count evenly, the integrated family assessment marks PBO as not computed and still returns White Reality Check and SPA; it does not discard otherwise usable family diagnostics. PBO measures how often the selected in-sample winner falls below the OOS median across the symmetric partitions; it is not a probability that a live strategy will fail.
 
 ## 3. White Reality Check and Hansen SPA
 
@@ -35,7 +35,9 @@ Call `assess_research_trial_family(family_snapshot, selected_trial_id=...)` with
 
 ## Integration boundary
 
-These utilities are intentionally separate from order execution and model approval. They are not yet wired into the model promotion endpoint because the current promotion payload does not carry a canonical, aligned per-period return matrix or a durable experiment-family registry. Do not fabricate these inputs from fold-level summary metrics. The next integration step is an immutable experiment/trial ledger that records every attempted hypothesis, dataset and cost-model identity, plus aligned net return series and a frozen benchmark.
+The integrated family assessment is now wired to the SQLite experiment ledger, the authenticated workspace-scoped diagnostics API and the approved research runner. The runner records candidate-specific outer-test return differentials against a frozen no-trade benchmark; it does not derive the matrix from fold-level summary metrics. Registered-but-unstarted hypotheses remain visible but are excluded from attempted-trial counts, while every started attempt—including failed attempts—is counted for DSR.
+
+These utilities remain separate from model promotion and order execution. They do not authenticate external source data, independently verify cost assumptions, prove that every external experiment was registered, or authorize promotion. SQLite is a single-instance store; multi-replica deployment requires a PostgreSQL migration.
 
 ## Safety
 
