@@ -42,6 +42,22 @@ def test_nested_training_pipeline_orchestrates_market_folds(monkeypatch):
     assert result["probability_calibration"]["method"] == "fold_local_temperature_scaling"
     assert result["folds"][0]["probability_calibration"]["calibration_fit"]["status"] == "insufficient_calibration_window"
     assert "hist_gradient_boosting" in result["candidate_summary"]
+    # The exact frozen outer-test predictions must yield ledger-ready,
+    # candidate-specific net return streams (not only selected-model metrics).
+    assert set(result["candidate_oos_returns"]) == set(pipeline.NESTED_CANDIDATE_NAMES)
+    for candidate_name, stream in result["candidate_oos_returns"].items():
+        assert stream["benchmark_id"] == "no_trade"
+        assert len(stream["timestamps"]) == len(stream["net_return_differentials"])
+        assert len(stream["timestamps"]) >= 8
+        assert len(stream["timestamps"]) == len(set(stream["timestamps"]))
+        assert stream["ledger_compatible"] is True
+    lineage = result["trial_lineage"]
+    assert len(lineage["training_data_sha256"]) == 64
+    assert len(lineage["evaluation_data_sha256"]) == 64
+    assert lineage["training_row_count"] > 0
+    assert lineage["evaluation_row_count"] == sum(
+        len(fold["timestamps"]) for fold in result["trading_performance"]["folds"]
+    )
     scenarios = result["cost_sensitivity"]["scenarios"]
     assert [item["cost_multiplier"] for item in scenarios] == [1.0, 1.5, 2.0]
     assert all(
