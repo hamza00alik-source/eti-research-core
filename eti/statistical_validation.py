@@ -241,8 +241,18 @@ def assess_research_trial_family(
     selected_index = trial_ids.index(selected_trial_id)
     selected_returns = matrix[:, selected_index]
     if np.std(selected_returns, ddof=1) <= np.finfo(float).eps:
-        raise ValueError("selected trial has zero volatility; Deflated Sharpe Ratio is undefined")
-    dsr = deflated_sharpe_ratio(selected_returns, trials=attempted)
+        dsr = {
+            "method": "deflated_sharpe_ratio",
+            "status": "undefined_zero_volatility",
+            "observations": int(len(selected_returns)),
+            "trial_count": attempted,
+            "period_sharpe": None,
+            "dsr_probability": None,
+            "dsr_pass_95": False,
+            "warning": "Selected trial has zero volatility; DSR is undefined. Family PBO and benchmark-relative bootstrap tests are still reported.",
+        }
+    else:
+        dsr = deflated_sharpe_ratio(selected_returns, trials=attempted)
     pbo = probability_of_backtest_overfitting(matrix, n_splits=pbo_splits, metric="sharpe")
     white = white_reality_check(
         matrix, repetitions=bootstrap_repetitions, block_length=block_length, seed=seed
