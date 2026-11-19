@@ -214,3 +214,26 @@ def test_trial_matrix_detects_return_series_tampering(tmp_path):
         )
     with pytest.raises(ValueError, match="digest mismatch"):
         store.get_research_trial_matrix("owner-a", workspace_id, "family-2026-01")
+
+
+def test_legacy_trial_family_migration_backfills_empty_manifest_digest(tmp_path):
+    path = tmp_path / "legacy-trials.sqlite3"
+    store = MemoryStore(path)
+    workspace = store.create_workspace("owner-a", "research")
+    workspace_id = workspace["id"]
+    _register(store, workspace_id, "trial-001")
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE research_trial_families SET source_evidence_sha256='' WHERE family_id=?",
+            ("family-2026-01",),
+        )
+
+    migrated = MemoryStore(path)
+    _register(migrated, workspace_id, "trial-002", config="e")
+    with sqlite3.connect(path) as conn:
+        digest = conn.execute(
+            "SELECT source_evidence_sha256 FROM research_trial_families WHERE family_id=?",
+            ("family-2026-01",),
+        ).fetchone()[0]
+    import hashlib
+    assert digest == hashlib.sha256(b"{}").hexdigest()
