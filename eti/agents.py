@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -364,7 +365,18 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         "assumption_type": "training_configured_not_independently_verified",
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     experiment_id = "eti-exp-" + config_sha256[:24]
+    code_digest = hashlib.sha256()
+    module_root = Path(__file__).resolve().parent
+    for source_name in (
+        "agents.py", "pipeline.py", "features.py", "evaluation.py",
+        "backtest.py", "transaction_costs.py", "model.py",
+    ):
+        source_path = module_root / source_name
+        code_digest.update(source_name.encode("utf-8"))
+        code_digest.update(source_path.read_bytes())
+    code_sha256 = code_digest.hexdigest()
     lineage = {
+        "code_sha256": code_sha256,
         "config_sha256": config_sha256,
         "dataset_sha256": schema.get("dataset_sha256"),
         "cost_model_sha256": cost_model_sha256,
