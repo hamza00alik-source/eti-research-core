@@ -406,6 +406,14 @@ class MemoryStore:
             ):
                 if column not in research_family_columns:
                     conn.execute(f"ALTER TABLE research_trial_families ADD COLUMN {column} {definition}")
+            # Backfill pre-manifest families with the canonical empty-manifest digest.
+            # This keeps existing families appendable after the schema migration.
+            empty_source_evidence_sha256 = hashlib.sha256(b"{}").hexdigest()
+            conn.execute(
+                """UPDATE research_trial_families SET source_evidence_sha256=?
+                WHERE source_evidence_sha256='' AND source_evidence_json='{}'""",
+                (empty_source_evidence_sha256,),
+            )
             autonomy_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info(autonomy_profiles)").fetchall()
             }
