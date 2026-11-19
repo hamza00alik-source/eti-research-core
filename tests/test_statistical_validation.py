@@ -1,5 +1,11 @@
 import numpy as np
 import pytest
+from datetime import datetime, timedelta, timezone
+
+
+def _hourly_times(count):
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    return [(start + timedelta(hours=index)).isoformat() for index in range(count)]
 
 from eti.statistical_validation import (
     assess_research_trial_family,
@@ -126,7 +132,7 @@ def test_trial_family_assessment_uses_full_attempted_count_and_all_four_tests():
         "failed_trial_count": 4,
         "trial_ids": ["trial-a", "trial-b", "trial-c"],
         "strategy_names": ["trend", "momentum", "breakout"],
-        "observation_times": [f"t-{i}" for i in range(400)],
+        "observation_times": _hourly_times(400),
         "net_return_differentials": matrix.tolist(),
     }
     report = assess_research_trial_family(
@@ -187,7 +193,7 @@ def test_trial_family_keeps_bootstrap_diagnostics_when_cscv_blocks_do_not_divide
         "attempted_trial_count": 3,
         "trial_ids": ["trial-a", "trial-b", "trial-c"],
         "strategy_names": ["candidate-a", "candidate-b", "candidate-c"],
-        "observation_times": [f"t-{i}" for i in range(10)],
+        "observation_times": _hourly_times(10),
         "net_return_differentials": matrix.tolist(),
     }
     report = assess_research_trial_family(
@@ -198,3 +204,25 @@ def test_trial_family_keeps_bootstrap_diagnostics_when_cscv_blocks_do_not_divide
     assert "divisible" in report["family_pbo"]["reason"]
     assert report["white_reality_check"]["bootstrap_repetitions"] == 200
     assert report["hansen_spa"]["bootstrap_repetitions"] == 200
+
+
+
+def test_trial_family_assessment_rejects_irregular_observation_intervals():
+    matrix = np.random.default_rng(41).normal(0.0, 0.01, size=(16, 2))
+    times = _hourly_times(16)
+    times[8] = (datetime.fromisoformat(times[7]) + timedelta(hours=2)).isoformat()
+    # Keep the sequence increasing while making one gap twice as long.
+    family = {
+        "family_id": "irregular-family",
+        "benchmark_id": "no_trade",
+        "attempted_trial_count": 2,
+        "trial_ids": ["trial-a", "trial-b"],
+        "strategy_names": ["candidate-a", "candidate-b"],
+        "observation_times": times,
+        "net_return_differentials": matrix.tolist(),
+    }
+    with pytest.raises(ValueError, match="equally spaced"):
+        assess_research_trial_family(
+            family, selected_trial_id="trial-a",
+            bootstrap_repetitions=200, block_length=2,
+        )
