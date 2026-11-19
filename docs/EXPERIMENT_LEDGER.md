@@ -10,9 +10,12 @@ The first trial registered in a family freezes:
 - training-data SHA-256;
 - evaluation-data SHA-256;
 - cost-model SHA-256;
-- benchmark identifier.
+- benchmark identifier;
+- an immutable source-evidence manifest and its SHA-256 digest (when created by the approved local runner).
 
-Every later trial in that family must repeat the exact same values. A family cannot silently change its dataset, cost assumptions or benchmark midway through a comparison. Each trial also records its strategy name and configuration SHA-256.
+The approved runner now fingerprints the exact validated OHLCV snapshot at the MarketDataHub boundary using a stable UTC-timestamp / IEEE-754 value serialization. It binds that snapshot digest, provider adapter identity, capture time, source provenance, data-quality report, validated cost-model object and its digest, plus the derived training/evaluation row hashes into one family manifest. The ledger stores the manifest and verifies its digest before returning diagnostics. Later trials must repeat the same manifest byte-for-byte.
+
+The authenticated public registration API does not accept a source-evidence manifest; API-created families therefore retain an empty manifest unless registered through the local runner. This makes the evidence receipt useful for reproducibility without pretending that a caller-supplied API hash is independently verified. A content fingerprint proves which values were captured, not that the upstream provider was truthful, complete, licensed or manipulation-free. It also cannot prove that every experiment outside ETI was disclosed.
 
 ## Trial lifecycle
 
@@ -41,7 +44,7 @@ The family matrix accessor includes only completed trials, recomputes each store
 
 Trial-family identifiers are scoped to an owner and workspace. Reusing a trial identifier within that scope is rejected, while independent workspaces may use the same local identifier.
 
-The ledger is connected to authenticated, workspace-scoped API endpoints and the approved research runner. The runner records the two current nested candidates against a common no-trade benchmark. Ledger recording requires step_size == test_size, unique observations, and timestamps exactly one configured candle interval apart; this prevents row-based block bootstraps from treating gaps as adjacent observations. If registration succeeds but starting fails, the registered-only trial remains visible and is excluded from attempted counts; only successfully started trials are marked failed after a run error. The ledger validates declared hashes and alignment but cannot authenticate source data, independently verify costs, or prove the benchmark was correctly constructed. It also cannot prove that all experiments performed outside ETI were registered.
+The ledger is connected to authenticated, workspace-scoped API endpoints and the approved research runner. The runner records the two current nested candidates against a common no-trade benchmark. Ledger recording requires step_size == test_size, unique observations, and timestamps exactly one configured candle interval apart; this prevents row-based block bootstraps from treating gaps as adjacent observations. If registration succeeds but starting fails, the registered-only trial remains visible and is excluded from attempted counts; only successfully started trials are marked failed after a run error. The ledger verifies the persisted source-manifest digest and exact captured-value fingerprint for runner-created families, but cannot independently authenticate the upstream provider, independently measure venue costs, or prove the benchmark was correctly constructed. API-created families may have no source manifest. It also cannot prove that all experiments performed outside ETI were registered.
 
 The aggregate training-row and evaluation-row hashes describe the union of rows used across expanding walk-forward folds. They are not globally disjoint: an earlier outer-test observation can legitimately enter the training set of a later fold. Each fold's own test window remains chronologically held out from that fold's training data. SQLite remains a single-instance store; multi-replica deployment requires a PostgreSQL migration.
 
