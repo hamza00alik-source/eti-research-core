@@ -31,8 +31,8 @@ The family matrix accessor includes only completed trials and refuses to constru
 
 ## Statistical usage
 
-- Pass the completed matrix to PBO/CSCV and the benchmark-relative bootstrap tests.
-- Use the full attempted-trial count as the DSR trial count for a selected trial from that family; do not use only the completed shortlist.
+- Pass the family snapshot to `assess_research_trial_family(family, selected_trial_id=...)` to run all four statistical diagnostics together.
+- The integrated assessment uses the full attempted-trial count as the DSR trial count for the selected completed trial; do not use only the completed shortlist.
 - If a failed attempt has no return series, it is counted for multiple-testing penalty but is not fabricated into the return matrix.
 - Use the family benchmark ID, evaluation-data hash and cost-model hash as mandatory inputs to downstream report provenance.
 
