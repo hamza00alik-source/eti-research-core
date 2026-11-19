@@ -848,6 +848,31 @@ class MemoryStore:
         return {"id": event_id, "owner_id": owner_id, "workspace_id": workspace_id,
                 "event_type": event_type, "payload": json.loads(encoded), "created_at": created_at}
 
+    def record_audit_event(
+        self, owner_id: str, event_type: str, payload: dict[str, Any],
+        workspace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist an account-scoped governance decision in the audit stream."""
+        owner_id = _required_text(owner_id, "owner_id")
+        event_type = _required_text(event_type, "event_type", 120)
+        if not isinstance(payload, dict):
+            raise ValueError("audit payload must be an object")
+        payload_json = _encode_json(payload)
+        if workspace_id is not None:
+            workspace_id = _required_text(workspace_id, "workspace_id")
+        event_id, now = str(uuid4()), _utc_now()
+        with self._connection() as conn:
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (event_id, owner_id, workspace_id, event_type, payload_json, now),
+            )
+        return {
+            "id": event_id, "owner_id": owner_id, "workspace_id": workspace_id,
+            "event_type": event_type, "payload": payload, "created_at": now,
+        }
+
+
     def list_audit_events(self, owner_id: str, limit: int = 100) -> list[dict[str, Any]]:
         owner_id = _required_text(owner_id, "owner_id")
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:

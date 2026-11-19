@@ -1023,6 +1023,15 @@ def approve_model(model_id: str, version: str,
         raise HTTPException(status_code=409, detail={"message": "candidate is not eligible for human promotion", "assessment": assessment})
     try:
         approved = store.approve_model_version(model_id, version, account["username"])
+        store.record_audit_event(
+            account["id"], "model.promotion.approved",
+            {
+                "model_id": model_id, "version": version,
+                "reviewer": account["username"],
+                "promotion_assessment": assessment,
+                "comparison_family_size": payload.comparison_family_size,
+            },
+        )
         return {**approved, "promotion_assessment": assessment}
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="model version not found") from exc

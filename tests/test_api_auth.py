@@ -236,6 +236,10 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
         )
         assert approved.status_code == 200, approved.text
         assert approved.json()["approved_by"] == "reviewer_admin"
+        assert approved.json()["promotion_assessment"]["promotion_eligible"] is True
+        audit = client.get("/v1/audit/events", headers=reviewer_headers).json()["items"]
+        promotion_event = next(item for item in audit if item["event_type"] == "model.promotion.approved")
+        assert promotion_event["payload"]["model_id"] == "eti-core"
         visible = client.get("/v1/models", headers=regular_headers)
         assert len(visible.json()["items"]) == 1
         assert visible.json()["items"][0]["lifecycle"] == "approved"
