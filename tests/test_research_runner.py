@@ -388,4 +388,20 @@ def test_runner_persists_candidate_trials_in_real_sqlite_ledger(tmp_path, monkey
     assert len(matrix["observation_times"]) == 16
     assert len(matrix["net_return_differentials"]) == 16
     assert all(len(row) == 2 for row in matrix["net_return_differentials"])
+
+    # Continue from the durable SQLite matrix into the same statistical
+    # assessment used by the authenticated diagnostics API.
+    from eti.statistical_validation import assess_research_trial_family
+    diagnostics = assess_research_trial_family(
+        matrix,
+        selected_trial_id=matrix["trial_ids"][0],
+        bootstrap_repetitions=200,
+        block_length=2,
+        pbo_splits=8,
+        seed=19,
+    )
+    assert diagnostics["attempted_trial_count"] == 2
+    assert diagnostics["family_pbo"]["pbo"] == 0.5
+    assert diagnostics["white_reality_check"]["bootstrap_repetitions"] == 200
+    assert diagnostics["hansen_spa"]["bootstrap_repetitions"] == 200
     assert result["execution_enabled"] is False
