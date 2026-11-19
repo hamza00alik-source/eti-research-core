@@ -135,7 +135,8 @@ def test_trial_family_assessment_uses_full_attempted_count_and_all_four_tests():
     )
     assert report["kind"] == "research_trial_family_statistical_assessment"
     assert report["attempted_trial_count"] == 7
-    assert report["selected_trial_dsr"]["trial_count"] == 7
+    assert report["selected_trial_deflated_information_ratio"]["trial_count"] == 7
+    assert "differential" in report["selected_trial_return_basis"]
     assert report["family_pbo"]["combination_count"] == 70
     assert report["white_reality_check"]["bootstrap_repetitions"] == 250
     assert report["hansen_spa"]["bootstrap_repetitions"] == 250
