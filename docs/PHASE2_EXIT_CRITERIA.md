@@ -48,14 +48,17 @@ The ledger verifies the manifest digest and, for runner-captured receipts, cross
 
 ## Phase 2 completion status
 
-**Implementation substantially present; final acceptance pending.**
+**Implementation complete and CI-verified on the integrated PR #217 merge ref; independent review and ordered PR integration remain pending.**
 
-Required before declaring Phase 2 complete:
+Latest integrated validation:
+- GitHub Actions run [44573262669](https://github.com/hamza00alik-source/eti-research-core/actions/runs/44573262669) succeeded on 2026-11-19.
+- **604 passed, 1 skipped, 8 warnings**.
+- Python compilation, JavaScript syntax checks, Docker Compose validation and production container image build all passed.
 
-- CI passes on the latest head of PR #217 and all prerequisite PR branches.
-- Independent review confirms statistical implementation, candidate selection and family accounting.
-- Review confirms that unverified API receipts cannot be represented as verified evidence.
-- The full PR stack is integrated in dependency order, with no unreviewed merge.
+Remaining governance / acceptance gates:
+
+- Independent review confirms statistical implementation, candidate selection, trial-family accounting and evidence trust boundaries.
+- The stacked PRs are integrated in dependency order after review and explicit repository-owner authorization.
 - Phase 3 planning addresses raw immutable data artifact retention, provider/source verification, independently measured execution costs, trial-family completeness controls and stronger benchmark construction.
 
-Even after these gates, ETI must continue to report economic performance as unproven until genuinely out-of-sample, independently costed evidence supports it.
+The passing integrated CI establishes code/build validation, not independent source authenticity, cost accuracy, complete capture of off-platform experiments, or a profitable trading edge. ETI must continue to report economic performance as unproven until genuinely out-of-sample, independently costed evidence supports it.
