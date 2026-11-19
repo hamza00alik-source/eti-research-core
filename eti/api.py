@@ -1278,6 +1278,7 @@ class ResearchTrialRegisterPayload(BaseModel):
     evaluation_data_sha256: str = Field(pattern="^[0-9a-f]{64}$")
     cost_model_sha256: str = Field(pattern="^[0-9a-f]{64}$")
     benchmark_id: str = Field(min_length=1, max_length=160)
+    source_evidence: dict[str, Any] = Field(default_factory=dict)
 
 class ResearchTrialCompletePayload(BaseModel):
     observation_times: list[str] = Field(min_length=8, max_length=200000)
@@ -1301,7 +1302,7 @@ def register_research_trial(workspace_id: str, payload: ResearchTrialRegisterPay
         return store.register_research_trial(account["id"], workspace_id, payload.family_id,
             payload.trial_id, payload.strategy_name, payload.config_sha256,
             payload.training_data_sha256, payload.evaluation_data_sha256,
-            payload.cost_model_sha256, payload.benchmark_id)
+            payload.cost_model_sha256, payload.benchmark_id, payload.source_evidence)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
     except ValueError as exc:
