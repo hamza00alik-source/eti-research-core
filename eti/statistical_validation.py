@@ -124,6 +124,7 @@ def probability_of_backtest_overfitting(values: Any, *, n_splits: int = 8, metri
         "method": "combinatorially_symmetric_cross_validation", "metric": metric,
         "observations": int(returns.shape[0]), "strategy_count": int(returns.shape[1]),
         "n_splits": n_splits, "combination_count": split_count, "pbo": pbo,
+        "tie_handling": "negative logits count 1; exact median-rank ties count 0.5; positive logits count 0",
         "median_logit_oos_rank": float(np.median(logits)), "mean_logit_oos_rank": float(np.mean(logits)),
         "selected_strategy_counts": {str(i): int(selected_indices.count(i)) for i in sorted(set(selected_indices))},
         "logit_oos_ranks": logits,
