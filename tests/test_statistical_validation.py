@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from eti.statistical_validation import (
+    assess_research_trial_family,
     deflated_sharpe_ratio,
     hansen_spa_test,
     probability_of_backtest_overfitting,
@@ -63,14 +64,17 @@ def test_cscv_rejects_unequal_blocks_odd_splits_and_excessive_combinations():
         probability_of_backtest_overfitting(returns[:400], n_splits=8, max_combinations=10)
 
 
-def test_cscv_rejects_non_finite_and_constant_strategy_columns():
+def test_cscv_rejects_non_finite_and_invalid_constant_strategy_columns():
     returns = np.random.default_rng(13).normal(size=(400, 3))
     returns[0, 0] = np.nan
     with pytest.raises(ValueError, match="finite"):
         probability_of_backtest_overfitting(returns)
     returns = np.random.default_rng(13).normal(size=(400, 3))
-    returns[:, 0] = 0.0
-    with pytest.raises(ValueError, match="volatility"):
+    returns[:, 0] = 0.0  # Constant cash/no-trade strategy has a zero Sharpe by convention.
+    report = probability_of_backtest_overfitting(returns)
+    assert 0.0 <= report["pbo"] <= 1.0
+    returns[:, 1] = 0.01  # Constant positive return with zero volatility is invalid for Sharpe ranking.
+    with pytest.raises(ValueError, match="zero-volatility"):
         probability_of_backtest_overfitting(returns)
 
 
@@ -106,3 +110,47 @@ def test_bootstrap_tests_are_reproducible_and_validate_parameters():
         hansen_spa_test(returns, repetitions=10)
     with pytest.raises(ValueError, match="block_length"):
         white_reality_check(returns, block_length=101)
+
+def test_trial_family_assessment_uses_full_attempted_count_and_all_four_tests():
+    rng = np.random.default_rng(31)
+    matrix = rng.normal(0.0001, 0.01, size=(400, 3))
+    matrix[:, 1] += 0.001
+    family = {
+        "family_id": "family-x",
+        "benchmark_id": "cash-usd",
+        "training_data_sha256": "a" * 64,
+        "evaluation_data_sha256": "b" * 64,
+        "cost_model_sha256": "c" * 64,
+        "attempted_trial_count": 7,
+        "completed_trial_count": 3,
+        "failed_trial_count": 4,
+        "trial_ids": ["trial-a", "trial-b", "trial-c"],
+        "strategy_names": ["trend", "momentum", "breakout"],
+        "observation_times": [f"t-{i}" for i in range(400)],
+        "net_return_differentials": matrix.tolist(),
+    }
+    report = assess_research_trial_family(
+        family, selected_trial_id="trial-b",
+        bootstrap_repetitions=250, block_length=4, seed=17,
+    )
+    assert report["kind"] == "research_trial_family_statistical_assessment"
+    assert report["attempted_trial_count"] == 7
+    assert report["selected_trial_dsr"]["trial_count"] == 7
+    assert report["family_pbo"]["combination_count"] == 70
+    assert report["white_reality_check"]["bootstrap_repetitions"] == 250
+    assert report["hansen_spa"]["bootstrap_repetitions"] == 250
+
+
+def test_trial_family_assessment_rejects_missing_selected_trial_and_underreported_count():
+    matrix = np.random.default_rng(32).normal(0.0, 0.01, size=(400, 2))
+    family = {
+        "family_id": "family-x", "benchmark_id": "cash",
+        "attempted_trial_count": 2, "trial_ids": ["a", "b"],
+        "strategy_names": ["one", "two"], "observation_times": [f"t-{i}" for i in range(400)],
+        "net_return_differentials": matrix.tolist(),
+    }
+    with pytest.raises(ValueError, match="selected_trial_id"):
+        assess_research_trial_family(family, selected_trial_id="missing", bootstrap_repetitions=200)
+    family["attempted_trial_count"] = 1
+    with pytest.raises(ValueError, match="cannot be less"):
+        assess_research_trial_family(family, selected_trial_id="a", bootstrap_repetitions=200)
