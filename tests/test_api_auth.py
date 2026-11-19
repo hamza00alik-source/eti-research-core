@@ -171,6 +171,33 @@ def test_login_and_registration_are_rate_limited(tmp_path, monkeypatch):
         assert limited_register.status_code == 429
 
 
+
+
+def _promotion_payload(challenger_sha):
+    start = pd.Timestamp("2025-01-01T00:00:00Z")
+    folds = []
+    for index in range(5):
+        folds.append({
+            "test_start": (start + pd.Timedelta(days=30 * index)).isoformat(),
+            "test_end": (start + pd.Timedelta(days=30 * index + 20)).isoformat(),
+            "test_bars": 200, "net_return_bps": 20.0,
+            "max_drawdown": 0.02, "out_of_sample_ece": 0.03,
+        })
+    champion_folds = [{**item, "net_return_bps": 10.0} for item in folds]
+    return {
+        "comparison_family_size": 1,
+        "champion_report": {
+            "model_sha256": "c" * 64, "training_data_sha256": "b" * 64,
+            "evaluation_data_sha256": "d" * 64, "cost_model_sha256": "e" * 64,
+            "cost_adjusted": True, "evaluation_locked": True, "folds": champion_folds,
+        },
+        "challenger_report": {
+            "model_sha256": challenger_sha, "training_data_sha256": "b" * 64,
+            "evaluation_data_sha256": "d" * 64, "cost_model_sha256": "e" * 64,
+            "cost_adjusted": True, "evaluation_locked": True, "folds": folds,
+        },
+    }
+
 def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeypatch):
     class CalibratedStub:
         estimator = type("Estimator", (), {
@@ -221,7 +248,8 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
 
         CalibratedStub.estimator.feature_names_in_ = np.array(["bad", "volume"])
         schema_mismatch = client.post(
-            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=_promotion_payload("a" * 64),
         )
         assert schema_mismatch.status_code == 409
         CalibratedStub.estimator.feature_names_in_ = np.array(["close", "volume"])
@@ -344,7 +372,7 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
         assert registered.status_code == 201, registered.text
         approved = client.post(
             "/v1/models/eti-inference-test/0.1.0/approve",
-            headers=reviewer_headers,
+            headers=reviewer_headers, json=_promotion_payload(digest),
         )
         assert approved.status_code == 200
 
