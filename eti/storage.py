@@ -975,7 +975,12 @@ class MemoryStore:
             source_evidence = {}
         if not isinstance(source_evidence, dict):
             raise ValueError("source_evidence must be a JSON object")
-        source_evidence_json = _encode_research_json(source_evidence)
+        source_evidence_json = json.dumps(
+            source_evidence, ensure_ascii=False, allow_nan=False,
+            sort_keys=True, separators=(",", ":"),
+        )
+        if len(source_evidence_json.encode("utf-8")) > MAX_RESEARCH_SERIES_BYTES:
+            raise ValueError("source evidence manifest exceeds the research-series size limit")
         source_evidence_sha256 = hashlib.sha256(source_evidence_json.encode("utf-8")).hexdigest()
         config_sha256 = _required_sha256(config_sha256, "config_sha256")
         training_data_sha256 = _required_sha256(training_data_sha256, "training_data_sha256")
