@@ -155,3 +155,23 @@ def test_trial_family_assessment_rejects_missing_selected_trial_and_underreporte
     family["attempted_trial_count"] = 1
     with pytest.raises(ValueError, match="cannot be less"):
         assess_research_trial_family(family, selected_trial_id="a", bootstrap_repetitions=200)
+
+def test_trial_family_assessment_reports_undefined_dsr_but_keeps_other_tests_for_no_trade_family():
+    family = {
+        "family_id": "cash-only",
+        "benchmark_id": "cash",
+        "attempted_trial_count": 3,
+        "trial_ids": ["cash-a", "cash-b"],
+        "strategy_names": ["no-trade-a", "no-trade-b"],
+        "observation_times": [f"t-{i}" for i in range(400)],
+        "net_return_differentials": np.zeros((400, 2)).tolist(),
+    }
+    report = assess_research_trial_family(
+        family, selected_trial_id="cash-a",
+        bootstrap_repetitions=200, block_length=4, seed=4,
+    )
+    assert report["selected_trial_deflated_information_ratio"]["status"] == "undefined_zero_volatility"
+    assert report["selected_trial_deflated_information_ratio"]["dsr_probability"] is None
+    assert report["family_pbo"]["pbo"] == 0.5
+    assert report["white_reality_check"]["p_value"] == 1.0
+    assert report["hansen_spa"]["p_value"] == 1.0
