@@ -1458,7 +1458,7 @@ class MemoryStore:
             if not isinstance(declared_lineage, dict):
                 raise ValueError("lineage must be a JSON object")
             import re
-            for digest_name in ("code_sha256", "config_sha256", "dataset_sha256"):
+            for digest_name in ("code_sha256", "config_sha256", "dataset_sha256", "cost_model_sha256"):
                 digest = declared_lineage.get(digest_name)
                 if digest is not None and (
                     not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
