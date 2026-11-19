@@ -26,14 +26,14 @@ def _live_store(tmp_path):
         {"features": FEATURE_COLUMNS}, ["crypto_spot"], "live-test-data",
         {"passed": True}, "calibrated", "trainer",
     )
-    store.approve_model_version("eti-binance-btc-usdt-1h", "live-test", "reviewer")
+    store.approve_model_version("eti-binance-crypto-spot-btc-usdt-1h", "live-test", "reviewer")
     store.register_model_version(
         "eti-binance-crypto-spot-eth-usdt-1h", "live-test",
         "artifact://sha256/" + "b" * 64, "b" * 64,
         {"features": FEATURE_COLUMNS}, ["crypto_spot"], "live-test-data",
         {"passed": True}, "calibrated", "trainer",
     )
-    store.approve_model_version("eti-binance-eth-usdt-1h", "live-test", "reviewer")
+    store.approve_model_version("eti-binance-crypto-spot-eth-usdt-1h", "live-test", "reviewer")
     store.upsert_exchange_credential("owner", "binance", "encrypted-key", "encrypted-secret", "1234")
     store.save_live_execution_profile(
         "owner", "binance", ["BTC/USDT", "ETH/USDT"], "1h", 1000.0,
