@@ -1194,6 +1194,30 @@ class MemoryStore:
             if expected_source_digest != source_evidence_sha256:
                 raise ValueError("source evidence manifest digest mismatch; family statistics are blocked")
         source_evidence = json.loads(source_evidence_json)
+        if not isinstance(source_evidence, dict):
+            raise ValueError("source evidence manifest must be a JSON object")
+        if source_evidence.get("capture_method") == "MarketDataHub.fetch":
+            # Runner-captured receipts must cross-bind to the family declarations.
+            # A valid outer digest alone would not detect internally inconsistent claims.
+            snapshot_digest = source_evidence.get("source_snapshot_sha256")
+            provenance = source_evidence.get("source_provenance")
+            cost_model = source_evidence.get("cost_model")
+            cost_digest = source_evidence.get("cost_model_sha256")
+            if not isinstance(snapshot_digest, str) or not _SHA256_RE.fullmatch(snapshot_digest):
+                raise ValueError("captured source snapshot fingerprint is missing or invalid")
+            if not isinstance(provenance, dict) or provenance.get("source_snapshot_sha256") != snapshot_digest:
+                raise ValueError("captured source provenance does not match its snapshot fingerprint")
+            if source_evidence.get("training_data_sha256") != family["training_data_sha256"]:
+                raise ValueError("captured training-data fingerprint does not match the trial family")
+            if source_evidence.get("evaluation_data_sha256") != family["evaluation_data_sha256"]:
+                raise ValueError("captured evaluation-data fingerprint does not match the trial family")
+            if not isinstance(cost_model, dict) or not isinstance(cost_digest, str):
+                raise ValueError("captured transaction-cost model evidence is incomplete")
+            actual_cost_digest = hashlib.sha256(json.dumps(
+                cost_model, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")).hexdigest()
+            if actual_cost_digest != cost_digest or cost_digest != family["cost_model_sha256"]:
+                raise ValueError("captured transaction-cost model fingerprint mismatch")
         completed = [row for row in rows if row["status"] == "completed"]
         if len(completed) < 2:
             raise ValueError("at least two completed trials are required for family statistics")
