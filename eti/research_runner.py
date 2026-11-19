@@ -295,6 +295,7 @@ def run_approved_multi_market_research(
     run_id = uuid4().hex[:16]
     for item in prepared:
         registered_trials: dict[str, str] = {}
+        started_trials: dict[str, str] = {}
         family_id = None
         try:
             if trial_ledger is not None:
@@ -325,8 +326,12 @@ def run_approved_multi_market_research(
                         item["trial_lineage"]["evaluation_data_sha256"], cost_sha256,
                         f"no_trade:{item['key']}",
                     )
-                    trial_ledger.start_research_trial(owner_id, workspace_id, trial_id)
+                    # Keep registration and start as separate lifecycle facts. If
+                    # start fails, the registered-but-unstarted hypothesis remains
+                    # visible in the family but is not counted as an attempted trial.
                     registered_trials[candidate_name] = trial_id
+                    trial_ledger.start_research_trial(owner_id, workspace_id, trial_id)
+                    started_trials[candidate_name] = trial_id
             report = run_nested_experiment(
                 item["frame"], horizon=horizon, min_train=min_train,
                 validation_size=validation_size, test_size=test_size,
@@ -341,7 +346,7 @@ def run_approved_multi_market_research(
                 streams = report.get("candidate_oos_returns", {})
                 if set(streams) != set(NESTED_CANDIDATE_NAMES):
                     raise ValueError("Research report omitted one or more registered candidate return streams")
-                for candidate_name, trial_id in registered_trials.items():
+                for candidate_name, trial_id in started_trials.items():
                     stream = streams[candidate_name]
                     if stream.get("ledger_compatible") is not True:
                         raise ValueError(
@@ -355,7 +360,8 @@ def run_approved_multi_market_research(
                 report["trial_ledger"] = {
                     "family_id": family_id, "trial_ids": registered_trials,
                     "registered_candidate_count": len(registered_trials),
-                    "completed_candidate_count": len(registered_trials),
+                    "started_candidate_count": len(started_trials),
+                    "completed_candidate_count": len(started_trials),
                     "benchmark": "no_trade",
                     "warning": "Candidate returns are net of configured fee/slippage assumptions and relative to no-trade. Data/cost authenticity and unrecorded external searches remain operator responsibilities.",
                 }
@@ -367,7 +373,7 @@ def run_approved_multi_market_research(
             }
         except Exception as exc:
             if trial_ledger is not None:
-                for trial_id in registered_trials.values():
+                for trial_id in started_trials.values():
                     try:
                         trial_ledger.fail_research_trial(
                             owner_id, workspace_id, trial_id,
@@ -377,6 +383,14 @@ def run_approved_multi_market_research(
                         pass
             results[item["key"]] = {
                 "status": "evaluation_failed", "fit_calls": item["fit_calls"],
+                "trial_ledger": ({
+                    "family_id": family_id,
+                    "registered_trial_ids": registered_trials,
+                    "started_trial_ids": started_trials,
+                    "registered_candidate_count": len(registered_trials),
+                    "started_candidate_count": len(started_trials),
+                    "warning": "Registered-but-unstarted trials remain visible but are excluded from attempted-trial statistics.",
+                } if trial_ledger is not None else None),
                 "error": {"type": type(exc).__name__, "message": str(exc)[:500]},
             }
 
