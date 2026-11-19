@@ -16,11 +16,11 @@ def _timestamps(start="2026-01-01T00:00:00Z"):
 
 
 def _register(store, workspace_id, trial_id, *, config="a", evaluation="b", cost="c",
-               source_evidence=None):
+               cost_digest=None, source_evidence=None):
     return store.register_research_trial(
         "owner-a", workspace_id, "family-2026-01", trial_id,
         "momentum", _digest(config), _digest("d"), _digest(evaluation),
-        _digest(cost), "buy-and-hold-btc-usdt-1h", source_evidence,
+        cost_digest or _digest(cost), "buy-and-hold-btc-usdt-1h", source_evidence,
     )
 
 
@@ -89,7 +89,8 @@ def test_trial_family_persists_and_verifies_source_evidence_manifest(tmp_path):
         "evaluation_data_sha256": _digest("b"),
     }
     for trial_id, config, value in (("trial-001", "a", 0.001), ("trial-002", "e", 0.002)):
-        _register(store, workspace_id, trial_id, config=config, source_evidence=manifest)
+        _register(store, workspace_id, trial_id, config=config, cost_digest=cost_digest,
+                   source_evidence=manifest)
         store.start_research_trial("owner-a", workspace_id, trial_id)
         store.complete_research_trial(
             "owner-a", workspace_id, trial_id, _timestamps(), [value] * 8,
@@ -138,7 +139,8 @@ def test_runner_capture_manifest_rejects_cross_binding_mismatch(tmp_path):
         "evaluation_data_sha256": _digest("b"),
     }
     for trial_id, value in (("trial-001", 0.001), ("trial-002", 0.002)):
-        _register(store, workspace["id"], trial_id, source_evidence=manifest)
+        _register(store, workspace["id"], trial_id, cost_digest=cost_digest,
+                   source_evidence=manifest)
         store.start_research_trial("owner-a", workspace["id"], trial_id)
         store.complete_research_trial(
             "owner-a", workspace["id"], trial_id, _timestamps(), [value] * 8,
