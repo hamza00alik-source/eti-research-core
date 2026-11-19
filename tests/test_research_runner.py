@@ -331,3 +331,61 @@ def test_runner_marks_registered_trials_failed_when_evaluation_fails(monkeypatch
     )
     assert result["markets"]["kraken:spot:BTC/USD"]["status"] == "evaluation_failed"
     assert len(ledger.started) == len(ledger.failed) == 2
+
+
+def test_runner_persists_candidate_trials_in_real_sqlite_ledger(tmp_path, monkeypatch):
+    import eti.research_runner as runner
+    from types import SimpleNamespace
+    from eti.storage import MemoryStore
+
+    monkeypatch.setattr(runner, "estimate_nested_model_fits_from_rows", lambda *args, **kwargs: 4)
+    monkeypatch.setattr(
+        "eti.evaluation.walk_forward_folds",
+        lambda n_rows, **kwargs: [SimpleNamespace(
+            train_end=min(4, n_rows),
+            test_start=min(8, n_rows),
+            test_end=min(12, n_rows),
+        )],
+    )
+
+    timestamps = pd.date_range("2026-01-01", periods=16, freq="h", tz="UTC")
+    monkeypatch.setattr(
+        runner, "run_nested_experiment",
+        lambda *args, **kwargs: {"candidate_oos_returns": {
+            name: {
+                "timestamps": [value.isoformat() for value in timestamps],
+                "net_return_differentials": [0.001 + i * 0.00001 for i in range(16)],
+                "benchmark_id": "no_trade",
+                "ledger_compatible": True,
+            } for name in runner.NESTED_CANDIDATE_NAMES
+        }},
+    )
+
+    database = tmp_path / "runner-ledger.sqlite3"
+    store = MemoryStore(database)
+    workspace = store.create_workspace("owner-1", "runner integration")
+    result = run_approved_multi_market_research(
+        scan(), allocation(), approval(), hub=FakeHub(variable_volume=True),
+        trial_ledger=store, owner_id="owner-1", workspace_id=workspace["id"],
+    )
+
+    market = result["markets"]["kraken:spot:BTC/USD"]
+    assert market["status"] == "evaluated"
+    ledger_report = market["report"]["trial_ledger"]
+    assert ledger_report["registered_candidate_count"] == 2
+    assert ledger_report["completed_candidate_count"] == 2
+
+    # Reopen the database to prove this is durable storage, not an in-memory fake.
+    reopened = MemoryStore(database)
+    matrix = reopened.get_research_trial_matrix(
+        "owner-1", workspace["id"], ledger_report["family_id"]
+    )
+    assert matrix["registered_trial_count"] == 2
+    assert matrix["attempted_trial_count"] == 2
+    assert matrix["completed_trial_count"] == 2
+    assert matrix["failed_trial_count"] == 0
+    assert matrix["trial_ids"] == sorted(ledger_report["trial_ids"].values())
+    assert len(matrix["observation_times"]) == 16
+    assert len(matrix["net_return_differentials"]) == 16
+    assert all(len(row) == 2 for row in matrix["net_return_differentials"])
+    assert result["execution_enabled"] is False
