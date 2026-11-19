@@ -461,8 +461,15 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
             "net_return_differentials": stream["net_return_differentials"],
             "benchmark_id": "no_trade",
             "ledger_compatible": (
-                len(stream["timestamps"]) == len(set(stream["timestamps"]))
-                and len(stream["timestamps"]) >= 8
+                len(stream["timestamps"]) >= 8
+                and len(stream["timestamps"]) == len(set(stream["timestamps"]))
+                and all(
+                    right - left == pd.to_timedelta(timeframe)
+                    for left, right in zip(
+                        pd.to_datetime(stream["timestamps"], utc=True),
+                        pd.to_datetime(stream["timestamps"], utc=True)[1:],
+                    )
+                )
             ),
         }
         for name, stream in candidate_return_streams.items()
