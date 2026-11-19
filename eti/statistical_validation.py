@@ -240,6 +240,26 @@ def assess_research_trial_family(
     observation_times = family.get("observation_times")
     if not isinstance(observation_times, list) or len(observation_times) < 8:
         raise ValueError("family must include the aligned observation timestamp vector")
+    # Circular block bootstrap and CSCV treat rows as equally spaced observations.
+    # Reject irregular timestamps here as well as at runner ingestion, because
+    # authenticated API clients can submit ledger trials directly.
+    from datetime import datetime
+    parsed_times = []
+    for index, value in enumerate(observation_times):
+        if not isinstance(value, str):
+            raise ValueError(f"observation_times[{index}] must be an ISO-8601 timestamp")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(f"observation_times[{index}] must be an ISO-8601 timestamp") from exc
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("research observation timestamps must include a timezone")
+        parsed_times.append(parsed.timestamp())
+    intervals = np.diff(np.asarray(parsed_times, dtype=float))
+    if np.any(intervals <= 0):
+        raise ValueError("research observation timestamps must be strictly increasing")
+    if not np.allclose(intervals, intervals[0], rtol=0.0, atol=1e-6):
+        raise ValueError("research observation timestamps must be equally spaced for block-bootstrap and CSCV diagnostics")
     matrix = _return_matrix(family.get("net_return_differentials"), require_nonzero_volatility=False)
     if matrix.shape != (len(observation_times), len(trial_ids)):
         raise ValueError("family return matrix dimensions do not match timestamps and completed trial IDs")
