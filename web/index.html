@@ -167,7 +167,7 @@
 <form id="model-approve-form" class="inline-form">
 <label>Model ID<input name="model_id" required maxlength="120"></label>
 <label>Version<input name="version" required maxlength="80"></label>
-<label class="wide-field">Locked champion/challenger evidence (JSON)<textarea name="evidence" rows="8" spellcheck="false" required placeholder='{"comparison_family_size":1,"champion_report":{},"challenger_report":{}}'></textarea></label>
+<label class="wide-field">Locked champion/challenger evidence and independent cost-evidence attestation (JSON)<textarea name="evidence" rows="10" spellcheck="false" required placeholder='{"comparison_family_size":1,"independent_cost_evidence_verified":true,"cost_evidence_sha256":"...64 lowercase hex...","cost_evidence_source":"independent exchange fee/spread/slippage evidence","cost_evidence_as_of":"2026-01-01T00:00:00Z","champion_report":{},"challenger_report":{}}'></textarea></label>
 <button type="submit">Review evidence and approve candidate</button>
 </form>
 <form id="model-retire-form" class="inline-form">
