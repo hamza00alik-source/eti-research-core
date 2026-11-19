@@ -252,10 +252,13 @@ def test_runner_records_every_candidate_in_the_trial_ledger(monkeypatch):
     from types import SimpleNamespace
 
     monkeypatch.setattr(runner, "estimate_nested_model_fits_from_rows", lambda *args, **kwargs: 4)
-    monkeypatch.setattr(
-        "eti.evaluation.walk_forward_folds",
-        lambda *args, **kwargs: [SimpleNamespace(train_end=400, test_start=600, test_end=700)],
-    )
+    def fake_folds(n_rows, **kwargs):
+        return [SimpleNamespace(
+            train_end=min(4, n_rows),
+            test_start=min(8, n_rows),
+            test_end=min(12, n_rows),
+        )]
+    monkeypatch.setattr("eti.evaluation.walk_forward_folds", fake_folds)
 
     class FakeLedger:
         def __init__(self):
@@ -308,6 +311,15 @@ def test_runner_marks_registered_trials_failed_when_evaluation_fails(monkeypatch
         def fail_research_trial(self, *args):
             self.failed.append(args)
 
+    monkeypatch.setattr(runner, "estimate_nested_model_fits_from_rows", lambda *args, **kwargs: 4)
+    from types import SimpleNamespace
+    def fake_folds(n_rows, **kwargs):
+        return [SimpleNamespace(
+            train_end=min(4, n_rows),
+            test_start=min(8, n_rows),
+            test_end=min(12, n_rows),
+        )]
+    monkeypatch.setattr("eti.evaluation.walk_forward_folds", fake_folds)
     monkeypatch.setattr(
         runner, "run_nested_experiment",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("synthetic training failure")),
