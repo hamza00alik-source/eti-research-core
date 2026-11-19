@@ -176,3 +176,25 @@ def test_trial_family_assessment_reports_undefined_dsr_but_keeps_other_tests_for
     assert "median-rank ties count 0.5" in report["family_pbo"]["tie_handling"]
     assert report["white_reality_check"]["p_value"] == 1.0
     assert report["hansen_spa"]["p_value"] == 1.0
+
+
+def test_trial_family_keeps_bootstrap_diagnostics_when_cscv_blocks_do_not_divide_evenly():
+    rng = np.random.default_rng(2026)
+    matrix = rng.normal(0.0001, 0.01, size=(10, 3))
+    family = {
+        "family_id": "uneven-cscv-family",
+        "benchmark_id": "no_trade",
+        "attempted_trial_count": 3,
+        "trial_ids": ["trial-a", "trial-b", "trial-c"],
+        "strategy_names": ["candidate-a", "candidate-b", "candidate-c"],
+        "observation_times": [f"t-{i}" for i in range(10)],
+        "net_return_differentials": matrix.tolist(),
+    }
+    report = assess_research_trial_family(
+        family, selected_trial_id="trial-a",
+        bootstrap_repetitions=200, block_length=2, pbo_splits=8, seed=2026,
+    )
+    assert report["family_pbo"]["status"] == "not_computed"
+    assert "divisible" in report["family_pbo"]["reason"]
+    assert report["white_reality_check"]["bootstrap_repetitions"] == 200
+    assert report["hansen_spa"]["bootstrap_repetitions"] == 200
