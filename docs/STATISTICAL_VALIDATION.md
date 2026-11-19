@@ -31,7 +31,7 @@ All bootstrap routines accept an explicit seed and return it with the report. Th
 
 ## Integrated family assessment
 
-Call `assess_research_trial_family(family_snapshot, selected_trial_id=...)` with the object returned by the ledger matrix accessor. It applies the DSR estimator to the selected trial's net benchmark-relative differential (therefore an information-ratio basis) using the full attempted-trial count, and runs PBO, White Reality Check and SPA across all completed aligned columns. It preserves the family benchmark and dataset/cost hashes in the report. A selected zero-volatility trial is rejected because its Sharpe ratio is undefined; a zero-return cash comparator is allowed in family PBO and benchmark-relative tests.
+Call `assess_research_trial_family(family_snapshot, selected_trial_id=...)` with the object returned by the ledger matrix accessor. It applies the DSR estimator to the selected trial's net benchmark-relative differential (therefore an information-ratio basis) using the full attempted-trial count, and runs PBO, White Reality Check and SPA across all completed aligned columns. It preserves the family benchmark and dataset/cost hashes in the report. If the selected trial has zero volatility, the family report marks its DSR as undefined rather than blocking PBO and bootstrap diagnostics; zero-return cash comparators are valid for family PBO and benchmark-relative tests.
 
 ## Integration boundary
 
