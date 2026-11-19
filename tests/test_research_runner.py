@@ -296,6 +296,11 @@ def test_runner_records_every_candidate_in_the_trial_ledger(monkeypatch):
     assert ledger.failed == []
     assert len({record[3] for record in ledger.registered}) == 2
     assert all(record[9] == "no_trade:kraken:spot:BTC/USD" for record in ledger.registered)
+    manifests = [record[10] for record in ledger.registered]
+    assert all(item["schema_version"] == "eti.research_source_evidence.v1" for item in manifests)
+    assert all(item["capture_method"] == "MarketDataHub.fetch" for item in manifests)
+    assert all(item["training_data_sha256"] == record[6] for item, record in zip(manifests, ledger.registered))
+    assert market["report"]["trial_ledger"]["source_evidence_sha256"]
     assert market["report"]["trial_ledger"]["completed_candidate_count"] == 2
 
 
