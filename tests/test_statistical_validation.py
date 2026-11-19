@@ -173,5 +173,6 @@ def test_trial_family_assessment_reports_undefined_dsr_but_keeps_other_tests_for
     assert report["selected_trial_deflated_information_ratio"]["status"] == "undefined_zero_volatility"
     assert report["selected_trial_deflated_information_ratio"]["dsr_probability"] is None
     assert report["family_pbo"]["pbo"] == 0.5
+    assert "median-rank ties count 0.5" in report["family_pbo"]["tie_handling"]
     assert report["white_reality_check"]["p_value"] == 1.0
     assert report["hansen_spa"]["p_value"] == 1.0
