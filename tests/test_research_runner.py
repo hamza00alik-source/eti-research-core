@@ -405,3 +405,44 @@ def test_runner_persists_candidate_trials_in_real_sqlite_ledger(tmp_path, monkey
     assert diagnostics["white_reality_check"]["bootstrap_repetitions"] == 200
     assert diagnostics["hansen_spa"]["bootstrap_repetitions"] == 200
     assert result["execution_enabled"] is False
+
+
+def test_runner_exposes_registered_but_unstarted_trial_without_counting_it_as_attempted(monkeypatch):
+    import eti.research_runner as runner
+    from types import SimpleNamespace
+
+    class StartFailureLedger:
+        def __init__(self):
+            self.registered = []
+            self.failed = []
+        def register_research_trial(self, *args):
+            self.registered.append(args)
+        def start_research_trial(self, *args):
+            raise RuntimeError("synthetic ledger start failure")
+        def fail_research_trial(self, *args):
+            self.failed.append(args)
+
+    monkeypatch.setattr(runner, "estimate_nested_model_fits_from_rows", lambda *args, **kwargs: 4)
+    monkeypatch.setattr(
+        "eti.evaluation.walk_forward_folds",
+        lambda n_rows, **kwargs: [SimpleNamespace(
+            train_end=min(4, n_rows),
+            test_start=min(8, n_rows),
+            test_end=min(12, n_rows),
+        )],
+    )
+    ledger = StartFailureLedger()
+    result = run_approved_multi_market_research(
+        scan(), allocation(), approval(), hub=FakeHub(variable_volume=True),
+        trial_ledger=ledger, owner_id="owner-1", workspace_id="workspace-1",
+    )
+
+    market = result["markets"]["kraken:spot:BTC/USD"]
+    assert market["status"] == "evaluation_failed"
+    lifecycle = market["trial_ledger"]
+    assert len(ledger.registered) == 1
+    assert lifecycle["registered_candidate_count"] == 1
+    assert lifecycle["started_candidate_count"] == 0
+    assert lifecycle["registered_trial_ids"]
+    assert lifecycle["started_trial_ids"] == {}
+    assert ledger.failed == []  # Registered-only trials cannot be failed as running attempts.
