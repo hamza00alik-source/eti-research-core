@@ -90,7 +90,7 @@ def test_trial_family_persists_and_verifies_source_evidence_manifest(tmp_path):
     matrix = reopened.get_research_trial_matrix("owner-a", workspace_id, "family-2026-01")
     assert matrix["source_evidence"] == manifest
     expected = hashlib.sha256(json.dumps(
-        manifest, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True
+        manifest, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")).hexdigest()
     assert matrix["source_evidence_sha256"] == expected
 
