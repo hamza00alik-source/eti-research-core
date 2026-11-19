@@ -116,7 +116,10 @@ def probability_of_backtest_overfitting(values: Any, *, n_splits: int = 8, metri
         logits.append(float(math.log(omega / (1.0 - omega))))
         selected_indices.append(selected)
         relative_ranks.append(omega)
-    pbo = float(np.mean(np.asarray(logits) <= 0.0))
+    logit_values = np.asarray(logits, dtype=float)
+    tie_tolerance = 1e-12
+    pbo = float(np.mean(logit_values < -tie_tolerance)
+                + 0.5 * np.mean(np.abs(logit_values) <= tie_tolerance))
     return {
         "method": "combinatorially_symmetric_cross_validation", "metric": metric,
         "observations": int(returns.shape[0]), "strategy_count": int(returns.shape[1]),
