@@ -80,4 +80,5 @@ def test_backtest_replay_is_deterministic_for_identical_inputs():
 
     assert first["final_equity"] == pytest.approx(replay["final_equity"], abs=0.0)
     assert first["equity_curve"].equals(replay["equity_curve"])
-    assert first["trades"] == replay["trades"]
+    assert first["position_changes"] == replay["position_changes"]
+    assert first["max_drawdown"] == pytest.approx(replay["max_drawdown"], abs=0.0)
