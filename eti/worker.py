@@ -17,10 +17,10 @@ from typing import Any
 from uuid import uuid4
 
 from .agents import AgentCapabilityRegistry, default_capabilities
-from .artifacts import ModelArtifactStore
 from .paper import run_paper_tick
 from .execution import run_live_tick
 from .storage import MemoryStore
+from .model_identity import model_id_for_instrument
 
 
 class AgentWorker:
@@ -170,10 +170,15 @@ class AgentWorker:
         required = ("venue", "asset_class", "market_type", "symbol", "timeframe", "training_data_ref")
         if not digest or not uri or not isinstance(schema, dict) or any(not result.get(k) for k in required):
             raise ValueError("trained candidate is missing registry metadata")
-        safe_symbol = result["symbol"].replace("/", "-").replace(":", "-").replace("=", "-").replace("^", "")
         asset_class = result["asset_class"]
         market_type = result["market_type"]
-        model_id = f"eti-{result['venue']}-{asset_class}-{market_type}-{safe_symbol}-{result['timeframe']}".lower()
+        model_id = model_id_for_instrument(
+            venue=result["venue"],
+            asset_class=asset_class,
+            market_type=market_type,
+            symbol=result["symbol"],
+            timeframe=result["timeframe"],
+        )
         version = "research-" + digest[:16]
         evaluation = dict(result.get("evaluation") or {})
         evaluation["passed"] = bool(result.get("evaluation_passed", False))
@@ -191,18 +196,9 @@ class AgentWorker:
             registered = self.store.get_model_version(model_id, version)
             if not registered or registered.get("artifact_sha256") != digest:
                 raise
+        # Training workers may register research candidates but never approve them.
+        # Approval requires the separate, documented human-review promotion process.
         auto_approved = False
-        if evaluation["passed"] and calibration_status == "calibrated" and registered["lifecycle"] == "candidate":
-            # The promotion authority is a deterministic server quality gate, not the model itself.
-            artifact_model = ModelArtifactStore().load_model(uri, digest)
-            trained_features = getattr(getattr(artifact_model, "estimator", None), "feature_names_in_", None)
-            expected_features = schema.get("features")
-            if (not isinstance(expected_features, list) or trained_features is None
-                    or [str(name) for name in trained_features] != expected_features
-                    or not artifact_model.has_valid_calibration()):
-                raise ValueError("candidate artifact failed independent feature-schema or calibration verification")
-            registered = self.store.approve_model_version(model_id, version, "eti.quality_gate")
-            auto_approved = True
         result["registry"] = {
             "model_id": registered["model_id"],
             "version": registered["version"],

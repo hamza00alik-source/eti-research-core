@@ -21,14 +21,14 @@ def _live_store(tmp_path):
     store = MemoryStore(tmp_path / "live.sqlite3")
     store.create_workspace("owner", "live")
     store.register_model_version(
-        "eti-binance-btc-usdt-1h", "live-test",
+        "eti-binance-crypto-spot-btc-usdt-1h", "live-test",
         "artifact://sha256/" + "a" * 64, "a" * 64,
         {"features": FEATURE_COLUMNS}, ["crypto_spot"], "live-test-data",
         {"passed": True}, "calibrated", "trainer",
     )
     store.approve_model_version("eti-binance-btc-usdt-1h", "live-test", "reviewer")
     store.register_model_version(
-        "eti-binance-eth-usdt-1h", "live-test",
+        "eti-binance-crypto-spot-eth-usdt-1h", "live-test",
         "artifact://sha256/" + "b" * 64, "b" * 64,
         {"features": FEATURE_COLUMNS}, ["crypto_spot"], "live-test-data",
         {"passed": True}, "calibrated", "trainer",

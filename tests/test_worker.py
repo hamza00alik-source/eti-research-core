@@ -214,27 +214,12 @@ def test_user_created_live_execution_task_is_rejected_by_worker(tmp_path):
     assert result["result"]["error"]["type"] == "ValueError"
 
 
-def test_worker_auto_approves_only_quality_passed_calibrated_artifact(tmp_path, monkeypatch):
-    import eti.worker as worker_module
+def test_worker_keeps_quality_passed_calibrated_artifact_as_candidate_for_human_review(tmp_path):
 
     store = MemoryStore(tmp_path / "auto-promotion.sqlite3")
     store.create_workspace("owner-1", "worker tests")
     worker = AgentWorker(store, registry=AgentCapabilityRegistry())
 
-    class FakeEstimator:
-        feature_names_in_ = ["ret_1", "volatility"]
-
-    class FakeModel:
-        estimator = FakeEstimator()
-        def has_valid_calibration(self):
-            return True
-
-    class FakeArtifacts:
-        def load_model(self, uri, digest):
-            assert digest == "b" * 64
-            return FakeModel()
-
-    monkeypatch.setattr(worker_module, "ModelArtifactStore", FakeArtifacts)
     result = {
         "venue": "mexc", "asset_class": "crypto", "market_type": "spot",
         "symbol": "ETH/USDT", "timeframe": "1h",
@@ -252,11 +237,13 @@ def test_worker_auto_approves_only_quality_passed_calibrated_artifact(tmp_path, 
     registered = worker._register_model_candidate(result)
     model = store.get_model_version(registered["registry"]["model_id"],
                                     registered["registry"]["version"])
-    assert model["lifecycle"] == "approved"
+    assert model["lifecycle"] == "candidate"
     assert model["created_by"] == "eti.worker"
-    assert model["approved_by"] == "eti.quality_gate"
-    assert registered["registry"]["approval_required"] is False
-    assert registered["registry"]["promotion_authority"] == "eti.quality_gate"
+    assert model["approved_by"] is None
+    assert registered["registry"]["model_id"] == "eti-mexc-crypto-spot-eth-usdt-1h"
+    assert registered["registry"]["approval_required"] is True
+    assert registered["registry"]["promotion_authority"] is None
+    assert registered["lifecycle"] == "candidate"
 
 
 def test_owner_scoped_worker_cannot_claim_another_workspace_task(tmp_path):

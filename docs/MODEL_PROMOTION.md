@@ -19,3 +19,12 @@ The statistical test is an exact one-sided sign test over non-tied fold-level ne
 - Repeatedly tuning after seeing the same holdout invalidates the evidence. Use a fresh locked holdout for a new comparison family.
 
 This is a governance primitive only. No model is automatically promoted and no live execution permission is granted.
+
+
+## Candidate registration and approval boundary
+
+Autonomous training workers register every result as a `candidate`; they do not approve models, even when the training report marks its internal evaluation checks as passed. Calibration and artifact-schema verification are necessary artifact-integrity checks, not sufficient economic evidence for promotion.
+
+A candidate can become approved only through a separately authorized review workflow that evaluates the locked champion/challenger evidence described above and records the human reviewer. A positive statistical comparison only establishes eligibility for human review; it does not itself approve the model. Existing approved models are not automatically demoted by this change.
+
+The worker's output therefore reports `approval_required=true` for newly registered candidates and never assigns `eti.quality_gate` as an automatic approval authority.

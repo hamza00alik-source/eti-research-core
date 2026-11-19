@@ -20,6 +20,7 @@ from .data import drop_incomplete_candles
 from .features import build_features
 from .portfolio import PortfolioLimits, assess_portfolio
 from .risk import RiskEngine, RiskRequest
+from .model_identity import legacy_spot_model_id, model_id_for_instrument
 
 
 # Hard code-level kill switch. Do not replace with an environment variable or
@@ -45,13 +46,22 @@ def _free_balance(balance: dict[str, Any], currency: str) -> float:
 
 
 def _approved_model(store, venue: str, symbol: str, timeframe: str) -> dict[str, Any] | None:
-    safe_symbol = symbol.replace("/", "-").replace(":", "-")
-    model_id = f"eti-{venue}-{safe_symbol}-{timeframe}".lower()
-    versions = [
-        item for item in store.list_model_versions("approved")
-        if item.get("model_id") == model_id
-    ]
-    return max(versions, key=lambda item: item.get("updated_at", ""), default=None)
+    """Resolve the canonical crypto-spot identity, with a narrow legacy fallback.
+
+    Live execution currently supports crypto spot only. The legacy fallback is
+    retained for already-approved pre-canonical spot models; all new registry
+    writes use the complete canonical identity.
+    """
+    approved = store.list_model_versions("approved")
+    canonical_id = model_id_for_instrument(
+        venue=venue, asset_class="crypto", market_type="spot",
+        symbol=symbol, timeframe=timeframe,
+    )
+    matches = [item for item in approved if item.get("model_id") == canonical_id]
+    if not matches:
+        legacy_id = legacy_spot_model_id(venue, symbol, timeframe)
+        matches = [item for item in approved if item.get("model_id") == legacy_id]
+    return max(matches, key=lambda item: item.get("updated_at", ""), default=None)
 
 
 def _validated_probabilities(model: Any, features: pd.DataFrame, expected: list[str]) -> np.ndarray:
