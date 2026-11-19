@@ -127,7 +127,7 @@ def test_runner_capture_manifest_rejects_cross_binding_mismatch(tmp_path):
     cost_digest = hashlib.sha256(json.dumps(
         cost_model, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")).hexdigest()
-    snapshot_digest = _digest("snapshot")
+    snapshot_digest = _digest("1")
     manifest = {
         "schema_version": "eti.research_source_evidence.v1",
         "capture_method": "MarketDataHub.fetch",
@@ -147,7 +147,7 @@ def test_runner_capture_manifest_rejects_cross_binding_mismatch(tmp_path):
         )
     # Tamper with the manifest and recompute its outer digest to model a
     # self-consistent but internally contradictory evidence receipt.
-    manifest["cost_model_sha256"] = _digest("different-cost-model")
+    manifest["cost_model_sha256"] = _digest("e")
     encoded = json.dumps(
         manifest, ensure_ascii=False, allow_nan=False,
         sort_keys=True, separators=(",", ":"),
