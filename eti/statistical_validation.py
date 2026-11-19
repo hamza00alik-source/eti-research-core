@@ -258,7 +258,22 @@ def assess_research_trial_family(
         }
     else:
         dsr = deflated_sharpe_ratio(selected_returns, trials=attempted)
-    pbo = probability_of_backtest_overfitting(matrix, n_splits=pbo_splits, metric="sharpe")
+    try:
+        pbo = probability_of_backtest_overfitting(matrix, n_splits=pbo_splits, metric="sharpe")
+    except ValueError as exc:
+        # CSCV requires equal-sized blocks. Preserve the other independent
+        # diagnostics when a valid OOS series cannot be partitioned evenly.
+        if "observation count must be divisible by n_splits" not in str(exc):
+            raise
+        pbo = {
+            "method": "combinatorially_symmetric_cross_validation",
+            "status": "not_computed",
+            "observations": int(matrix.shape[0]),
+            "strategy_count": int(matrix.shape[1]),
+            "n_splits": pbo_splits,
+            "reason": str(exc),
+            "warning": "PBO/CSCV was unavailable because the observation count cannot be divided into equal blocks; White Reality Check and Hansen SPA remain available.",
+        }
     white = white_reality_check(
         matrix, repetitions=bootstrap_repetitions, block_length=block_length, seed=seed
     )
