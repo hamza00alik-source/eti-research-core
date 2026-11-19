@@ -18,6 +18,14 @@ These tests are necessary safeguards, not a mathematical proof against every pos
 
 ## Promotion evidence still required
 
+The approval API now fails closed unless a candidate carries a non-empty experiment ID and four valid SHA-256 lineage digests: code, configuration, training dataset and cost model. The challenger evidence must repeat the same experiment ID and match all four candidate digests. Storage rejects malformed cost-model digests as well as malformed code/config/dataset digests. This prevents manually registered candidates with missing lineage from bypassing the training-path provenance contract; it does not authenticate the truth of the supplied hashes.
+
 Before a candidate can be promoted, the reviewer must inspect locked chronological out-of-sample evidence and fold-level results; measured or independently sourced fees, spreads and slippage with assumptions clearly labeled; cost stress scenarios; drawdown, turnover, liquidity and concentration behavior; leakage, provenance and historical-availability checks; the number of hypotheses and parameter/model trials considered; and calibration and artifact-schema integrity.
+
+## Temporal-integrity acceptance tests
+
+`tests/test_phase1_temporal_integrity.py` checks completed-candle filtering at exact timeframe boundaries, sorting and duplicate removal before the completion filter, and deterministic replay of identical backtest inputs. These tests complement the feature prefix/perturbation checks and next-bar signal timing checks above.
+
+No higher-timeframe join or event-time fundamentals feature is currently admitted to the training feature pipeline. Such inputs remain out of scope until their source-availability timestamp, publication/receipt time, as-of join behavior, and future-perturbation/prefix-invariance tests are implemented. This is an explicit admission boundary, not a claim that those future data paths have been validated.
 
 The current phase establishes the candidate-only boundary and causality test foundations. It does not claim that ETI already computes PBO, Deflated Sharpe Ratio, White's Reality Check or Hansen SPA; those remain follow-on research-quality work.
