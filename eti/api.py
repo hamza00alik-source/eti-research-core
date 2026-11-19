@@ -756,6 +756,10 @@ class ModelApprovalPayload(BaseModel):
     champion_report: dict[str, Any]
     challenger_report: dict[str, Any]
     comparison_family_size: int = Field(ge=1, le=10000)
+    independent_cost_evidence_verified: bool
+    cost_evidence_sha256: str = Field(pattern="^[0-9a-f]{64}$")
+    cost_evidence_source: str = Field(min_length=5, max_length=300)
+    cost_evidence_as_of: str = Field(min_length=10, max_length=40)
 
 
 class ModelInferencePayload(BaseModel):
@@ -1003,6 +1007,14 @@ def approve_model(model_id: str, version: str,
         raise HTTPException(status_code=409, detail="model artifact must exist and pass integrity checks before approval") from exc
     if payload is None:
         raise HTTPException(status_code=409, detail="locked champion/challenger promotion evidence is required")
+    if payload.independent_cost_evidence_verified is not True:
+        raise HTTPException(status_code=409, detail="reviewer must attest that independent fee/spread/slippage evidence was inspected")
+    try:
+        cost_evidence_as_of = pd.Timestamp(payload.cost_evidence_as_of)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="cost_evidence_as_of must be an ISO-8601 timestamp") from exc
+    if cost_evidence_as_of.tzinfo is None or cost_evidence_as_of > pd.Timestamp.now(tz="UTC"):
+        raise HTTPException(status_code=422, detail="cost evidence timestamp must be timezone-aware and not future-dated")
     try:
         assessment = assess_challenger_promotion(
             payload.champion_report, payload.challenger_report,
@@ -1043,6 +1055,10 @@ def approve_model(model_id: str, version: str,
                 "reviewer": account["username"],
                 "promotion_assessment": assessment,
                 "comparison_family_size": payload.comparison_family_size,
+                "independent_cost_evidence_verified": True,
+                "cost_evidence_sha256": payload.cost_evidence_sha256,
+                "cost_evidence_source": payload.cost_evidence_source,
+                "cost_evidence_as_of": cost_evidence_as_of.isoformat(),
             },
         )
         return {**approved, "promotion_assessment": assessment}
