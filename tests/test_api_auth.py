@@ -277,6 +277,12 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
             "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
             json=wrong_dataset,
         ).status_code == 409
+        wrong_cost_model = _promotion_payload("a" * 64)
+        wrong_cost_model["challenger_report"]["cost_model_sha256"] = "3" * 64
+        assert client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=wrong_cost_model,
+        ).status_code == 409
         wrong_code = _promotion_payload("a" * 64)
         wrong_code["challenger_report"]["code_sha256"] = "2" * 64
         assert client.post(
