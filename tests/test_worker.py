@@ -224,6 +224,13 @@ def test_worker_keeps_quality_passed_calibrated_artifact_as_candidate_for_human_
         "venue": "mexc", "asset_class": "crypto", "market_type": "spot",
         "symbol": "ETH/USDT", "timeframe": "1h",
         "training_data_ref": "ccxt:mexc:ETH/USDT:1h:3000:" + "b" * 64,
+        "experiment_id": "eti-exp-0123456789abcdef01234567",
+        "lineage": {
+            "config_sha256": "1" * 64,
+            "dataset_sha256": "2" * 64,
+            "evaluation_method": "purged_nested_walk_forward_v2",
+            "fold_count": 4,
+        },
         "candidate_artifact": {
             "artifact_uri": "artifact://sha256/" + "b" * 64,
             "artifact_sha256": "b" * 64,
@@ -240,6 +247,8 @@ def test_worker_keeps_quality_passed_calibrated_artifact_as_candidate_for_human_
     assert model["lifecycle"] == "candidate"
     assert model["created_by"] == "eti.worker"
     assert model["approved_by"] is None
+    assert model["input_schema"]["experiment_id"] == "eti-exp-0123456789abcdef01234567"
+    assert model["input_schema"]["lineage"]["dataset_sha256"] == "2" * 64
     assert registered["registry"]["model_id"] == "eti-mexc-crypto-spot-eth-usdt-1h"
     assert registered["registry"]["approval_required"] is True
     assert registered["registry"]["promotion_authority"] is None

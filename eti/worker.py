@@ -191,6 +191,8 @@ class AgentWorker:
             registered = self.store.register_model_version(
                 model_id, version, uri, digest, schema, [f"{asset_class}_{market_type}"],
                 result["training_data_ref"], evaluation, calibration_status, "eti.worker",
+                experiment_id=result.get("experiment_id"),
+                lineage=result.get("lineage"),
             )
         except sqlite3.IntegrityError:
             registered = self.store.get_model_version(model_id, version)

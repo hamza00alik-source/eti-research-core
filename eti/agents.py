@@ -6,6 +6,8 @@ are never interpreted as Python, shell commands, prompts or executable code.
 from __future__ import annotations
 
 from collections.abc import Callable
+import hashlib
+import json
 from typing import Any
 
 import numpy as np
@@ -344,6 +346,34 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         f"{venue}:{asset_class}:{market_type}:{symbol}:{timeframe}:{len(frame)}:"
         f"{schema.get('dataset_sha256', 'unknown')}"
     )
+    experiment_config = {
+        "venue": venue, "asset_class": asset_class, "market_type": market_type,
+        "symbol": symbol, "timeframe": timeframe, "horizon": horizon,
+        "requested_candles": limit, "model_family": "HistGradientBoostingClassifier",
+        "training_method": "purged_nested_walk_forward_v2",
+        "fee_bps": float(payload.get("fee_bps", 8.0 if market_type in {"swap", "future"} else 6.0)),
+        "slippage_bps": float(payload.get("slippage_bps", 5.0 if market_type in {"swap", "future"} else 2.0)),
+        "dataset_sha256": schema.get("dataset_sha256"),
+    }
+    config_sha256 = hashlib.sha256(
+        json.dumps(experiment_config, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    experiment_id = "eti-exp-" + config_sha256[:24]
+    lineage = {
+        "config_sha256": config_sha256,
+        "dataset_sha256": schema.get("dataset_sha256"),
+        "provider": provider_diagnostics.get("provider") if isinstance(provider_diagnostics, dict) else None,
+        "data_start": timestamps.iloc[0].isoformat(),
+        "data_end": timestamps.iloc[-1].isoformat(),
+        "fold_count": fold_count,
+        "evaluation_method": "purged_nested_walk_forward_v2",
+        "selected_candidates_by_fold": [
+            item.get("selected_candidate") for item in evaluation.get("folds", [])
+        ],
+        "candidate_selection_scores_by_fold": [
+            item.get("validation_scores") for item in evaluation.get("folds", [])
+        ],
+    }
     trading_folds = {item.get("fold"): item for item in trading.get("folds", [])}
     fold_diagnostics = []
     for fold in evaluation.get("folds", []):
@@ -393,6 +423,8 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
         "candidate_artifact": artifact,
         "input_schema": schema,
         "training_data_ref": training_data_ref,
+        "experiment_id": experiment_id,
+        "lineage": lineage,
         "calibration_status": model.calibration_status,
         "calibration_report": model.calibration_report,
         "lifecycle": "unregistered_candidate",
