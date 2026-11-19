@@ -273,6 +273,36 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
             "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
             json=wrong_dataset,
         ).status_code == 409
+        wrong_code = _promotion_payload("a" * 64)
+        wrong_code["challenger_report"]["code_sha256"] = "2" * 64
+        assert client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=wrong_code,
+        ).status_code == 409
+        wrong_experiment = _promotion_payload("a" * 64)
+        wrong_experiment["challenger_report"]["experiment_id"] = "eti-exp-other"
+        assert client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=wrong_experiment,
+        ).status_code == 409
+
+        no_lineage_payload = {
+            **payload, "model_id": "eti-no-lineage", "version": "0.1.0",
+            "input_schema": {"features": ["close", "volume"]},
+            "experiment_id": "eti-exp-no-lineage",
+        }
+        assert client.post(
+            "/v1/models", headers=trainer_headers, json=no_lineage_payload
+        ).status_code == 201
+        no_lineage_approval = client.post(
+            "/v1/models/eti-no-lineage/0.1.0/approve",
+            headers=reviewer_headers, json=_promotion_payload("a" * 64),
+        )
+        assert no_lineage_approval.status_code == 409
+        assert "complete code/config/data/cost lineage" in no_lineage_approval.text
+        assert client.get(
+            "/v1/models/eti-no-lineage/0.1.0", headers=trainer_headers
+        ).json()["lifecycle"] == "candidate"
 
         approved = client.post(
             "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
