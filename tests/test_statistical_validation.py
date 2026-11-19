@@ -169,7 +169,7 @@ def test_trial_family_assessment_reports_undefined_dsr_but_keeps_other_tests_for
         "attempted_trial_count": 3,
         "trial_ids": ["cash-a", "cash-b"],
         "strategy_names": ["no-trade-a", "no-trade-b"],
-        "observation_times": [f"t-{i}" for i in range(400)],
+        "observation_times": _hourly_times(400),
         "net_return_differentials": np.zeros((400, 2)).tolist(),
     }
     report = assess_research_trial_family(
