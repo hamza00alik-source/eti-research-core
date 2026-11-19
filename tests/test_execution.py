@@ -45,6 +45,41 @@ def _live_store(tmp_path):
     return store
 
 
+def test_approved_model_prefers_canonical_identity_over_legacy_fallback(tmp_path):
+    from eti.execution import _approved_model
+
+    store = _live_store(tmp_path)
+    store.register_model_version(
+        "eti-binance-btc-usdt-1h", "legacy",
+        "artifact://sha256/" + "c" * 64, "c" * 64,
+        {"features": FEATURE_COLUMNS}, ["crypto_spot"], "legacy-data",
+        {"passed": True}, "calibrated", "legacy-trainer",
+    )
+    store.approve_model_version("eti-binance-btc-usdt-1h", "legacy", "reviewer")
+
+    resolved = _approved_model(store, "binance", "BTC/USDT", "1h")
+    assert resolved is not None
+    assert resolved["model_id"] == "eti-binance-crypto-spot-btc-usdt-1h"
+
+
+def test_approved_model_supports_precanonical_crypto_spot_model(tmp_path):
+    from eti.execution import _approved_model
+
+    store = MemoryStore(tmp_path / "legacy-live.sqlite3")
+    store.create_workspace("owner", "legacy")
+    store.register_model_version(
+        "eti-binance-btc-usdt-1h", "legacy",
+        "artifact://sha256/" + "d" * 64, "d" * 64,
+        {"features": FEATURE_COLUMNS}, ["crypto_spot"], "legacy-data",
+        {"passed": True}, "calibrated", "legacy-trainer",
+    )
+    store.approve_model_version("eti-binance-btc-usdt-1h", "legacy", "reviewer")
+
+    resolved = _approved_model(store, "binance", "BTC/USDT", "1h")
+    assert resolved is not None
+    assert resolved["model_id"] == "eti-binance-btc-usdt-1h"
+
+
 def test_live_execution_is_disabled_until_owner_authorizes(tmp_path):
     store = MemoryStore(tmp_path / "disabled.sqlite3")
     store.create_workspace("owner", "live")
