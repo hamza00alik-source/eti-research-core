@@ -1,4 +1,5 @@
 import numpy as np
+import sqlite3
 import pytest
 
 from eti.storage import MemoryStore
@@ -149,4 +150,24 @@ def test_trial_ledger_is_owner_scoped_and_requires_completed_family(tmp_path):
             _digest("a"), _digest("d"), _digest("b"), _digest("c"), "benchmark",
         )
     with pytest.raises(ValueError, match="at least two completed"):
+        store.get_research_trial_matrix("owner-a", workspace_id, "family-2026-01")
+
+def test_trial_matrix_detects_return_series_tampering(tmp_path):
+    path = tmp_path / "tamper.sqlite3"
+    store = MemoryStore(path)
+    workspace = store.create_workspace("owner-a", "research")
+    workspace_id = workspace["id"]
+    for trial_id, config, value in (("trial-001", "a", 0.001), ("trial-002", "e", 0.002)):
+        _register(store, workspace_id, trial_id, config=config)
+        store.start_research_trial("owner-a", workspace_id, trial_id)
+        store.complete_research_trial(
+            "owner-a", workspace_id, trial_id, _timestamps(), [value] * 8,
+        )
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE research_trials SET net_return_differentials_json=? WHERE trial_id=?",
+            ("[0.9,0.9,0.9,0.9,0.9,0.9,0.9,0.9]", "trial-001"),
+        )
+    with pytest.raises(ValueError, match="digest mismatch"):
         store.get_research_trial_matrix("owner-a", workspace_id, "family-2026-01")
