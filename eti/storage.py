@@ -7,11 +7,13 @@ No unauthenticated HTTP routes expose this store.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import hashlib
 from datetime import datetime, timedelta, timezone
 import json
 import math
 import os
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any, Iterator
 from uuid import uuid4
@@ -20,6 +22,8 @@ from .model_identity import live_spot_model_ids
 
 
 MAX_JSON_BYTES = 65_536
+MAX_RESEARCH_SERIES_BYTES = 16_000_000
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _utc_now() -> str:
@@ -43,6 +47,21 @@ def _encode_json(value: Any) -> str:
     if len(encoded.encode("utf-8")) > MAX_JSON_BYTES:
         raise ValueError(f"JSON value exceeds {MAX_JSON_BYTES} bytes")
     return encoded
+
+def _encode_research_json(value: Any) -> str:
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("research series must be valid JSON data with finite numbers") from exc
+    if len(encoded.encode("utf-8")) > MAX_RESEARCH_SERIES_BYTES:
+        raise ValueError(f"research series exceeds {MAX_RESEARCH_SERIES_BYTES} bytes")
+    return encoded
+
+
+def _required_sha256(value: str, field: str) -> str:
+    if not isinstance(value, str) or not _SHA256_RE.fullmatch(value):
+        raise ValueError(f"{field} must be a lowercase SHA-256 digest")
+    return value
 
 
 class MemoryStore:
@@ -337,6 +356,43 @@ class MemoryStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_paper_portfolio_snapshots_latest
                     ON paper_portfolio_snapshots(owner_id, workspace_id, account_id, as_of DESC);
+
+                CREATE TABLE IF NOT EXISTS research_trial_families (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    family_id TEXT NOT NULL,
+                    training_data_sha256 TEXT NOT NULL,
+                    evaluation_data_sha256 TEXT NOT NULL,
+                    cost_model_sha256 TEXT NOT NULL,
+                    benchmark_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(owner_id, workspace_id, family_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_research_trial_families_owner
+                    ON research_trial_families(owner_id, workspace_id, created_at);
+
+                CREATE TABLE IF NOT EXISTS research_trials (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    family_id TEXT NOT NULL,
+                    trial_id TEXT NOT NULL,
+                    strategy_name TEXT NOT NULL,
+                    config_sha256 TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('registered','running','completed','failed')),
+                    started_at TEXT,
+                    completed_at TEXT,
+                    failure_reason TEXT,
+                    observation_times_json TEXT,
+                    net_return_differentials_json TEXT,
+                    returns_sha256 TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(owner_id, workspace_id, trial_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_research_trials_family
+                    ON research_trials(owner_id, workspace_id, family_id, status, created_at);
                 """
             )
             autonomy_columns = {
@@ -890,6 +946,253 @@ class MemoryStore:
             for row in rows
         ]
 
+
+    def register_research_trial(
+        self, owner_id: str, workspace_id: str, family_id: str, trial_id: str,
+        strategy_name: str, config_sha256: str, training_data_sha256: str,
+        evaluation_data_sha256: str, cost_model_sha256: str, benchmark_id: str,
+    ) -> dict[str, Any]:
+        """Register one immutable hypothesis attempt within a frozen comparison family."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        family_id = _required_text(family_id, "family_id", 160)
+        trial_id = _required_text(trial_id, "trial_id", 160)
+        strategy_name = _required_text(strategy_name, "strategy_name", 160)
+        benchmark_id = _required_text(benchmark_id, "benchmark_id", 160)
+        config_sha256 = _required_sha256(config_sha256, "config_sha256")
+        training_data_sha256 = _required_sha256(training_data_sha256, "training_data_sha256")
+        evaluation_data_sha256 = _required_sha256(evaluation_data_sha256, "evaluation_data_sha256")
+        cost_model_sha256 = _required_sha256(cost_model_sha256, "cost_model_sha256")
+        now, record_id = _utc_now(), str(uuid4())
+        with self._connection() as conn:
+            workspace = conn.execute(
+                "SELECT 1 FROM workspaces WHERE id=? AND owner_id=?", (workspace_id, owner_id)
+            ).fetchone()
+            if workspace is None:
+                raise LookupError("workspace not found")
+            family = conn.execute(
+                "SELECT * FROM research_trial_families WHERE owner_id=? AND workspace_id=? AND family_id=?",
+                (owner_id, workspace_id, family_id),
+            ).fetchone()
+            family_values = (training_data_sha256, evaluation_data_sha256, cost_model_sha256, benchmark_id)
+            if family is None:
+                conn.execute(
+                    """INSERT INTO research_trial_families
+                    (id,owner_id,workspace_id,family_id,training_data_sha256,evaluation_data_sha256,
+                     cost_model_sha256,benchmark_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)""",
+                    (str(uuid4()), owner_id, workspace_id, family_id, *family_values, now),
+                )
+            else:
+                existing = (
+                    family["training_data_sha256"], family["evaluation_data_sha256"],
+                    family["cost_model_sha256"], family["benchmark_id"],
+                )
+                if existing != family_values:
+                    raise ValueError("trial family dataset, evaluation, cost model and benchmark are immutable")
+            duplicate = conn.execute(
+                "SELECT 1 FROM research_trials WHERE owner_id=? AND workspace_id=? AND trial_id=?",
+                (owner_id, workspace_id, trial_id),
+            ).fetchone()
+            if duplicate:
+                raise ValueError("trial_id already exists; attempts are append-only")
+            conn.execute(
+                """INSERT INTO research_trials
+                (id,owner_id,workspace_id,family_id,trial_id,strategy_name,config_sha256,status,created_at,updated_at)
+                VALUES(?,?,?,?,?,?,?,'registered',?,?)""",
+                (record_id, owner_id, workspace_id, family_id, trial_id, strategy_name, config_sha256, now, now),
+            )
+        return self.get_research_trial(owner_id, workspace_id, trial_id)
+
+    def get_research_trial(self, owner_id: str, workspace_id: str, trial_id: str) -> dict[str, Any] | None:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        trial_id = _required_text(trial_id, "trial_id", 160)
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM research_trials WHERE owner_id=? AND workspace_id=? AND trial_id=?",
+                (owner_id, workspace_id, trial_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"], "owner_id": row["owner_id"], "workspace_id": row["workspace_id"],
+            "family_id": row["family_id"], "trial_id": row["trial_id"],
+            "strategy_name": row["strategy_name"], "config_sha256": row["config_sha256"],
+            "status": row["status"], "started_at": row["started_at"], "completed_at": row["completed_at"],
+            "failure_reason": row["failure_reason"], "returns_sha256": row["returns_sha256"],
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+        }
+
+    def start_research_trial(self, owner_id: str, workspace_id: str, trial_id: str) -> dict[str, Any]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        trial_id = _required_text(trial_id, "trial_id", 160)
+        now = _utc_now()
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT status FROM research_trials WHERE owner_id=? AND workspace_id=? AND trial_id=?",
+                (owner_id, workspace_id, trial_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("research trial not found")
+            if row["status"] != "registered":
+                raise ValueError("only a registered research trial can be started")
+            conn.execute(
+                """UPDATE research_trials SET status='running',started_at=?,updated_at=?
+                WHERE owner_id=? AND workspace_id=? AND trial_id=?""",
+                (now, now, owner_id, workspace_id, trial_id),
+            )
+        return self.get_research_trial(owner_id, workspace_id, trial_id)
+
+    def complete_research_trial(
+        self, owner_id: str, workspace_id: str, trial_id: str,
+        observation_times: list[str], net_return_differentials: list[float],
+    ) -> dict[str, Any]:
+        """Complete a started trial with an immutable, timestamp-aligned net-return series."""
+        from datetime import datetime
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        trial_id = _required_text(trial_id, "trial_id", 160)
+        if not isinstance(observation_times, list) or not isinstance(net_return_differentials, list):
+            raise ValueError("observation times and net return differentials must be lists")
+        if len(observation_times) < 8 or len(observation_times) != len(net_return_differentials):
+            raise ValueError("aligned research series must contain at least 8 paired observations")
+        normalized_times = []
+        previous = None
+        for index, value in enumerate(observation_times):
+            if not isinstance(value, str):
+                raise ValueError(f"observation_times[{index}] must be an ISO-8601 timestamp")
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError(f"observation_times[{index}] must be an ISO-8601 timestamp") from exc
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                raise ValueError("research observation timestamps must include a timezone")
+            parsed = parsed.astimezone(timezone.utc)
+            if previous is not None and parsed <= previous:
+                raise ValueError("research observation timestamps must be unique and strictly increasing")
+            previous = parsed
+            normalized_times.append(parsed.isoformat(timespec="microseconds").replace("+00:00", "Z"))
+        normalized_returns = []
+        for index, value in enumerate(net_return_differentials):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError(f"net_return_differentials[{index}] must be finite")
+            normalized_returns.append(float(value))
+        times_json = _encode_research_json(normalized_times)
+        returns_json = _encode_research_json(normalized_returns)
+        now = _utc_now()
+        with self._connection() as conn:
+            row = conn.execute(
+                """SELECT t.status,t.family_id,f.benchmark_id,f.evaluation_data_sha256,f.cost_model_sha256
+                FROM research_trials t JOIN research_trial_families f
+                ON f.owner_id=t.owner_id AND f.workspace_id=t.workspace_id AND f.family_id=t.family_id
+                WHERE t.owner_id=? AND t.workspace_id=? AND t.trial_id=?""",
+                (owner_id, workspace_id, trial_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("research trial not found")
+            if row["status"] != "running":
+                raise ValueError("only a running research trial can be completed")
+            evidence = {
+                "trial_id": trial_id, "family_id": row["family_id"],
+                "benchmark_id": row["benchmark_id"],
+                "evaluation_data_sha256": row["evaluation_data_sha256"],
+                "cost_model_sha256": row["cost_model_sha256"],
+                "observation_times": normalized_times,
+                "net_return_differentials": normalized_returns,
+            }
+            returns_sha256 = hashlib.sha256(_encode_research_json(evidence).encode("utf-8")).hexdigest()
+            conn.execute(
+                """UPDATE research_trials SET status='completed',completed_at=?,updated_at=?,
+                observation_times_json=?,net_return_differentials_json=?,returns_sha256=?
+                WHERE owner_id=? AND workspace_id=? AND trial_id=?""",
+                (now, now, times_json, returns_json, returns_sha256, owner_id, workspace_id, trial_id),
+            )
+        return self.get_research_trial(owner_id, workspace_id, trial_id)
+
+    def fail_research_trial(self, owner_id: str, workspace_id: str, trial_id: str, reason: str) -> dict[str, Any]:
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        trial_id = _required_text(trial_id, "trial_id", 160)
+        reason = _required_text(reason, "reason", 1000)
+        now = _utc_now()
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT status FROM research_trials WHERE owner_id=? AND workspace_id=? AND trial_id=?",
+                (owner_id, workspace_id, trial_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("research trial not found")
+            if row["status"] != "running":
+                raise ValueError("only a running research trial can be marked failed")
+            conn.execute(
+                """UPDATE research_trials SET status='failed',completed_at=?,updated_at=?,failure_reason=?
+                WHERE owner_id=? AND workspace_id=? AND trial_id=?""",
+                (now, now, reason, owner_id, workspace_id, trial_id),
+            )
+        return self.get_research_trial(owner_id, workspace_id, trial_id)
+
+    def get_research_trial_matrix(self, owner_id: str, workspace_id: str, family_id: str) -> dict[str, Any]:
+        """Return only completed, fully aligned trials plus the full attempted-trial count."""
+        owner_id = _required_text(owner_id, "owner_id")
+        workspace_id = _required_text(workspace_id, "workspace_id")
+        family_id = _required_text(family_id, "family_id", 160)
+        with self._connection() as conn:
+            workspace = conn.execute(
+                "SELECT 1 FROM workspaces WHERE id=? AND owner_id=?", (workspace_id, owner_id)
+            ).fetchone()
+            if workspace is None:
+                raise LookupError("workspace not found")
+            family = conn.execute(
+                "SELECT * FROM research_trial_families WHERE owner_id=? AND workspace_id=? AND family_id=?",
+                (owner_id, workspace_id, family_id),
+            ).fetchone()
+            if family is None:
+                raise LookupError("research trial family not found")
+            rows = conn.execute(
+                "SELECT * FROM research_trials WHERE owner_id=? AND workspace_id=? AND family_id=? ORDER BY trial_id",
+                (owner_id, workspace_id, family_id),
+            ).fetchall()
+        completed = [row for row in rows if row["status"] == "completed"]
+        if len(completed) < 2:
+            raise ValueError("at least two completed trials are required for family statistics")
+        reference_times = json.loads(completed[0]["observation_times_json"])
+        series = []
+        for row in completed:
+            times = json.loads(row["observation_times_json"])
+            values = json.loads(row["net_return_differentials_json"])
+            if times != reference_times or len(values) != len(reference_times):
+                raise ValueError("completed trial series are not timestamp-aligned; family statistics are blocked")
+            series.append(values)
+        matrix = [
+            [series[column][row] for column in range(len(series))]
+            for row in range(len(reference_times))
+        ]
+        counts = {status: sum(row["status"] == status for row in rows)
+                  for status in ("registered", "running", "completed", "failed")}
+        return {
+            "family_id": family_id,
+            "training_data_sha256": family["training_data_sha256"],
+            "evaluation_data_sha256": family["evaluation_data_sha256"],
+            "cost_model_sha256": family["cost_model_sha256"],
+            "benchmark_id": family["benchmark_id"],
+            "registered_trial_count": len(rows),
+            "attempted_trial_count": counts["running"] + counts["completed"] + counts["failed"],
+            "completed_trial_count": counts["completed"],
+            "failed_trial_count": counts["failed"],
+            "running_trial_count": counts["running"],
+            "not_started_trial_count": counts["registered"],
+            "trial_ids": [row["trial_id"] for row in completed],
+            "strategy_names": [row["strategy_name"] for row in completed],
+            "returns_sha256": [row["returns_sha256"] for row in completed],
+            "observation_times": reference_times,
+            "net_return_differentials": matrix,
+            "warning": (
+                "Only completed aligned trials are in the matrix. Attempted count includes running, "
+                "completed and failed trials; registered-but-never-started trials are excluded. "
+                "Family hashes and benchmark are declarations, not source authentication."
+            ),
+        }
 
     def create_agent_task(
         self, owner_id: str, workspace_id: str, requester: str,
