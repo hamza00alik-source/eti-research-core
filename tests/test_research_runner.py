@@ -542,3 +542,22 @@ def test_trial_ledger_rejects_gaps_between_outer_test_windows(monkeypatch):
             hub=FakeHub(variable_volume=True),
             trial_ledger=Ledger(), owner_id="owner-1", workspace_id="workspace-1",
         )
+
+
+def test_market_data_snapshot_fingerprint_is_stable_and_content_sensitive():
+    import pandas as pd
+    from eti.market_data_hub import _ohlcv_snapshot_sha256
+
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=3, freq="h", tz="UTC"),
+        "open": [100.0, 101.0, 102.0],
+        "high": [101.0, 102.0, 103.0],
+        "low": [99.0, 100.0, 101.0],
+        "close": [100.5, 101.5, 102.5],
+        "volume": [10.0, 11.0, 12.0],
+    })
+    first = _ohlcv_snapshot_sha256(frame)
+    assert first == _ohlcv_snapshot_sha256(frame.copy())
+    changed = frame.copy()
+    changed.loc[1, "close"] += 0.000001
+    assert first != _ohlcv_snapshot_sha256(changed)
