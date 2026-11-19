@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Multiple-testing-aware validation is only meaningful when ETI records the hypotheses actually attempted. The SQLite research ledger stores an append-only trial identity within a frozen comparison family and records a single terminal outcome for each started attempt.
+Multiple-testing-aware validation is only meaningful when ETI records the hypotheses actually attempted. The SQLite research ledger stores an append-only trial identity within a frozen comparison family and records a single terminal outcome for each started attempt. The approved research runner now registers and starts each nested candidate before fitting, then completes it with its candidate-specific outer-test return differential series.
 
 ## Family contract
 
@@ -35,6 +35,7 @@ The family matrix accessor includes only completed trials, recomputes each store
 - The integrated assessment applies the DSR estimator to the selected trial's net benchmark-relative differential (an information-ratio basis) and uses the full attempted-trial count; do not use only the completed shortlist. If the selected trial has zero volatility, DSR is reported as undefined while the other family diagnostics remain available.
 - If a failed attempt has no return series, it is counted for multiple-testing penalty but is not fabricated into the return matrix.
 - Use the family benchmark ID, evaluation-data hash and cost-model hash as mandatory inputs to downstream report provenance.
+- CSCV/PBO requires an observation count divisible by the requested split count. If not, the integrated assessment marks PBO as not computed but still returns the block-bootstrap diagnostics.
 
 ## Limitations and next integration
 
