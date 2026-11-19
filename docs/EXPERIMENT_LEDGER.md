@@ -32,7 +32,7 @@ The family matrix accessor includes only completed trials and refuses to constru
 ## Statistical usage
 
 - Pass the family snapshot to `assess_research_trial_family(family, selected_trial_id=...)` to run all four statistical diagnostics together.
-- The integrated assessment uses the full attempted-trial count as the DSR trial count for the selected completed trial; do not use only the completed shortlist.
+- The integrated assessment applies the DSR estimator to the selected trial's net benchmark-relative differential (an information-ratio basis) and uses the full attempted-trial count; do not use only the completed shortlist.
 - If a failed attempt has no return series, it is counted for multiple-testing penalty but is not fabricated into the return matrix.
 - Use the family benchmark ID, evaluation-data hash and cost-model hash as mandatory inputs to downstream report provenance.
 
