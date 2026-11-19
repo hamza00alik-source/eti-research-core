@@ -1163,6 +1163,18 @@ class MemoryStore:
             values = json.loads(row["net_return_differentials_json"])
             if times != reference_times or len(values) != len(reference_times):
                 raise ValueError("completed trial series are not timestamp-aligned; family statistics are blocked")
+            evidence = {
+                "trial_id": row["trial_id"],
+                "family_id": row["family_id"],
+                "benchmark_id": family["benchmark_id"],
+                "evaluation_data_sha256": family["evaluation_data_sha256"],
+                "cost_model_sha256": family["cost_model_sha256"],
+                "observation_times": times,
+                "net_return_differentials": values,
+            }
+            expected_digest = hashlib.sha256(_encode_research_json(evidence).encode("utf-8")).hexdigest()
+            if expected_digest != row["returns_sha256"]:
+                raise ValueError("completed trial return evidence digest mismatch; family statistics are blocked")
             series.append(values)
         matrix = [
             [series[column][row] for column in range(len(series))]
