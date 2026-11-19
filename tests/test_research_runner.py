@@ -446,3 +446,57 @@ def test_runner_exposes_registered_but_unstarted_trial_without_counting_it_as_at
     assert lifecycle["registered_trial_ids"]
     assert lifecycle["started_trial_ids"] == {}
     assert ledger.failed == []  # Registered-only trials cannot be failed as running attempts.
+
+
+def test_runner_real_model_pipeline_persists_oos_trials_to_sqlite(tmp_path):
+    import numpy as np
+    from eti.storage import MemoryStore
+
+    rng = np.random.default_rng(20261119)
+    count = 1000
+    returns = rng.normal(0.0001, 0.012, count)
+    close = 100.0 * np.exp(np.cumsum(returns))
+    open_ = np.r_[close[0], close[:-1]]
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=count, freq="h", tz="UTC"),
+        "open": open_,
+        "high": np.maximum(open_, close) * 1.002,
+        "low": np.minimum(open_, close) * 0.998,
+        "close": close,
+        "volume": rng.uniform(1.0, 100.0, count),
+    })
+
+    class SyntheticHub:
+        def fetch(self, instrument, timeframe, limit, min_rows):
+            return MarketDataSnapshot(
+                instrument, timeframe, frame.copy(),
+                {"venue": instrument.venue, "symbol": instrument.symbol, "source": "seeded_synthetic_test"},
+                {"rows": len(frame), "ohlcv_validated": True},
+            )
+
+    database = tmp_path / "real-runner-pipeline.sqlite3"
+    store = MemoryStore(database)
+    workspace = store.create_workspace("owner-1", "real pipeline")
+    approved = approval(evaluation={
+        "horizon": 6, "min_train": 400, "validation_size": 100,
+        "test_size": 80, "step_size": 80,
+    })
+    result = run_approved_multi_market_research(
+        scan(), allocation(), approved, hub=SyntheticHub(),
+        trial_ledger=store, owner_id="owner-1", workspace_id=workspace["id"],
+    )
+
+    market = result["markets"]["kraken:spot:BTC/USD"]
+    assert market["status"] == "evaluated", market
+    assert market["report"]["candidate_oos_returns"]
+    assert market["report"]["trial_ledger"]["completed_candidate_count"] == 2
+
+    reopened = MemoryStore(database)
+    family_id = market["report"]["trial_ledger"]["family_id"]
+    family = reopened.get_research_trial_matrix("owner-1", workspace["id"], family_id)
+    assert family["attempted_trial_count"] == 2
+    assert family["completed_trial_count"] == 2
+    assert len(family["observation_times"]) >= 8
+    assert len(family["observation_times"]) % 8 == 0
+    assert all(len(row) == 2 for row in family["net_return_differentials"])
+    assert result["execution_enabled"] is False
