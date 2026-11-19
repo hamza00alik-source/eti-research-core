@@ -41,3 +41,12 @@ def legacy_spot_model_id(venue: str, symbol: str, timeframe: str) -> str:
         _component(timeframe, "timeframe"),
     )
     return "eti-" + "-".join(parts)
+
+
+
+def live_spot_model_ids(venue: str, symbol: str, timeframe: str) -> tuple[str, str]:
+    """Return canonical then legacy identities for the live crypto-spot path."""
+    return (
+        model_id_for_instrument(venue=venue, asset_class="crypto", market_type="spot", symbol=symbol, timeframe=timeframe),
+        legacy_spot_model_id(venue, symbol, timeframe),
+    )

@@ -378,3 +378,33 @@ def test_authorized_live_profile_still_cannot_place_orders_while_global_gate_is_
     }
     assert calls == {"exchange_init": 0, "decrypt": 0}
     assert store.list_live_orders("owner") == []
+
+
+def test_live_authorization_accepts_canonical_model_identity(tmp_path):
+    store = MemoryStore(tmp_path / "canonical-auth.sqlite3")
+    store.create_workspace("owner", "live")
+    store.register_model_version(
+        "eti-binance-crypto-spot-btc-usdt-1h", "canonical",
+        "artifact://sha256/" + "e" * 64, "e" * 64,
+        {"features": FEATURE_COLUMNS}, ["crypto_spot"], "data",
+        {"passed": True}, "calibrated", "trainer",
+    )
+    store.approve_model_version("eti-binance-crypto-spot-btc-usdt-1h", "canonical", "reviewer")
+    store.upsert_exchange_credential("owner", "binance", "key", "secret", "1234")
+    store.save_live_execution_profile("owner", "binance", ["BTC/USDT"], "1h", 1000.0, {})
+    assert store.authorize_live_execution("owner")["enabled"] is True
+
+
+def test_live_authorization_retains_legacy_spot_compatibility(tmp_path):
+    store = MemoryStore(tmp_path / "legacy-auth.sqlite3")
+    store.create_workspace("owner", "live")
+    store.register_model_version(
+        "eti-binance-btc-usdt-1h", "legacy",
+        "artifact://sha256/" + "f" * 64, "f" * 64,
+        {"features": FEATURE_COLUMNS}, ["crypto_spot"], "data",
+        {"passed": True}, "calibrated", "trainer",
+    )
+    store.approve_model_version("eti-binance-btc-usdt-1h", "legacy", "reviewer")
+    store.upsert_exchange_credential("owner", "binance", "key", "secret", "1234")
+    store.save_live_execution_profile("owner", "binance", ["BTC/USDT"], "1h", 1000.0, {})
+    assert store.authorize_live_execution("owner")["enabled"] is True

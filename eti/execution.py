@@ -20,7 +20,7 @@ from .data import drop_incomplete_candles
 from .features import build_features
 from .portfolio import PortfolioLimits, assess_portfolio
 from .risk import RiskEngine, RiskRequest
-from .model_identity import legacy_spot_model_id, model_id_for_instrument
+from .model_identity import live_spot_model_ids
 
 
 # Hard code-level kill switch. Do not replace with an environment variable or
@@ -53,13 +53,9 @@ def _approved_model(store, venue: str, symbol: str, timeframe: str) -> dict[str,
     writes use the complete canonical identity.
     """
     approved = store.list_model_versions("approved")
-    canonical_id = model_id_for_instrument(
-        venue=venue, asset_class="crypto", market_type="spot",
-        symbol=symbol, timeframe=timeframe,
-    )
+    canonical_id, legacy_id = live_spot_model_ids(venue, symbol, timeframe)
     matches = [item for item in approved if item.get("model_id") == canonical_id]
     if not matches:
-        legacy_id = legacy_spot_model_id(venue, symbol, timeframe)
         matches = [item for item in approved if item.get("model_id") == legacy_id]
     return max(matches, key=lambda item: item.get("updated_at", ""), default=None)
 

@@ -16,6 +16,8 @@ import sqlite3
 from typing import Any, Iterator
 from uuid import uuid4
 
+from .model_identity import live_spot_model_ids
+
 
 MAX_JSON_BYTES = 65_536
 
@@ -2184,11 +2186,17 @@ class MemoryStore:
             symbols = json.loads(row["symbols_json"])
             eligible = 0
             for symbol in symbols:
-                model_id = f"eti-{row['venue']}-{symbol.replace('/', '-').replace(':', '-')}-{row['timeframe']}".lower()
-                if conn.execute(
+                canonical_id, legacy_id = live_spot_model_ids(row["venue"], symbol, row["timeframe"])
+                approved = conn.execute(
                     "SELECT 1 FROM model_versions WHERE model_id=? AND lifecycle='approved' LIMIT 1",
-                    (model_id,),
-                ).fetchone():
+                    (canonical_id,),
+                ).fetchone()
+                if approved is None:
+                    approved = conn.execute(
+                        "SELECT 1 FROM model_versions WHERE model_id=? AND lifecycle='approved' LIMIT 1",
+                        (legacy_id,),
+                    ).fetchone()
+                if approved:
                     eligible += 1
             if eligible == 0:
                 raise ValueError("at least one approved model is required for the selected live watchlist")
