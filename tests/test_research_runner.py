@@ -91,6 +91,9 @@ def scan():
 
 
 class FakeHub:
+    def __init__(self, *, variable_volume=False):
+        self.variable_volume = variable_volume
+
     def fetch(self, instrument, timeframe, limit, min_rows):
         frame = pd.DataFrame({
             "timestamp": pd.date_range("2024-01-01", periods=1000, freq="h", tz="UTC"),
@@ -98,7 +101,9 @@ class FakeHub:
             "high": [101.0 + i * 0.01 for i in range(1000)],
             "low": [99.0 + i * 0.01 for i in range(1000)],
             "close": [100.5 + i * 0.01 for i in range(1000)],
-            "volume": [10.0] * 1000,
+            # The volume z-score is a required feature; constant volume makes
+            # its rolling standard deviation zero and drops every row.
+            "volume": [10.0 + (i % 13) for i in range(1000)] if self.variable_volume else [10.0] * 1000,
         })
         return MarketDataSnapshot(
             instrument, timeframe, frame,
@@ -276,7 +281,7 @@ def test_runner_records_every_candidate_in_the_trial_ledger(monkeypatch):
     monkeypatch.setattr(runner, "run_nested_experiment", fake_nested)
     ledger = FakeLedger()
     result = run_approved_multi_market_research(
-        scan(), allocation(), approval(), hub=FakeHub(),
+        scan(), allocation(), approval(), hub=FakeHub(variable_volume=True),
         trial_ledger=ledger, owner_id="owner-1", workspace_id="workspace-1",
     )
     market = result["markets"]["kraken:spot:BTC/USD"]
