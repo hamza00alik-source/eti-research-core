@@ -24,6 +24,7 @@ from .portfolio import assess_portfolio
 from .promotion import assess_challenger_promotion
 from .risk import RiskEngine, RiskRequest
 from .storage import MemoryStore
+from .statistical_validation import assess_research_trial_family
 
 app = FastAPI(title=AppConfig().app_name, version=AppConfig().version, lifespan=runtime_lifespan)
 risk_engine = RiskEngine()
@@ -1266,6 +1267,122 @@ def execution_status():
                     "Live order submission requires explicit owner authorization and independent safety gates."),
     }
 
+
+
+class ResearchTrialRegisterPayload(BaseModel):
+    family_id: str = Field(min_length=1, max_length=160)
+    trial_id: str = Field(min_length=1, max_length=160)
+    strategy_name: str = Field(min_length=1, max_length=160)
+    config_sha256: str = Field(pattern="^[0-9a-f]{64}$")
+    training_data_sha256: str = Field(pattern="^[0-9a-f]{64}$")
+    evaluation_data_sha256: str = Field(pattern="^[0-9a-f]{64}$")
+    cost_model_sha256: str = Field(pattern="^[0-9a-f]{64}$")
+    benchmark_id: str = Field(min_length=1, max_length=160)
+
+class ResearchTrialCompletePayload(BaseModel):
+    observation_times: list[str] = Field(min_length=8, max_length=200000)
+    net_return_differentials: list[float] = Field(min_length=8, max_length=200000)
+
+class ResearchTrialFailurePayload(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+class ResearchDiagnosticsPayload(BaseModel):
+    n_splits: int = Field(default=8, ge=4, le=12)
+    repetitions: int = Field(default=2000, ge=200, le=20000)
+    block_length: int = Field(default=5, ge=1, le=10000)
+    seed: int = Field(default=42, ge=0, le=2147483647)
+
+@app.post("/v1/workspaces/{workspace_id}/research-trials", status_code=201)
+def register_research_trial(workspace_id: str, payload: ResearchTrialRegisterPayload,
+                            account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        return store.register_research_trial(account["id"], workspace_id, payload.family_id,
+            payload.trial_id, payload.strategy_name, payload.config_sha256,
+            payload.training_data_sha256, payload.evaluation_data_sha256,
+            payload.cost_model_sha256, payload.benchmark_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+@app.post("/v1/workspaces/{workspace_id}/research-trials/{trial_id}/start")
+def start_research_trial(workspace_id: str, trial_id: str,
+                         account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        return store.start_research_trial(account["id"], workspace_id, trial_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="trial not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+@app.post("/v1/workspaces/{workspace_id}/research-trials/{trial_id}/complete")
+def complete_research_trial(workspace_id: str, trial_id: str, payload: ResearchTrialCompletePayload,
+                            account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        return store.complete_research_trial(account["id"], workspace_id, trial_id,
+            payload.observation_times, payload.net_return_differentials)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="trial not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+@app.post("/v1/workspaces/{workspace_id}/research-trials/{trial_id}/fail")
+def fail_research_trial(workspace_id: str, trial_id: str, payload: ResearchTrialFailurePayload,
+                        account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        return store.fail_research_trial(account["id"], workspace_id, trial_id, payload.reason)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="trial not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+@app.get("/v1/workspaces/{workspace_id}/research-trial-families/{family_id}")
+def get_research_trial_family(workspace_id: str, family_id: str,
+                              account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        return store.get_research_trial_matrix(account["id"], workspace_id, family_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="trial family not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+@app.post("/v1/workspaces/{workspace_id}/research-trial-families/{family_id}/diagnostics")
+def get_research_trial_diagnostics(workspace_id: str, family_id: str,
+                                   payload: ResearchDiagnosticsPayload,
+                                   account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    _require_workspace(store, account, workspace_id)
+    try:
+        family = store.get_research_trial_matrix(account["id"], workspace_id, family_id)
+        # Zero-return cash/no-trade has a zero Sharpe by convention.
+        # The shared assessment validates all selected-trial preconditions.
+        import statistics
+        scores = []
+        for column in zip(*family["net_return_differentials"]):
+            mean = statistics.fmean(column)
+            deviation = statistics.stdev(column)
+            scores.append(mean / deviation if deviation > 1e-15 else 0.0)
+        selected_trial_id = family["trial_ids"][max(range(len(scores)), key=scores.__getitem__)]
+        return assess_research_trial_family(
+            family, selected_trial_id=selected_trial_id,
+            bootstrap_repetitions=payload.repetitions,
+            block_length=payload.block_length, seed=payload.seed,
+            pbo_splits=payload.n_splits,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="trial family not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 web_dir = Path(__file__).resolve().parent.parent / "web"
 if web_dir.exists():
