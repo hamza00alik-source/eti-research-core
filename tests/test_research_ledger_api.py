@@ -15,9 +15,13 @@ def test_authenticated_trial_ledger_drives_statistical_diagnostics(tmp_path, mon
         headers={"Authorization":f"Bearer {account.json()['access_token']}"}
         workspace=client.post("/v1/workspaces",headers=headers,json={"name":"research"}).json()
         wid=workspace["id"]
+        source_evidence={"schema_version":"eti.research_source_evidence.v1",
+                         "capture_method":"external_api_attestation",
+                         "source_snapshot_sha256":"d"*64,
+                         "cost_model":{"fee_bps":6.0,"slippage_bps":2.0}}
         base={"family_id":"family-1","training_data_sha256":"a"*64,
               "evaluation_data_sha256":"b"*64,"cost_model_sha256":"c"*64,
-              "benchmark_id":"cash"}
+              "benchmark_id":"cash","source_evidence":source_evidence}
         for i in range(4):
             payload={**base,"trial_id":f"trial-{i}","strategy_name":f"strategy-{i}",
                      "config_sha256":str(i+1)*64}
@@ -41,6 +45,8 @@ def test_authenticated_trial_ledger_drives_statistical_diagnostics(tmp_path, mon
             headers=headers,json={"n_splits":8,"repetitions":200,"block_length":3,"seed":9})
         assert result.status_code==200,result.text
         report=result.json()
+        assert report["source_evidence"]==source_evidence
+        assert len(report["source_evidence_sha256"])==64
         assert report["attempted_trial_count"]==4
         assert report["completed_trial_count"]==3
         assert report["failed_trial_count"]==1
