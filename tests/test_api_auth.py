@@ -229,7 +229,10 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
             "version": "0.3.0",
             "artifact_uri": "artifact://eti-core/0.3.0",
             "artifact_sha256": "a" * 64,
-            "input_schema": {"features": ["close", "volume"]},
+            "input_schema": {
+                "features": ["close", "volume"],
+                "lineage": {"dataset_sha256": "b" * 64, "cost_model_sha256": "e" * 64},
+            },
             "supported_classes": ["crypto_spot"],
             "training_data_ref": "dataset:training-2026-11",
             "evaluation_report": {"passed": True, "balanced_accuracy": 0.61},
@@ -258,6 +261,12 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
             json=_promotion_payload("f" * 64),
         )
         assert mismatched_evidence.status_code == 409
+        wrong_dataset = _promotion_payload("a" * 64)
+        wrong_dataset["challenger_report"]["training_data_sha256"] = "9" * 64
+        assert client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=wrong_dataset,
+        ).status_code == 409
 
         approved = client.post(
             "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
