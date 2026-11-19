@@ -306,6 +306,18 @@ def run_approved_multi_market_research(
                 cost_sha256 = hashlib.sha256(json.dumps(
                     item["transaction_cost_model"], sort_keys=True, separators=(",", ":")
                 ).encode("utf-8")).hexdigest()
+                source_evidence = {
+                    "schema_version": "eti.research_source_evidence.v1",
+                    "capture_method": "MarketDataHub.fetch",
+                    "source_snapshot_sha256": item["provenance"].get("source_snapshot_sha256"),
+                    "source_provenance": item["provenance"],
+                    "data_quality": item["quality"],
+                    "cost_model": item["transaction_cost_model"],
+                    "cost_model_sha256": cost_sha256,
+                    "training_data_sha256": item["trial_lineage"]["training_data_sha256"],
+                    "evaluation_data_sha256": item["trial_lineage"]["evaluation_data_sha256"],
+                    "warning": "Content fingerprints prove identity of the captured values, not provider authenticity or completeness of external experiment searches.",
+                }
                 for candidate_name in NESTED_CANDIDATE_NAMES:
                     config_payload = {
                         "candidate": candidate_name, "instrument": item["key"],
@@ -325,7 +337,7 @@ def run_approved_multi_market_research(
                         owner_id, workspace_id, family_id, trial_id, candidate_name,
                         config_sha256, item["trial_lineage"]["training_data_sha256"],
                         item["trial_lineage"]["evaluation_data_sha256"], cost_sha256,
-                        f"no_trade:{item['key']}",
+                        f"no_trade:{item['key']}", source_evidence,
                     )
                     # Keep registration and start as separate lifecycle facts. If
                     # start fails, the registered-but-unstarted hypothesis remains
@@ -364,7 +376,10 @@ def run_approved_multi_market_research(
                     "started_candidate_count": len(started_trials),
                     "completed_candidate_count": len(started_trials),
                     "benchmark": "no_trade",
-                    "warning": "Candidate returns are net of configured fee/slippage assumptions and relative to no-trade. Data/cost authenticity and unrecorded external searches remain operator responsibilities.",
+                    "source_evidence_sha256": hashlib.sha256(json.dumps(
+                        source_evidence, sort_keys=True, separators=(",", ":")
+                    ).encode("utf-8")).hexdigest(),
+                    "warning": "Candidate returns are net of configured fee/slippage assumptions and relative to no-trade. Snapshot fingerprints bind captured values but do not authenticate the upstream provider or unrecorded external searches.",
                 }
             results[item["key"]] = {
                 "status": "evaluated", "instrument": item["instrument"].__dict__,
