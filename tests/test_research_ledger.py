@@ -15,11 +15,12 @@ def _timestamps(start="2026-01-01T00:00:00Z"):
             pd.date_range(start, periods=8, freq="h", tz="UTC")]
 
 
-def _register(store, workspace_id, trial_id, *, config="a", evaluation="b", cost="c"):
+def _register(store, workspace_id, trial_id, *, config="a", evaluation="b", cost="c",
+               source_evidence=None):
     return store.register_research_trial(
         "owner-a", workspace_id, "family-2026-01", trial_id,
         "momentum", _digest(config), _digest("d"), _digest(evaluation),
-        _digest(cost), "buy-and-hold-btc-usdt-1h",
+        _digest(cost), "buy-and-hold-btc-usdt-1h", source_evidence,
     )
 
 
@@ -62,6 +63,48 @@ def test_trial_family_persists_every_attempt_and_builds_aligned_matrix(tmp_path)
     assert all(len(row) == 2 for row in matrix["net_return_differentials"])
     assert len(set(matrix["returns_sha256"])) == 2
     assert reopened.get_research_trial("owner-a", workspace_id, "trial-004")["status"] == "registered"
+
+
+def test_trial_family_persists_and_verifies_source_evidence_manifest(tmp_path):
+    import hashlib
+    import json
+
+    path = tmp_path / "source-evidence.sqlite3"
+    store = MemoryStore(path)
+    workspace = store.create_workspace("owner-a", "research")
+    workspace_id = workspace["id"]
+    manifest = {
+        "schema_version": "eti.research_source_evidence.v1",
+        "capture_method": "MarketDataHub.fetch",
+        "source_snapshot_sha256": _digest("1"),
+        "cost_model": {"fee_bps": 6.0, "slippage_bps": 2.0},
+    }
+    for trial_id, config, value in (("trial-001", "a", 0.001), ("trial-002", "e", 0.002)):
+        _register(store, workspace_id, trial_id, config=config, source_evidence=manifest)
+        store.start_research_trial("owner-a", workspace_id, trial_id)
+        store.complete_research_trial(
+            "owner-a", workspace_id, trial_id, _timestamps(), [value] * 8,
+        )
+
+    reopened = MemoryStore(path)
+    matrix = reopened.get_research_trial_matrix("owner-a", workspace_id, "family-2026-01")
+    assert matrix["source_evidence"] == manifest
+    expected = hashlib.sha256(json.dumps(
+        manifest, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True
+    ).encode("utf-8")).hexdigest()
+    assert matrix["source_evidence_sha256"] == expected
+
+    with pytest.raises(ValueError, match="source evidence are immutable"):
+        _register(reopened, workspace_id, "trial-003", config="f",
+                  source_evidence={**manifest, "source_snapshot_sha256": _digest("2")})
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE research_trial_families SET source_evidence_json=? WHERE family_id=?",
+            ('{"tampered":true}', "family-2026-01"),
+        )
+    with pytest.raises(ValueError, match="source evidence manifest digest mismatch"):
+        reopened.get_research_trial_matrix("owner-a", workspace_id, "family-2026-01")
 
 
 def test_trial_family_identity_and_attempt_ids_are_immutable(tmp_path):
