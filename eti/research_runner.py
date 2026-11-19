@@ -287,9 +287,10 @@ def run_approved_multi_market_research(
             f"exceed approval cap {max_fits}"
         )
 
-    if trial_ledger is not None and step_size < test_size:
+    if trial_ledger is not None and step_size != test_size:
         raise ValueError(
-            "Trial-ledger recording requires non-overlapping outer-test windows: step_size >= test_size"
+            "Trial-ledger recording requires contiguous, non-overlapping outer-test windows: "
+            "step_size must equal test_size"
         )
     results = {}
     run_id = uuid4().hex[:16]
