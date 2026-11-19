@@ -73,11 +73,20 @@ def test_trial_family_persists_and_verifies_source_evidence_manifest(tmp_path):
     store = MemoryStore(path)
     workspace = store.create_workspace("owner-a", "research")
     workspace_id = workspace["id"]
+    cost_model = {"fee_bps": 6.0, "slippage_bps": 2.0}
+    cost_digest = hashlib.sha256(json.dumps(
+        cost_model, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
+    snapshot_digest = _digest("1")
     manifest = {
         "schema_version": "eti.research_source_evidence.v1",
         "capture_method": "MarketDataHub.fetch",
-        "source_snapshot_sha256": _digest("1"),
-        "cost_model": {"fee_bps": 6.0, "slippage_bps": 2.0},
+        "source_snapshot_sha256": snapshot_digest,
+        "source_provenance": {"source_snapshot_sha256": snapshot_digest},
+        "cost_model": cost_model,
+        "cost_model_sha256": cost_digest,
+        "training_data_sha256": _digest("d"),
+        "evaluation_data_sha256": _digest("b"),
     }
     for trial_id, config, value in (("trial-001", "a", 0.001), ("trial-002", "e", 0.002)):
         _register(store, workspace_id, trial_id, config=config, source_evidence=manifest)
@@ -105,6 +114,49 @@ def test_trial_family_persists_and_verifies_source_evidence_manifest(tmp_path):
         )
     with pytest.raises(ValueError, match="source evidence manifest digest mismatch"):
         reopened.get_research_trial_matrix("owner-a", workspace_id, "family-2026-01")
+
+
+def test_runner_capture_manifest_rejects_cross_binding_mismatch(tmp_path):
+    import hashlib
+    import json
+
+    store = MemoryStore(tmp_path / "cross-binding.sqlite3")
+    workspace = store.create_workspace("owner-a", "research")
+    cost_model = {"fee_bps": 6.0, "slippage_bps": 2.0}
+    cost_digest = hashlib.sha256(json.dumps(
+        cost_model, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
+    snapshot_digest = _digest("snapshot")
+    manifest = {
+        "schema_version": "eti.research_source_evidence.v1",
+        "capture_method": "MarketDataHub.fetch",
+        "source_snapshot_sha256": snapshot_digest,
+        "source_provenance": {"source_snapshot_sha256": snapshot_digest},
+        "cost_model": cost_model,
+        "cost_model_sha256": cost_digest,
+        "training_data_sha256": _digest("d"),
+        "evaluation_data_sha256": _digest("b"),
+    }
+    for trial_id, value in (("trial-001", 0.001), ("trial-002", 0.002)):
+        _register(store, workspace["id"], trial_id, source_evidence=manifest)
+        store.start_research_trial("owner-a", workspace["id"], trial_id)
+        store.complete_research_trial(
+            "owner-a", workspace["id"], trial_id, _timestamps(), [value] * 8,
+        )
+    # Tamper with the manifest and recompute its outer digest to model a
+    # self-consistent but internally contradictory evidence receipt.
+    manifest["cost_model_sha256"] = _digest("different-cost-model")
+    encoded = json.dumps(
+        manifest, ensure_ascii=False, allow_nan=False,
+        sort_keys=True, separators=(",", ":"),
+    )
+    with sqlite3.connect(store.database_path) as conn:
+        conn.execute(
+            "UPDATE research_trial_families SET source_evidence_json=?,source_evidence_sha256=?",
+            (encoded, hashlib.sha256(encoded.encode("utf-8")).hexdigest()),
+        )
+    with pytest.raises(ValueError, match="transaction-cost model fingerprint mismatch"):
+        store.get_research_trial_matrix("owner-a", workspace["id"], "family-2026-01")
 
 
 def test_trial_family_identity_and_attempt_ids_are_immutable(tmp_path):
