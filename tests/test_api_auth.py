@@ -194,6 +194,8 @@ def _promotion_payload(challenger_sha):
         "challenger_report": {
             "model_sha256": challenger_sha, "training_data_sha256": "b" * 64,
             "evaluation_data_sha256": "d" * 64, "cost_model_sha256": "e" * 64,
+            "code_sha256": "f" * 64, "config_sha256": "1" * 64,
+            "experiment_id": "eti-exp-test-001",
             "cost_adjusted": True, "evaluation_locked": True, "folds": folds,
         },
     }
@@ -231,8 +233,12 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
             "artifact_sha256": "a" * 64,
             "input_schema": {
                 "features": ["close", "volume"],
-                "lineage": {"dataset_sha256": "b" * 64, "cost_model_sha256": "e" * 64},
+                "lineage": {
+                    "dataset_sha256": "b" * 64, "cost_model_sha256": "e" * 64,
+                    "code_sha256": "f" * 64, "config_sha256": "1" * 64,
+                },
             },
+            "experiment_id": "eti-exp-test-001",
             "supported_classes": ["crypto_spot"],
             "training_data_ref": "dataset:training-2026-11",
             "evaluation_report": {"passed": True, "balanced_accuracy": 0.61},
@@ -373,7 +379,12 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
                 "features": ["feature_a", "feature_b"],
                 "department": "prediction", "model_role": "direction_classifier",
                 "market_types": ["spot"], "timeframes": ["1h"],
+                "lineage": {
+                    "dataset_sha256": "b" * 64, "cost_model_sha256": "e" * 64,
+                    "code_sha256": "f" * 64, "config_sha256": "1" * 64,
+                },
             },
+            "experiment_id": "eti-exp-test-001",
             "supported_classes": ["crypto_spot"],
             "training_data_ref": "synthetic-fixture",
             "evaluation_report": {"passed": True},
