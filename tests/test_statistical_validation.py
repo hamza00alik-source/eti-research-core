@@ -210,7 +210,10 @@ def test_trial_family_keeps_bootstrap_diagnostics_when_cscv_blocks_do_not_divide
 def test_trial_family_assessment_rejects_irregular_observation_intervals():
     matrix = np.random.default_rng(41).normal(0.0, 0.01, size=(16, 2))
     times = _hourly_times(16)
-    times[8] = (datetime.fromisoformat(times[7]) + timedelta(hours=2)).isoformat()
+    times = [
+        (datetime.fromisoformat(value) + (timedelta(hours=1) if index >= 8 else timedelta(0))).isoformat()
+        for index, value in enumerate(times)
+    ]
     # Keep the sequence increasing while making one gap twice as long.
     family = {
         "family_id": "irregular-family",
