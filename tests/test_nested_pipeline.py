@@ -58,6 +58,30 @@ def test_nested_training_pipeline_orchestrates_market_folds(monkeypatch):
     assert lineage["evaluation_row_count"] == sum(
         len(fold["timestamps"]) for fold in result["trading_performance"]["folds"]
     )
+    # Independently reproduce the runner's preflight lineage calculation.
+    # These hashes must match the pipeline report exactly before a trial is
+    # registered, otherwise the ledger could bind returns to different rows.
+    from eti.features import build_features, feature_columns_for_frame, make_labels
+    from eti.evaluation import walk_forward_folds
+    usable = build_features(frame).join(
+        make_labels(frame, horizon=3).rename("label")
+    ).dropna(subset=feature_columns_for_frame(frame) + ["label"])
+    usable["close"] = frame.loc[usable.index, "close"].astype(float)
+    usable["timestamp"] = frame.loc[usable.index, "timestamp"].to_numpy()
+    folds = walk_forward_folds(
+        len(usable), min_train=80, validation_size=25,
+        test_size=25, step_size=25, purge_bars=3,
+    )
+    train_rows = sorted({i for fold in folds for i in range(fold.train_end)})
+    test_rows = sorted({
+        i for fold in folds for i in range(fold.test_start, fold.test_end)
+    })
+    import hashlib
+    def digest(indices):
+        payload = pd.util.hash_pandas_object(usable.iloc[indices], index=True).to_numpy().tobytes()
+        return hashlib.sha256(payload).hexdigest()
+    assert lineage["training_data_sha256"] == digest(train_rows)
+    assert lineage["evaluation_data_sha256"] == digest(test_rows)
     scenarios = result["cost_sensitivity"]["scenarios"]
     assert [item["cost_multiplier"] for item in scenarios] == [1.0, 1.5, 2.0]
     assert all(
