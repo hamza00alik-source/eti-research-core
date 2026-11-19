@@ -6,14 +6,17 @@ existing nested purged walk-forward evaluator. It has no order-execution path.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from typing import Any
+from uuid import uuid4
 
 import pandas as pd
 
 from .instruments import InstrumentSpec
 from .market_data_hub import MarketDataHub, build_public_market_hub
-from .pipeline import estimate_nested_model_fits_from_rows, run_nested_experiment
+from .pipeline import NESTED_CANDIDATE_NAMES, estimate_nested_model_fits_from_rows, run_nested_experiment
 from .research_allocator import MAX_DAILY_USD, MAX_MONTHLY_USD
 from .transaction_costs import validate_transaction_cost_model
 
@@ -73,6 +76,10 @@ def run_approved_multi_market_research(
     approval: dict[str, Any],
     *,
     hub: MarketDataHub | None = None,
+    trial_ledger: Any | None = None,
+    owner_id: str | None = None,
+    workspace_id: str | None = None,
+    trial_family_prefix: str = "eti-run",
 ) -> dict[str, Any]:
     """Run only explicitly approved candidates after complete budget preflight.
 
@@ -93,6 +100,15 @@ def run_approved_multi_market_research(
         raise ValueError("Research approval and fit authorization must both be explicit")
     if approval.get("execution_enabled") is not False:
         raise ValueError("Approval must explicitly keep execution_enabled=false")
+    if trial_ledger is not None:
+        if not isinstance(owner_id, str) or not owner_id.strip():
+            raise ValueError("owner_id is required when trial_ledger is configured")
+        if not isinstance(workspace_id, str) or not workspace_id.strip():
+            raise ValueError("workspace_id is required when trial_ledger is configured")
+        if not isinstance(trial_family_prefix, str) or not trial_family_prefix.strip():
+            raise ValueError("trial_family_prefix must be non-empty")
+    elif owner_id is not None or workspace_id is not None:
+        raise ValueError("owner_id/workspace_id require a configured trial_ledger")
 
     budget = approval.get("usd_budget")
     if not isinstance(budget, dict):
@@ -230,6 +246,24 @@ def run_approved_multi_market_research(
         fit_calls = estimate_nested_model_fits_from_rows(
             len(usable), horizon, min_train, validation_size, test_size, step_size
         )
+        trial_lineage = None
+        if trial_ledger is not None:
+            from .evaluation import walk_forward_folds
+            folds = walk_forward_folds(
+                len(usable), min_train=min_train, validation_size=validation_size,
+                test_size=test_size, step_size=step_size, purge_bars=horizon,
+            )
+            training_rows = sorted({index for fold in folds for index in range(fold.train_end)})
+            evaluation_rows = sorted({
+                index for fold in folds for index in range(fold.test_start, fold.test_end)
+            })
+            def rows_sha256(indices: list[int]) -> str:
+                payload = pd.util.hash_pandas_object(usable.iloc[indices], index=True).to_numpy().tobytes()
+                return hashlib.sha256(payload).hexdigest()
+            trial_lineage = {
+                "training_data_sha256": rows_sha256(training_rows),
+                "evaluation_data_sha256": rows_sha256(evaluation_rows),
+            }
         prepared.append({
             "key": key, "instrument": instrument, "frame": frame,
             "provenance": snapshot.provenance, "quality": snapshot.quality,
@@ -238,6 +272,7 @@ def run_approved_multi_market_research(
             "funding_bps_per_bar": funding, "funding_events": funding_schedule,
             "allow_short": allow_short,
             "transaction_cost_model": validated_model,
+            "trial_lineage": trial_lineage,
         })
 
     total_fits = sum(item["fit_calls"] for item in prepared)
@@ -247,9 +282,46 @@ def run_approved_multi_market_research(
             f"exceed approval cap {max_fits}"
         )
 
+    if trial_ledger is not None and step_size < test_size:
+        raise ValueError(
+            "Trial-ledger recording requires non-overlapping outer-test windows: step_size >= test_size"
+        )
     results = {}
+    run_id = uuid4().hex[:16]
     for item in prepared:
+        registered_trials: dict[str, str] = {}
+        family_id = None
         try:
+            if trial_ledger is not None:
+                family_id = f"{trial_family_prefix}:{run_id}:{item['key']}"
+                if len(family_id) > 160:
+                    raise ValueError("Generated trial family ID exceeds the storage limit")
+                cost_sha256 = hashlib.sha256(json.dumps(
+                    item["transaction_cost_model"], sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")).hexdigest()
+                for candidate_name in NESTED_CANDIDATE_NAMES:
+                    config_payload = {
+                        "candidate": candidate_name, "instrument": item["key"],
+                        "timeframe": timeframe, "horizon": horizon,
+                        "min_train": min_train, "validation_size": validation_size,
+                        "test_size": test_size, "step_size": step_size,
+                        "fee_bps": item["fee_bps"], "slippage_bps": item["slippage_bps"],
+                        "allow_short": item["allow_short"],
+                    }
+                    config_sha256 = hashlib.sha256(json.dumps(
+                        config_payload, sort_keys=True, separators=(",", ":")
+                    ).encode("utf-8")).hexdigest()
+                    trial_id = hashlib.sha256(
+                        f"{family_id}:{candidate_name}".encode("utf-8")
+                    ).hexdigest()[:32]
+                    trial_ledger.register_research_trial(
+                        owner_id, workspace_id, family_id, trial_id, candidate_name,
+                        config_sha256, item["trial_lineage"]["training_data_sha256"],
+                        item["trial_lineage"]["evaluation_data_sha256"], cost_sha256,
+                        f"no_trade:{item['key']}",
+                    )
+                    trial_ledger.start_research_trial(owner_id, workspace_id, trial_id)
+                    registered_trials[candidate_name] = trial_id
             report = run_nested_experiment(
                 item["frame"], horizon=horizon, min_train=min_train,
                 validation_size=validation_size, test_size=test_size,
@@ -260,6 +332,28 @@ def run_approved_multi_market_research(
                 fee_bps=item["fee_bps"], slippage_bps=item["slippage_bps"],
                 max_model_fits=item["fit_calls"],
             )
+            if trial_ledger is not None:
+                streams = report.get("candidate_oos_returns", {})
+                if set(streams) != set(NESTED_CANDIDATE_NAMES):
+                    raise ValueError("Research report omitted one or more registered candidate return streams")
+                for candidate_name, trial_id in registered_trials.items():
+                    stream = streams[candidate_name]
+                    if stream.get("ledger_compatible") is not True:
+                        raise ValueError(
+                            "Outer-test windows overlap or are too short for a unique ledger return series; "
+                            "set step_size >= test_size and use at least eight observations"
+                        )
+                    trial_ledger.complete_research_trial(
+                        owner_id, workspace_id, trial_id,
+                        stream["timestamps"], stream["net_return_differentials"],
+                    )
+                report["trial_ledger"] = {
+                    "family_id": family_id, "trial_ids": registered_trials,
+                    "registered_candidate_count": len(registered_trials),
+                    "completed_candidate_count": len(registered_trials),
+                    "benchmark": "no_trade",
+                    "warning": "Candidate returns are net of configured fee/slippage assumptions and relative to no-trade. Data/cost authenticity and unrecorded external searches remain operator responsibilities.",
+                }
             results[item["key"]] = {
                 "status": "evaluated", "instrument": item["instrument"].__dict__,
                 "provenance": item["provenance"], "quality": item["quality"],
@@ -267,6 +361,15 @@ def run_approved_multi_market_research(
                 "fit_calls": item["fit_calls"], "report": report,
             }
         except Exception as exc:
+            if trial_ledger is not None:
+                for trial_id in registered_trials.values():
+                    try:
+                        trial_ledger.fail_research_trial(
+                            owner_id, workspace_id, trial_id,
+                            f"{type(exc).__name__}: {str(exc)[:900]}",
+                        )
+                    except (LookupError, ValueError):
+                        pass
             results[item["key"]] = {
                 "status": "evaluation_failed", "fit_calls": item["fit_calls"],
                 "error": {"type": type(exc).__name__, "message": str(exc)[:500]},

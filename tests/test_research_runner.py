@@ -240,3 +240,70 @@ def test_spot_short_economic_evaluation_is_blocked_until_borrow_costs_supported(
         run_approved_multi_market_research(
             candidate_scan, candidate_allocation, approved, hub=FakeHub()
         )
+
+
+def test_runner_records_every_candidate_in_the_trial_ledger(monkeypatch):
+    import eti.research_runner as runner
+
+    class FakeLedger:
+        def __init__(self):
+            self.registered, self.started, self.completed, self.failed = [], [], [], []
+        def register_research_trial(self, *args):
+            self.registered.append(args)
+        def start_research_trial(self, *args):
+            self.started.append(args)
+        def complete_research_trial(self, *args):
+            self.completed.append(args)
+        def fail_research_trial(self, *args):
+            self.failed.append(args)
+
+    timestamps = pd.date_range("2026-01-01", periods=16, freq="h", tz="UTC")
+    def fake_nested(*args, **kwargs):
+        return {"candidate_oos_returns": {
+            name: {
+                "timestamps": [value.isoformat() for value in timestamps],
+                "net_return_differentials": [0.001 + i * 0.00001 for i in range(16)],
+                "benchmark_id": "no_trade", "ledger_compatible": True,
+            } for name in runner.NESTED_CANDIDATE_NAMES
+        }}
+    monkeypatch.setattr(runner, "run_nested_experiment", fake_nested)
+    ledger = FakeLedger()
+    result = run_approved_multi_market_research(
+        scan(), allocation(), approval(), hub=FakeHub(),
+        trial_ledger=ledger, owner_id="owner-1", workspace_id="workspace-1",
+    )
+    market = result["markets"]["kraken:spot:BTC/USD"]
+    assert market["status"] == "evaluated"
+    assert len(ledger.registered) == len(ledger.started) == len(ledger.completed) == 2
+    assert ledger.failed == []
+    assert len({record[3] for record in ledger.registered}) == 2
+    assert all(record[9] == "no_trade:kraken:spot:BTC/USD" for record in ledger.registered)
+    assert market["report"]["trial_ledger"]["completed_candidate_count"] == 2
+
+
+def test_runner_marks_registered_trials_failed_when_evaluation_fails(monkeypatch):
+    import eti.research_runner as runner
+
+    class FakeLedger:
+        def __init__(self):
+            self.started, self.failed = [], []
+        def register_research_trial(self, *args):
+            pass
+        def start_research_trial(self, *args):
+            self.started.append(args)
+        def complete_research_trial(self, *args):
+            raise AssertionError("failed evaluation must not complete a trial")
+        def fail_research_trial(self, *args):
+            self.failed.append(args)
+
+    monkeypatch.setattr(
+        runner, "run_nested_experiment",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("synthetic training failure")),
+    )
+    ledger = FakeLedger()
+    result = run_approved_multi_market_research(
+        scan(), allocation(), approval(), hub=FakeHub(),
+        trial_ledger=ledger, owner_id="owner-1", workspace_id="workspace-1",
+    )
+    assert result["markets"]["kraken:spot:BTC/USD"]["status"] == "evaluation_failed"
+    assert len(ledger.started) == len(ledger.failed) == 2

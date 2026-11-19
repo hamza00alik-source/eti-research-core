@@ -21,6 +21,9 @@ from .universe import scan_market_universe
 from .calibrated_evaluation import run_nested_calibrated_walk_forward
 
 
+NESTED_CANDIDATE_NAMES = ("hist_gradient_boosting", "majority_class")
+
+
 def _estimate_observed_bars_per_year(
     frame: pd.DataFrame, dataset: pd.DataFrame
 ) -> tuple[float, dict]:
@@ -386,8 +389,8 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
     report = run_nested_calibrated_walk_forward(
         dataset, feature_columns, "label",
         {
-            "hist_gradient_boosting": BaselineModel,
-            "majority_class": lambda: DummyClassifier(strategy="most_frequent"),
+            NESTED_CANDIDATE_NAMES[0]: BaselineModel,
+            NESTED_CANDIDATE_NAMES[1]: lambda: DummyClassifier(strategy="most_frequent"),
         },
         min_train=min_train, validation_size=validation_size,
         test_size=test_size, step_size=step_size, purge_bars=horizon,
@@ -397,6 +400,10 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
     regime_frame = classify_market_regime(frame)
     regime_by_row = regime_frame.loc[dataset.index, "regime"].reset_index(drop=True)
     performance_folds = []
+    candidate_return_streams = {
+        name: {"timestamps": [], "net_return_differentials": []}
+        for name in report["candidate_summary"]
+    }
     for fold in report["folds"]:
         start, end = fold["boundaries"]["test_start"], fold["boundaries"]["test_end"]
         fold_regimes = regime_by_row.iloc[start:end]
@@ -420,6 +427,27 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
             funding_events=fold_funding_events,
             allow_short=allow_short, bars_per_year=bars_per_year,
         )
+        # Candidate-specific outer-test streams are net of the same costs and
+        # expressed relative to the same no-trade benchmark.
+        for candidate_name, candidate_metrics in fold["test_candidate_metrics"].items():
+            candidate_prediction = pd.Series(
+                candidate_metrics["test_predictions"], index=test_timestamps, dtype=int
+            )
+            candidate_evaluation = evaluate_predictions(
+                close_test, actual_test, candidate_prediction,
+                fee_bps=fee_bps, slippage_bps=slippage_bps,
+                funding_bps_per_bar=funding_bps_per_bar,
+                funding_events=fold_funding_events,
+                allow_short=allow_short, bars_per_year=bars_per_year,
+            )
+            candidate_net = candidate_evaluation["trading"]["model"]["bar_returns"]
+            benchmark_net = candidate_evaluation["trading"]["no_trade"]["bar_returns"]
+            stream = candidate_return_streams[candidate_name]
+            stream["timestamps"].extend(timestamp.isoformat() for timestamp in test_timestamps)
+            stream["net_return_differentials"].extend(
+                float(value - benchmark)
+                for value, benchmark in zip(candidate_net, benchmark_net)
+            )
         evaluation["timestamps"] = [timestamp.isoformat() for timestamp in test_timestamps]
         performance_folds.append({
             "fold": fold["fold"],
@@ -427,6 +455,19 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
             "market_regimes": regime_diagnostics,
             **evaluation,
         })
+    report["candidate_oos_returns"] = {
+        name: {
+            "timestamps": stream["timestamps"],
+            "net_return_differentials": stream["net_return_differentials"],
+            "benchmark_id": "no_trade",
+            "ledger_compatible": (
+                len(stream["timestamps"]) == len(set(stream["timestamps"]))
+                and len(stream["timestamps"]) >= 8
+            ),
+        }
+        for name, stream in candidate_return_streams.items()
+    }
+
     # Re-run the same frozen outer-test predictions under harsher execution costs.
     # These scenarios are sensitivity diagnostics, not additional model selection.
     cost_sensitivity = []
@@ -520,6 +561,20 @@ def run_nested_experiment(frame: pd.DataFrame, horizon: int = 6,
                        "note": "Fit-call count is a compute proxy, not a Kaggle dollar-cost estimate."
                    },
                    "model_note": "HistGradientBoostingClassifier is fitted from scratch within each fold; majority-class is a naive comparator."})
+    training_rows = sorted({index for fold in planned_folds for index in range(fold.train_end)})
+    evaluation_rows = sorted({
+        index for fold in planned_folds for index in range(fold.test_start, fold.test_end)
+    })
+    def _rows_sha256(indices: list[int]) -> str:
+        payload = pd.util.hash_pandas_object(dataset.iloc[indices], index=True).to_numpy().tobytes()
+        return hashlib.sha256(payload).hexdigest()
+    report["trial_lineage"] = {
+        "training_data_sha256": _rows_sha256(training_rows),
+        "evaluation_data_sha256": _rows_sha256(evaluation_rows),
+        "training_row_count": len(training_rows),
+        "evaluation_row_count": len(evaluation_rows),
+        "evaluation_protocol": "nested_purged_chronological_outer_test",
+    }
     return report
 
 
