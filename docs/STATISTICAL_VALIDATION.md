@@ -35,7 +35,9 @@ Call `assess_research_trial_family(family_snapshot, selected_trial_id=...)` with
 
 ## Integration boundary
 
-The integrated family assessment is now wired to the SQLite experiment ledger, the authenticated workspace-scoped diagnostics API and the approved research runner. The runner records candidate-specific outer-test return differentials against a frozen no-trade benchmark; it does not derive the matrix from fold-level summary metrics. Registered-but-unstarted hypotheses remain visible but are excluded from attempted-trial counts, while every started attempt—including failed attempts—is counted for DSR.
+The integrated family assessment is now wired to the SQLite experiment ledger, the authenticated workspace-scoped diagnostics API and the approved research runner. The runner records candidate-specific outer-test return differentials against a frozen no-trade benchmark; it does not derive the matrix from fold-level summary metrics. Ledger-backed series require contiguous, non-overlapping outer-test windows and timestamps one configured candle interval apart, because the current circular block bootstrap assumes row adjacency. Registered-but-unstarted hypotheses remain visible but are excluded from attempted-trial counts, while every started attempt—including failed attempts—is counted for DSR.
+
+The aggregate training/evaluation lineage hashes cover row unions across expanding folds and can overlap: an earlier fold's test rows may be used for training in a later fold. They must not be interpreted as two globally disjoint datasets; the fold-level chronological purge/test boundaries provide the actual holdout separation.
 
 These utilities remain separate from model promotion and order execution. They do not authenticate external source data, independently verify cost assumptions, prove that every external experiment was registered, or authorize promotion. SQLite is a single-instance store; multi-replica deployment requires a PostgreSQL migration.
 
