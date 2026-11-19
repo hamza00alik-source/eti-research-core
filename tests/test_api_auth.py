@@ -186,6 +186,10 @@ def _promotion_payload(challenger_sha):
     champion_folds = [{**item, "net_return_bps": 10.0} for item in folds]
     return {
         "comparison_family_size": 1,
+        "independent_cost_evidence_verified": True,
+        "cost_evidence_sha256": "2" * 64,
+        "cost_evidence_source": "independent exchange fee schedule and observed spread sample",
+        "cost_evidence_as_of": "2025-06-01T00:00:00Z",
         "champion_report": {
             "model_sha256": "c" * 64, "training_data_sha256": "b" * 64,
             "evaluation_data_sha256": "d" * 64, "cost_model_sha256": "e" * 64,
@@ -285,6 +289,12 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
             "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
             json=wrong_experiment,
         ).status_code == 409
+        unverified_costs = _promotion_payload("a" * 64)
+        unverified_costs["independent_cost_evidence_verified"] = False
+        assert client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=unverified_costs,
+        ).status_code == 409
 
         no_lineage_payload = {
             **payload, "model_id": "eti-no-lineage", "version": "0.1.0",
@@ -314,6 +324,8 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
         audit = client.get("/v1/audit/events", headers=reviewer_headers).json()["items"]
         promotion_event = next(item for item in audit if item["event_type"] == "model.promotion.approved")
         assert promotion_event["payload"]["model_id"] == "eti-core"
+        assert promotion_event["payload"]["independent_cost_evidence_verified"] is True
+        assert promotion_event["payload"]["cost_evidence_sha256"] == "2" * 64
         visible = client.get("/v1/models", headers=regular_headers)
         assert len(visible.json()["items"]) == 1
         assert visible.json()["items"][0]["lifecycle"] == "approved"
