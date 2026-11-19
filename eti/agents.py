@@ -358,10 +358,16 @@ def model_training_research(payload: dict[str, Any]) -> dict[str, Any]:
     config_sha256 = hashlib.sha256(
         json.dumps(experiment_config, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+    cost_model_sha256 = hashlib.sha256(json.dumps({
+        "fee_bps": experiment_config["fee_bps"],
+        "slippage_bps": experiment_config["slippage_bps"],
+        "assumption_type": "training_configured_not_independently_verified",
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     experiment_id = "eti-exp-" + config_sha256[:24]
     lineage = {
         "config_sha256": config_sha256,
         "dataset_sha256": schema.get("dataset_sha256"),
+        "cost_model_sha256": cost_model_sha256,
         "provider": provider_diagnostics.get("provider") if isinstance(provider_diagnostics, dict) else None,
         "data_start": timestamps.iloc[0].isoformat(),
         "data_end": timestamps.iloc[-1].isoformat(),

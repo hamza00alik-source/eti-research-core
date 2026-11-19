@@ -167,7 +167,8 @@
 <form id="model-approve-form" class="inline-form">
 <label>Model ID<input name="model_id" required maxlength="120"></label>
 <label>Version<input name="version" required maxlength="80"></label>
-<button type="submit">Approve with this reviewer account</button>
+<label class="wide-field">Locked champion/challenger evidence (JSON)<textarea name="evidence" rows="8" spellcheck="false" required placeholder='{"comparison_family_size":1,"champion_report":{},"challenger_report":{}}'></textarea></label>
+<button type="submit">Review evidence and approve candidate</button>
 </form>
 <form id="model-retire-form" class="inline-form">
 <label>Model ID<input name="model_id" required maxlength="120"></label>

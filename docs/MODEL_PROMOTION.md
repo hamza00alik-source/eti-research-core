@@ -28,3 +28,10 @@ Autonomous training workers register every result as a `candidate`; they do not 
 A candidate can become approved only through a separately authorized review workflow that evaluates the locked champion/challenger evidence described above and records the human reviewer. A positive statistical comparison only establishes eligibility for human review; it does not itself approve the model. Existing approved models are not automatically demoted by this change.
 
 The worker's output therefore reports `approval_required=true` for newly registered candidates and never assigns `eti.quality_gate` as an automatic approval authority.
+
+
+## API approval workflow
+
+The authenticated model-approval endpoint requires a JSON body containing `champion_report`, `challenger_report` and `comparison_family_size`. It runs the evidence gate server-side, binds the challenger model hash to the registered artifact digest, and—when candidate lineage declares them—checks the training-data and cost-model hashes. Ineligible or mismatched evidence is rejected. Only after these checks does the separate reviewer account approve the candidate, and the artifact's server-side digest, feature schema and calibration are verified.
+
+The approval endpoint does not accept a Boolean `passed` flag as a substitute for fold evidence. The PWA registry form now collects the evidence JSON. Evidence hashes and locked status are still declarations supplied for review; they are not independently authenticated by the API. Reviewers must independently verify the underlying data, cost model, locked test process and comparison-family declaration. The promotion gate is not live-order authorization.

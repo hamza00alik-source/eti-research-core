@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
@@ -224,6 +225,11 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
         )
         assert schema_mismatch.status_code == 409
         CalibratedStub.estimator.feature_names_in_ = np.array(["close", "volume"])
+        mismatched_evidence = client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=_promotion_payload("f" * 64),
+        )
+        assert mismatched_evidence.status_code == 409
 
         approved = client.post(
             "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers

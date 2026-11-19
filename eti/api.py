@@ -21,6 +21,7 @@ from .credentials import CredentialVault, CredentialVaultError, verify_exchange_
 from .decision import build_research_decision
 from .execution import LIVE_ORDER_EXECUTION_ENABLED
 from .portfolio import assess_portfolio
+from .promotion import assess_challenger_promotion
 from .risk import RiskEngine, RiskRequest
 from .storage import MemoryStore
 
@@ -751,6 +752,12 @@ def create_agent_message(workspace_id: str, payload: AgentMessagePayload,
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+class ModelApprovalPayload(BaseModel):
+    champion_report: dict[str, Any]
+    challenger_report: dict[str, Any]
+    comparison_family_size: int = Field(ge=1, le=10000)
+
+
 class ModelInferencePayload(BaseModel):
     asset_class: str = Field(min_length=1, max_length=40)
     model_role: str = Field(min_length=1, max_length=80)
@@ -975,6 +982,7 @@ def register_model(payload: ModelVersionPayload,
 
 @app.post("/v1/models/{model_id}/{version}/approve")
 def approve_model(model_id: str, version: str,
+                  payload: ModelApprovalPayload | None = None,
                   account: dict[str, str] = Depends(current_account)):
     _require_model_admin(account)
     store = _memory_store()
@@ -982,30 +990,40 @@ def approve_model(model_id: str, version: str,
     if candidate is None:
         raise HTTPException(status_code=404, detail="model version not found")
     try:
-        # Approval is allowed only when the server-owned artifact exists, matches
-        # the registered digest and deserializes as a fitted ETI BaselineModel.
         artifact_model = ModelArtifactStore().load_model(
             candidate["artifact_uri"], candidate["artifact_sha256"]
         )
         if not _model_feature_schema_matches(
             artifact_model, candidate["input_schema"].get("features")
         ):
-            raise HTTPException(
-                status_code=409,
-                detail="registered feature schema must exactly match the trained model",
-            )
+            raise HTTPException(status_code=409, detail="registered feature schema must exactly match the trained model")
         if not _model_has_verified_calibration(artifact_model):
-            raise HTTPException(
-                status_code=409,
-                detail="model artifact must contain a passing temperature-calibration report",
-            )
+            raise HTTPException(status_code=409, detail="model artifact must contain a passing temperature-calibration report")
     except ModelArtifactError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail="model artifact must exist and pass integrity checks before approval",
-        ) from exc
+        raise HTTPException(status_code=409, detail="model artifact must exist and pass integrity checks before approval") from exc
+    if payload is None:
+        raise HTTPException(status_code=409, detail="locked champion/challenger promotion evidence is required")
     try:
-        return store.approve_model_version(model_id, version, account["username"])
+        assessment = assess_challenger_promotion(
+            payload.champion_report, payload.challenger_report,
+            comparison_family_size=payload.comparison_family_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=f"invalid promotion evidence: {exc}") from exc
+    if payload.challenger_report.get("model_sha256") != candidate["artifact_sha256"]:
+        raise HTTPException(status_code=409, detail="challenger evidence model hash does not match the registered candidate artifact")
+    lineage = candidate["input_schema"].get("lineage") or {}
+    declared_dataset_hash = lineage.get("dataset_sha256")
+    if declared_dataset_hash and payload.challenger_report.get("training_data_sha256") != declared_dataset_hash:
+        raise HTTPException(status_code=409, detail="challenger training-data hash does not match candidate lineage")
+    declared_cost_hash = lineage.get("cost_model_sha256")
+    if declared_cost_hash and payload.challenger_report.get("cost_model_sha256") != declared_cost_hash:
+        raise HTTPException(status_code=409, detail="challenger cost-model hash does not match candidate lineage")
+    if assessment.get("promotion_eligible") is not True:
+        raise HTTPException(status_code=409, detail={"message": "candidate is not eligible for human promotion", "assessment": assessment})
+    try:
+        approved = store.approve_model_version(model_id, version, account["username"])
+        return {**approved, "promotion_assessment": assessment}
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="model version not found") from exc
     except ValueError as exc:
