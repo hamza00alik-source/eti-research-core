@@ -500,3 +500,28 @@ def test_runner_real_model_pipeline_persists_oos_trials_to_sqlite(tmp_path):
     assert len(family["observation_times"]) % 8 == 0
     assert all(len(row) == 2 for row in family["net_return_differentials"])
     assert result["execution_enabled"] is False
+
+
+
+def test_trial_ledger_rejects_gaps_between_outer_test_windows(monkeypatch):
+    import eti.research_runner as runner
+
+    monkeypatch.setattr(
+        runner, "estimate_nested_model_fits_from_rows",
+        lambda *args, **kwargs: 4,
+    )
+
+    class Ledger:
+        def register_research_trial(self, *args):
+            raise AssertionError("ledger registration must not begin for gapped folds")
+
+    approved = approval(evaluation={
+        "horizon": 6, "min_train": 400, "validation_size": 100,
+        "test_size": 80, "step_size": 100,
+    })
+    with pytest.raises(ValueError, match="step_size must equal test_size"):
+        run_approved_multi_market_research(
+            scan(), allocation(), approved,
+            hub=FakeHub(variable_volume=True),
+            trial_ledger=Ledger(), owner_id="owner-1", workspace_id="workspace-1",
+        )
