@@ -1012,13 +1012,26 @@ def approve_model(model_id: str, version: str,
         raise HTTPException(status_code=409, detail=f"invalid promotion evidence: {exc}") from exc
     if payload.challenger_report.get("model_sha256") != candidate["artifact_sha256"]:
         raise HTTPException(status_code=409, detail="challenger evidence model hash does not match the registered candidate artifact")
-    lineage = candidate["input_schema"].get("lineage") or {}
-    declared_dataset_hash = lineage.get("dataset_sha256")
-    if declared_dataset_hash and payload.challenger_report.get("training_data_sha256") != declared_dataset_hash:
-        raise HTTPException(status_code=409, detail="challenger training-data hash does not match candidate lineage")
-    declared_cost_hash = lineage.get("cost_model_sha256")
-    if declared_cost_hash and payload.challenger_report.get("cost_model_sha256") != declared_cost_hash:
-        raise HTTPException(status_code=409, detail="challenger cost-model hash does not match candidate lineage")
+    lineage = candidate["input_schema"].get("lineage")
+    experiment_id = candidate["input_schema"].get("experiment_id")
+    required_lineage = ("code_sha256", "config_sha256", "dataset_sha256", "cost_model_sha256")
+    if not isinstance(lineage, dict) or not isinstance(experiment_id, str) or not experiment_id.strip():
+        raise HTTPException(status_code=409, detail="candidate must contain immutable experiment and complete code/config/data/cost lineage")
+    for field in required_lineage:
+        digest = lineage.get(field)
+        if (not isinstance(digest, str) or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)):
+            raise HTTPException(status_code=409, detail=f"candidate lineage is missing a valid {field}")
+        evidence_field = {
+            "code_sha256": "code_sha256",
+            "config_sha256": "config_sha256",
+            "dataset_sha256": "training_data_sha256",
+            "cost_model_sha256": "cost_model_sha256",
+        }[field]
+        if payload.challenger_report.get(evidence_field) != digest:
+            raise HTTPException(status_code=409, detail=f"challenger {evidence_field} does not match candidate lineage")
+    if payload.challenger_report.get("experiment_id") != experiment_id:
+        raise HTTPException(status_code=409, detail="challenger experiment_id does not match candidate lineage")
     if assessment.get("promotion_eligible") is not True:
         raise HTTPException(status_code=409, detail={"message": "candidate is not eligible for human promotion", "assessment": assessment})
     try:
