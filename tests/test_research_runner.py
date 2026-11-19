@@ -284,7 +284,10 @@ def test_runner_records_every_candidate_in_the_trial_ledger(monkeypatch):
     monkeypatch.setattr(runner, "run_nested_experiment", fake_nested)
     ledger = FakeLedger()
     result = run_approved_multi_market_research(
-        scan(), allocation(), approval(), hub=FakeHub(variable_volume=True),
+        scan(), allocation(), approval(evaluation={
+            "horizon": 6, "min_train": 400, "validation_size": 100,
+            "test_size": 100, "step_size": 100,
+        }), hub=FakeHub(variable_volume=True),
         trial_ledger=ledger, owner_id="owner-1", workspace_id="workspace-1",
     )
     market = result["markets"]["kraken:spot:BTC/USD"]
@@ -326,7 +329,10 @@ def test_runner_marks_registered_trials_failed_when_evaluation_fails(monkeypatch
     )
     ledger = FakeLedger()
     result = run_approved_multi_market_research(
-        scan(), allocation(), approval(), hub=FakeHub(),
+        scan(), allocation(), approval(evaluation={
+            "horizon": 6, "min_train": 400, "validation_size": 100,
+            "test_size": 100, "step_size": 100,
+        }), hub=FakeHub(),
         trial_ledger=ledger, owner_id="owner-1", workspace_id="workspace-1",
     )
     assert result["markets"]["kraken:spot:BTC/USD"]["status"] == "evaluation_failed"
@@ -365,7 +371,10 @@ def test_runner_persists_candidate_trials_in_real_sqlite_ledger(tmp_path, monkey
     store = MemoryStore(database)
     workspace = store.create_workspace("owner-1", "runner integration")
     result = run_approved_multi_market_research(
-        scan(), allocation(), approval(), hub=FakeHub(variable_volume=True),
+        scan(), allocation(), approval(evaluation={
+            "horizon": 6, "min_train": 400, "validation_size": 100,
+            "test_size": 100, "step_size": 100,
+        }), hub=FakeHub(variable_volume=True),
         trial_ledger=store, owner_id="owner-1", workspace_id=workspace["id"],
     )
 
@@ -433,7 +442,10 @@ def test_runner_exposes_registered_but_unstarted_trial_without_counting_it_as_at
     )
     ledger = StartFailureLedger()
     result = run_approved_multi_market_research(
-        scan(), allocation(), approval(), hub=FakeHub(variable_volume=True),
+        scan(), allocation(), approval(evaluation={
+            "horizon": 6, "min_train": 400, "validation_size": 100,
+            "test_size": 100, "step_size": 100,
+        }), hub=FakeHub(variable_volume=True),
         trial_ledger=ledger, owner_id="owner-1", workspace_id="workspace-1",
     )
 
