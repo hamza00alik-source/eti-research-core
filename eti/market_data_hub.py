@@ -7,6 +7,8 @@ with full provenance. Execution is deliberately outside this module.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Iterable, Any
 
@@ -17,6 +19,26 @@ from .data import validate_ohlcv
 from .instruments import InstrumentCatalog, InstrumentSpec
 from .providers import CcxtPublicProvider, YahooFinanceProvider
 from .session_calendar import SessionCalendarRegistry, session_quality, timeframe_delta
+
+
+def _ohlcv_snapshot_sha256(frame: pd.DataFrame) -> str:
+    """Hash exact validated OHLCV values using a stable, typed serialization."""
+    columns = ["timestamp", "open", "high", "low", "close", "volume"]
+    if any(column not in frame.columns for column in columns):
+        raise ValueError("OHLCV snapshot is missing a required column")
+    rows = []
+    for timestamp, open_, high, low, close, volume in frame[columns].itertuples(index=False, name=None):
+        stamp = pd.Timestamp(timestamp)
+        if stamp.tzinfo is None:
+            raise ValueError("OHLCV snapshot timestamps must be timezone-aware")
+        rows.append([
+            stamp.tz_convert("UTC").isoformat(),
+            float(open_).hex(), float(high).hex(), float(low).hex(),
+            float(close).hex(), float(volume).hex(),
+        ])
+    payload = json.dumps({"schema_version": "eti.ohlcv_snapshot.v1", "columns": columns,
+                          "rows": rows}, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -363,6 +385,7 @@ class MarketDataHub:
                 f"{min_rows} required"
             )
         quality = self._quality(clean, timeframe, instrument)
+        captured_at = pd.Timestamp.now(tz="UTC").isoformat()
         provenance = {
             "venue": instrument.venue, "symbol": instrument.symbol,
             "asset_class": instrument.asset_class, "market_type": instrument.market_type,
@@ -370,6 +393,9 @@ class MarketDataHub:
             "returned_rows": len(clean), "public_market_data": adapter.capabilities.public_market_data,
             "authenticated_market_data": adapter.capabilities.authenticated_market_data,
             "execution_capability": adapter.capabilities.order_execution,
+            "provider_adapter": type(adapter).__name__,
+            "captured_at": captured_at,
+            "source_snapshot_sha256": _ohlcv_snapshot_sha256(clean),
         }
         return MarketDataSnapshot(instrument, timeframe, clean, provenance, quality)
 
