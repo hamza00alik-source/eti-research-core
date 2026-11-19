@@ -243,6 +243,11 @@ def run_approved_multi_market_research(
         columns = feature_columns_for_frame(frame)
         labels = make_labels(frame, horizon=horizon)
         usable = feature_frame.join(labels.rename("label")).dropna(subset=columns + ["label"])
+        if trial_ledger is not None:
+            # Match the exact feature/label/close/timestamp frame hashed by
+            # run_nested_experiment so ledger lineage is reproducible.
+            usable["close"] = frame.loc[usable.index, "close"].astype(float)
+            usable["timestamp"] = frame.loc[usable.index, "timestamp"].to_numpy()
         fit_calls = estimate_nested_model_fits_from_rows(
             len(usable), horizon, min_train, validation_size, test_size, step_size
         )
