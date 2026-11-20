@@ -257,6 +257,8 @@ def run_approved_multi_market_research(
                 else Path(os.environ.get("ETI_RESEARCH_EVIDENCE_DIR", "data/research_evidence")).expanduser()
             )
             archive_receipt = archive_ohlcv_snapshot(snapshot.frame, archive_root)
+            if archive_receipt["source_snapshot_sha256"] != snapshot_digest:
+                raise ValueError(f"{key} archived OHLCV fingerprint does not match the runner receipt")
             captured_provenance["raw_data_archive"] = archive_receipt
         from .features import build_features, feature_columns_for_frame, make_labels
         frame = snapshot.frame
