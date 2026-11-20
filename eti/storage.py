@@ -320,6 +320,7 @@ class MemoryStore:
                     prediction INTEGER NOT NULL,
                     confidence REAL NOT NULL,
                     risk_decision_json TEXT NOT NULL,
+                    market_evidence_json TEXT NOT NULL DEFAULT '{}',
                     candle_at TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
@@ -397,6 +398,13 @@ class MemoryStore:
                     ON research_trials(owner_id, workspace_id, family_id, status, created_at);
                 """
             )
+            paper_trade_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(paper_trades)").fetchall()
+            }
+            if "market_evidence_json" not in paper_trade_columns:
+                conn.execute(
+                    "ALTER TABLE paper_trades ADD COLUMN market_evidence_json TEXT NOT NULL DEFAULT '{}'"
+                )
             research_family_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info(research_trial_families)").fetchall()
             }
@@ -2269,6 +2277,7 @@ class MemoryStore:
             "slippage_bps": row["slippage_bps"], "realized_pnl": row["realized_pnl"],
             "prediction": row["prediction"], "confidence": row["confidence"],
             "risk_decision": json.loads(row["risk_decision_json"]),
+            "market_evidence": json.loads(row["market_evidence_json"]),
             "candle_at": row["candle_at"], "created_at": row["created_at"],
         } for row in rows]
 
@@ -2402,12 +2411,18 @@ class MemoryStore:
                 conn.execute(
                     """INSERT INTO paper_trades
                     (id,session_id,owner_id,event_type,quantity,price,notional,fee,slippage_bps,
-                     realized_pnl,prediction,confidence,risk_decision_json,candle_at,created_at)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     realized_pnl,prediction,confidence,risk_decision_json,market_evidence_json,
+                     candle_at,created_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (str(uuid4()), session_id, owner_id, event["event_type"], event["quantity"],
                      event["price"], event["notional"], event["fee"], event["slippage_bps"],
                      event["realized_pnl"], event["prediction"], event["confidence"],
-                     _encode_json(event["risk_decision"]), candle_at, now),
+                     _encode_json(event["risk_decision"]), _encode_json({
+                         key: event.get(key) for key in (
+                             "bid", "ask", "spread_bps", "quote_timestamp",
+                             "market_snapshot_sha256",
+                         )
+                     }), candle_at, now),
                 )
         return self.get_paper_session(owner_id, session_id)
 
