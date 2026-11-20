@@ -45,7 +45,7 @@ def capture_public_spot_snapshot(
     exchange_factory: Callable[[str], Any] | None = None,
     now_ms: int | None = None,
     max_quote_age_ms: int = 30_000,
-    max_candle_age_intervals: int = 2,
+    max_candle_age_intervals: int = 1,
 ) -> dict[str, Any]:
     """Capture one fresh quote and the latest completed OHLCV candle.
 
