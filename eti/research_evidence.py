@@ -23,6 +23,8 @@ _COLUMNS = ["timestamp", "open", "high", "low", "close", "volume"]
 def _canonical_payload(frame: pd.DataFrame) -> bytes:
     if not isinstance(frame, pd.DataFrame) or any(c not in frame.columns for c in _COLUMNS):
         raise ValueError("OHLCV archive requires a DataFrame with timestamp and OHLCV columns")
+    if frame.empty:
+        raise ValueError("OHLCV archive cannot store an empty snapshot")
     rows = []
     for index, values in enumerate(frame[_COLUMNS].itertuples(index=False, name=None)):
         timestamp, *numbers = values
@@ -67,6 +69,8 @@ def archive_ohlcv_snapshot(frame: pd.DataFrame, archive_root: str | os.PathLike[
         try:
             os.link(temporary, destination)
         except FileExistsError:
+            if destination.is_symlink():
+                raise RuntimeError("content-addressed archive object must not be a symbolic link")
             existing = destination.read_bytes()
             if existing != payload:
                 raise RuntimeError("content-addressed archive collision or tampered existing object")
