@@ -714,6 +714,12 @@ def test_paper_feed_health_api_is_authenticated_and_owner_scoped(tmp_path, monke
 
         path = f"/v1/paper/sessions/{session_id}/health"
         assert client.get(path).status_code == 401
+        decisions_path = f"/v1/paper/sessions/{session_id}/decisions"
+        assert client.get(decisions_path).status_code == 401
+        decisions = client.get(decisions_path, headers=owner_headers)
+        assert decisions.status_code == 200
+        assert decisions.json()["items"] == []
+        assert decisions.json()["live_execution_enabled"] is False
         initial = client.get(path, headers=owner_headers)
         assert initial.status_code == 200
         assert initial.json()["feed_health"]["status"] == "not_checked"
