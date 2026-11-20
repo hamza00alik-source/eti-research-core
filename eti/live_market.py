@@ -87,7 +87,6 @@ def capture_public_spot_snapshot(
         if not isinstance(market, dict) or not market.get("spot", False) or market.get("active") is not True:
             raise ValueError(f"{venue} {symbol} is not an active public spot market")
 
-        current_ms = int(exchange.milliseconds() if now_ms is None else now_ms)
         interval_ms = _timeframe_ms(exchange, timeframe)
         try:
             raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=5)
@@ -123,6 +122,9 @@ def capture_public_spot_snapshot(
             raise MarketDataUnavailable("exchange ticker request failed") from exc
         if not isinstance(ticker, dict):
             raise MarketDataUnavailable("venue returned an invalid ticker")
+        # Take the local/exchange clock after the quote request so network latency
+        # does not make a newly fetched ticker appear to be future-dated.
+        current_ms = int(exchange.milliseconds() if now_ms is None else now_ms)
         quote_timestamp = ticker.get("timestamp")
         if (isinstance(quote_timestamp, bool)
                 or not isinstance(quote_timestamp, (int, float))
