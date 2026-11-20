@@ -19,6 +19,11 @@ from .data import drop_incomplete_candles, validate_ohlcv
 _SUPPORTED_PUBLIC_SPOT_VENUES = {"binance", "mexc", "coinbaseexchange", "kraken"}
 
 
+class MarketDataUnavailable(RuntimeError):
+    """Temporary or quality-related public market data failure; safe to retry."""
+
+
+
 def _finite_positive(value: Any, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{field} must be a finite positive number")
@@ -71,16 +76,22 @@ def capture_public_spot_snapshot(
 
     exchange = exchange_factory(venue)
     try:
-        markets = exchange.load_markets()
+        try:
+            markets = exchange.load_markets()
+        except Exception as exc:
+            raise MarketDataUnavailable("exchange market metadata request failed") from exc
         market = markets.get(symbol)
         if not isinstance(market, dict) or not market.get("spot", False) or market.get("active") is False:
             raise ValueError(f"{venue} {symbol} is not an active public spot market")
 
         current_ms = int(exchange.milliseconds() if now_ms is None else now_ms)
         interval_ms = _timeframe_ms(exchange, timeframe)
-        raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=5)
+        try:
+            raw = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=5)
+        except Exception as exc:
+            raise MarketDataUnavailable("exchange OHLCV request failed") from exc
         if not raw:
-            raise ValueError("venue returned no OHLCV candles")
+            raise MarketDataUnavailable("venue returned no OHLCV candles")
         frame = validate_ohlcv(pd.DataFrame(
             raw, columns=["timestamp", "open", "high", "low", "close", "volume"]
         ))
@@ -90,32 +101,38 @@ def capture_public_spot_snapshot(
                 completed["timestamp"].iloc[-1] - completed["timestamp"].iloc[-2]
             ).total_seconds() * 1000
             if latest_gap_ms > interval_ms * 1.5:
-                raise ValueError("recent completed OHLCV candles contain a data gap")
+                raise MarketDataUnavailable("recent completed OHLCV candles contain a data gap")
         candle = completed.iloc[-1]
         candle_open_ms = int(pd.Timestamp(candle["timestamp"]).timestamp() * 1000)
         candle_close_ms = candle_open_ms + interval_ms
         candle_age_ms = current_ms - candle_close_ms
         if candle_age_ms < 0 or candle_age_ms > interval_ms * max_candle_age_intervals:
-            raise ValueError("latest completed candle is stale")
+            raise MarketDataUnavailable("latest completed candle is stale")
 
-        ticker = exchange.fetch_ticker(symbol)
+        try:
+            ticker = exchange.fetch_ticker(symbol)
+        except Exception as exc:
+            raise MarketDataUnavailable("exchange ticker request failed") from exc
         if not isinstance(ticker, dict):
-            raise ValueError("venue returned an invalid ticker")
+            raise MarketDataUnavailable("venue returned an invalid ticker")
         quote_timestamp = ticker.get("timestamp")
         if (isinstance(quote_timestamp, bool)
                 or not isinstance(quote_timestamp, (int, float))
                 or not math.isfinite(quote_timestamp)):
-            raise ValueError("ticker timestamp is unavailable; quote freshness cannot be verified")
+            raise MarketDataUnavailable("ticker timestamp is unavailable; quote freshness cannot be verified")
         quote_timestamp = int(quote_timestamp)
         quote_age_ms = current_ms - quote_timestamp
         if quote_age_ms < 0 or quote_age_ms > max_quote_age_ms:
-            raise ValueError("latest quote is stale or timestamped in the future")
+            raise MarketDataUnavailable("latest quote is stale or timestamped in the future")
 
-        bid = _finite_positive(ticker.get("bid"), "bid")
-        ask = _finite_positive(ticker.get("ask"), "ask")
-        last = _finite_positive(ticker.get("last"), "last")
+        try:
+            bid = _finite_positive(ticker.get("bid"), "bid")
+            ask = _finite_positive(ticker.get("ask"), "ask")
+            last = _finite_positive(ticker.get("last"), "last")
+        except ValueError as exc:
+            raise MarketDataUnavailable("venue returned invalid top-of-book prices") from exc
         if ask < bid:
-            raise ValueError("ticker ask is below bid")
+            raise MarketDataUnavailable("ticker ask is below bid")
         mid = (bid + ask) / 2.0
         spread_bps = ((ask - bid) / mid) * 10_000.0
 
