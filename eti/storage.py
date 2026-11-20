@@ -2434,7 +2434,7 @@ class MemoryStore:
                     """INSERT INTO agent_tasks
                     (id,owner_id,workspace_id,requester,target_capability,status,input_json,
                      max_attempts,created_at,updated_at)
-                    VALUES(?,?,?,?,?,'queued',?,2,?,?)""",
+                    VALUES(?,?,?,?,?,'queued',?,3,?,?)""",
                     (task_id, row["owner_id"], row["workspace_id"], "eti.paper.supervisor",
                      "paper.tick", _encode_json(payload), now_text, now_text),
                 )
