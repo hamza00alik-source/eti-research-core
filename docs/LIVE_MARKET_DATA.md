@@ -20,7 +20,7 @@ from eti.live_market_data import BinanceSpotKlineFeed
 feed = BinanceSpotKlineFeed("BTC/USDT", "1m")
 socket = feed.connect(timeout_seconds=10)
 try:
-    candle = feed.receive_closed_candle(socket, now_ms=current_time_ms)
+    candle = feed.receive_closed_candle(socket)
 finally:
     socket.close()
 ```
