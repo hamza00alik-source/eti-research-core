@@ -92,10 +92,15 @@ def capture_public_spot_snapshot(
             raise MarketDataUnavailable("exchange OHLCV request failed") from exc
         if not raw:
             raise MarketDataUnavailable("venue returned no OHLCV candles")
-        frame = validate_ohlcv(pd.DataFrame(
-            raw, columns=["timestamp", "open", "high", "low", "close", "volume"]
-        ))
-        completed = drop_incomplete_candles(frame, interval_ms, current_ms)
+        try:
+            frame = validate_ohlcv(pd.DataFrame(
+                raw, columns=["timestamp", "open", "high", "low", "close", "volume"]
+            ))
+            completed = drop_incomplete_candles(frame, interval_ms, current_ms)
+        except Exception as exc:
+            raise MarketDataUnavailable("venue returned invalid OHLCV data") from exc
+        if completed.empty:
+            raise MarketDataUnavailable("venue returned no completed OHLCV candles")
         if len(completed) >= 2:
             latest_gap_ms = (
                 completed["timestamp"].iloc[-1] - completed["timestamp"].iloc[-2]
