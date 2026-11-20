@@ -74,7 +74,10 @@ def capture_public_spot_snapshot(
         import ccxt
         exchange_factory = lambda exchange_id: getattr(ccxt, exchange_id)({"enableRateLimit": True})
 
-    exchange = exchange_factory(venue)
+    try:
+        exchange = exchange_factory(venue)
+    except Exception as exc:
+        raise MarketDataUnavailable("public exchange client initialization failed") from exc
     try:
         try:
             markets = exchange.load_markets()
