@@ -95,3 +95,11 @@ def test_receive_refreshes_clock_for_each_message():
     clocks = iter([1_800_000_003_599, 1_800_000_003_600])
     candle = feed.receive_closed_candle(FakeSocket(), clock_ms=lambda: next(clocks))
     assert candle.close == 101
+
+def test_sequence_guard_rejects_conflicting_duplicate_candle():
+    feed = BinanceSpotKlineFeed("BTC/USDT", "1h")
+    first = feed.parse(message(), now_ms=1_800_000_003_600)
+    assert feed.accept_sequence(first) is True
+    changed = feed.parse(message(close="100.5"), now_ms=1_800_000_003_600)
+    with pytest.raises(ValueError, match="conflicting duplicate"):
+        feed.accept_sequence(changed)
