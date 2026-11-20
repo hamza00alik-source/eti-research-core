@@ -2362,13 +2362,20 @@ class MemoryStore:
         session_id = _required_text(session_id, "session_id", 128)
         with self._connection() as conn:
             row = conn.execute(
-                "SELECT * FROM paper_feed_health WHERE owner_id=? AND session_id=?",
+                """SELECT h.*,s.timeframe FROM paper_feed_health h
+                JOIN paper_sessions s ON s.id=h.session_id
+                WHERE h.owner_id=? AND h.session_id=?""",
                 (owner_id, session_id),
             ).fetchone()
         if row is None:
             return None
+        attempted = datetime.fromisoformat(row["last_attempt_at"].replace("Z", "+00:00"))
+        age_seconds = max(0, int((datetime.now(timezone.utc) - attempted).total_seconds()))
+        interval_seconds = {"1h": 3600, "4h": 14400, "1d": 86400}[row["timeframe"]]
         return {
             "session_id": row["session_id"], "status": row["status"],
+            "freshness_status": "stale" if age_seconds > interval_seconds * 2 else "current",
+            "age_seconds": age_seconds,
             "consecutive_failures": row["consecutive_failures"],
             "last_attempt_at": row["last_attempt_at"],
             "last_success_at": row["last_success_at"],
