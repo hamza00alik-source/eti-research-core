@@ -12,7 +12,7 @@ from .config import RiskConfig
 from .features import build_features
 from .portfolio import PortfolioLimits, assess_portfolio
 from .providers import CcxtPublicProvider
-from .live_market import capture_public_spot_snapshot
+from .live_market import MarketDataUnavailable, capture_public_spot_snapshot
 from .risk import RiskEngine, RiskRequest
 
 
@@ -32,15 +32,25 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
         store.set_paper_session_status(owner_id, session_id, "stopped")
         return {"status": "stopped", "processed": False, "reason": "model_not_approved"}
 
-    frame = CcxtPublicProvider(session["venue"]).fetch_ohlcv(
-        session["symbol"], session["timeframe"], 200
-    )
+    try:
+        frame = CcxtPublicProvider(session["venue"]).fetch_ohlcv(
+            session["symbol"], session["timeframe"], 200
+        )
+    except Exception as exc:
+        raise MarketDataUnavailable("public OHLCV history request failed") from exc
+    if frame is None or frame.empty:
+        raise MarketDataUnavailable("public OHLCV history is empty")
     candle_at = frame.iloc[-1]["timestamp"].isoformat()
     if session["last_processed_candle"] and candle_at <= session["last_processed_candle"]:
         return {"status": session["status"], "processed": False, "reason": "candle_already_processed"}
 
     snapshot_provider = market_snapshot_provider or capture_public_spot_snapshot
-    market_snapshot = snapshot_provider(session["venue"], session["symbol"], session["timeframe"])
+    try:
+        market_snapshot = snapshot_provider(session["venue"], session["symbol"], session["timeframe"])
+    except MarketDataUnavailable:
+        raise
+    except Exception as exc:
+        raise MarketDataUnavailable("public quote snapshot request failed") from exc
     if (
         not isinstance(market_snapshot, dict)
         or market_snapshot.get("schema_version") != "eti.live_public_market_snapshot.v1"
@@ -49,16 +59,16 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
         or market_snapshot.get("market_type") != "spot"
         or market_snapshot.get("quality", {}).get("paper_eligible") is not True
     ):
-        raise ValueError("fresh, eligible public spot market snapshot is required")
+        raise MarketDataUnavailable("fresh, eligible public spot market snapshot is required")
     quote = market_snapshot.get("quote", {})
     bid = float(quote.get("bid", 0))
     ask = float(quote.get("ask", 0))
     price = float(quote.get("last", 0))
     if not np.isfinite([bid, ask, price]).all() or bid <= 0 or ask < bid or price <= 0:
-        raise ValueError("live public quote contains invalid bid/ask/last values")
+        raise MarketDataUnavailable("live public quote contains invalid bid/ask/last values")
     snapshot_candle_at = market_snapshot.get("latest_completed_candle", {}).get("open_time")
     if snapshot_candle_at is None or pd.Timestamp(snapshot_candle_at) != pd.Timestamp(frame.iloc[-1]["timestamp"]):
-        raise ValueError("live quote snapshot and feature candles are not aligned; retry the paper tick")
+        raise MarketDataUnavailable("live quote snapshot and feature candles are not aligned; retry the paper tick")
 
     features = build_features(frame).dropna()
     if features.empty:
