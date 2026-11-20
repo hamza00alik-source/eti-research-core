@@ -396,3 +396,54 @@ def test_paper_tick_rejects_tampered_market_snapshot_digest(tmp_path, monkeypatc
     assert unchanged["last_processed_candle"] is None
     assert unchanged["cash"] == 1000.0
     assert store.list_paper_decisions("owner", session["id"]) == []
+
+
+def test_paper_session_stops_when_worker_misses_a_completed_candle(tmp_path, monkeypatch):
+    import eti.paper as paper
+    from eti.paper import PaperSessionGap
+
+    store = MemoryStore(tmp_path / "paper-session-gap.sqlite3")
+    workspace = store.create_workspace("owner", "paper")
+    _approved_model(store)
+    session = store.create_paper_session(
+        "owner", workspace["id"], "eti-mexc-btc-usdt-1h", "paper-test",
+        "mexc", "BTC/USDT", "1h", 1000.0, {},
+    )
+    store.set_paper_session_status("owner", session["id"], "running")
+
+    class FakeProvider:
+        calls = 0
+        def __init__(self, venue):
+            pass
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            type(self).calls += 1
+            start = "2026-04-01" if type(self).calls == 1 else "2026-04-01T02:00:00"
+            return _candles(start)
+
+    class FakeArtifacts:
+        def load_model(self, uri, digest):
+            return _FakeModel()
+
+    monkeypatch.setattr(paper, "CcxtPublicProvider", FakeProvider)
+    monkeypatch.setattr(paper, "ModelArtifactStore", FakeArtifacts)
+    monkeypatch.setattr(paper, "build_features", lambda frame: pd.DataFrame(
+        [[0.0] * len(FEATURE_COLUMNS)], columns=FEATURE_COLUMNS, index=[79]
+    ))
+
+    first_frame = _candles("2026-04-01")
+    first = run_paper_tick(
+        {"owner_id": "owner", "session_id": session["id"]}, store,
+        market_snapshot_provider=lambda *args: _market_snapshot(first_frame),
+    )
+    assert first["processed"] is True
+
+    second_frame = _candles("2026-04-01T02:00:00")
+    with pytest.raises(PaperSessionGap, match="missed one or more completed candles"):
+        run_paper_tick(
+            {"owner_id": "owner", "session_id": session["id"]}, store,
+            market_snapshot_provider=lambda *args: _market_snapshot(second_frame),
+        )
+    stopped = store.get_paper_session("owner", session["id"])
+    assert stopped["status"] == "stopped"
+    assert stopped["last_processed_candle"] == first["candle_at"]
+    assert len(store.list_paper_decisions("owner", session["id"])) == 1
