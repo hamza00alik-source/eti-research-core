@@ -1,6 +1,6 @@
 import pytest
 
-from eti.live_market import capture_public_spot_snapshot
+from eti.live_market import MarketDataUnavailable, capture_public_spot_snapshot
 
 
 NOW = 1_800_000_210_000  # 2027-01-15T08:03:30Z
@@ -63,7 +63,7 @@ def test_capture_rejects_stale_quote():
     exchange = FakeExchange(ticker={
         "timestamp": NOW - 60_000, "bid": 99.9, "ask": 100.1, "last": 100.0,
     })
-    with pytest.raises(ValueError, match="quote is stale"):
+    with pytest.raises(MarketDataUnavailable, match="quote is stale"):
         capture_public_spot_snapshot(
             "binance", "BTC/USDT", "1m",
             exchange_factory=factory_for(exchange), now_ms=NOW,
@@ -72,7 +72,7 @@ def test_capture_rejects_stale_quote():
 
 def test_capture_rejects_quote_without_exchange_timestamp():
     exchange = FakeExchange(ticker={"bid": 99.9, "ask": 100.1, "last": 100.0})
-    with pytest.raises(ValueError, match="timestamp is unavailable"):
+    with pytest.raises(MarketDataUnavailable, match="timestamp is unavailable"):
         capture_public_spot_snapshot(
             "binance", "BTC/USDT", "1m",
             exchange_factory=factory_for(exchange), now_ms=NOW,
@@ -92,7 +92,7 @@ def test_capture_rejects_crossed_or_invalid_quotes():
     exchange = FakeExchange(ticker={
         "timestamp": NOW - 1_000, "bid": 100.2, "ask": 100.1, "last": 100.0,
     })
-    with pytest.raises(ValueError, match="ask is below bid"):
+    with pytest.raises(MarketDataUnavailable, match="ask is below bid"):
         capture_public_spot_snapshot(
             "binance", "BTC/USDT", "1m",
             exchange_factory=factory_for(exchange), now_ms=NOW,
@@ -105,7 +105,7 @@ def test_capture_rejects_stale_completed_candle():
         [old, 99, 101, 98, 100, 12],
         [old + 60_000, 100, 102, 99, 101, 13],
     ])
-    with pytest.raises(ValueError, match="completed candle is stale"):
+    with pytest.raises(MarketDataUnavailable, match="completed candle is stale"):
         capture_public_spot_snapshot(
             "binance", "BTC/USDT", "1m",
             exchange_factory=factory_for(exchange), now_ms=NOW,
@@ -117,7 +117,7 @@ def test_capture_rejects_recent_completed_candle_gap():
         [NOW - 210_000, 99, 101, 98, 100, 12],
         [NOW - 90_000, 101, 103, 100, 102, 14],
     ])
-    with pytest.raises(ValueError, match="data gap"):
+    with pytest.raises(MarketDataUnavailable, match="data gap"):
         capture_public_spot_snapshot(
             "binance", "BTC/USDT", "1m",
             exchange_factory=factory_for(exchange), now_ms=NOW,
