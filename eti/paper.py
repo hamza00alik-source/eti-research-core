@@ -115,9 +115,21 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
     price = float(quote.get("last", 0))
     if not np.isfinite([bid, ask, price]).all() or bid <= 0 or ask < bid or price <= 0:
         raise MarketDataUnavailable("live public quote contains invalid bid/ask/last values")
-    snapshot_candle_at = market_snapshot.get("latest_completed_candle", {}).get("open_time")
+    candle_evidence = market_snapshot.get("latest_completed_candle")
+    if not isinstance(candle_evidence, dict):
+        raise MarketDataUnavailable("public market snapshot completed-candle evidence is invalid")
+    snapshot_candle_at = candle_evidence.get("open_time")
     if snapshot_candle_at is None or pd.Timestamp(snapshot_candle_at) != pd.Timestamp(frame.iloc[-1]["timestamp"]):
         raise MarketDataUnavailable("live quote snapshot and feature candles are not aligned; retry the paper tick")
+    try:
+        quote_time = pd.to_datetime(quote.get("timestamp"), utc=True, errors="raise")
+        candle_close_time = pd.to_datetime(candle_evidence.get("close_time"), utc=True, errors="raise")
+        if quote_time < candle_close_time:
+            raise MarketDataUnavailable("live quote predates the completed feature candle close")
+    except MarketDataUnavailable:
+        raise
+    except Exception as exc:
+        raise MarketDataUnavailable("public market snapshot timestamps are invalid") from exc
 
     features = build_features(frame).dropna()
     if features.empty:
