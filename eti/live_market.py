@@ -81,7 +81,7 @@ def capture_public_spot_snapshot(
         except Exception as exc:
             raise MarketDataUnavailable("exchange market metadata request failed") from exc
         market = markets.get(symbol)
-        if not isinstance(market, dict) or not market.get("spot", False) or market.get("active") is False:
+        if not isinstance(market, dict) or not market.get("spot", False) or market.get("active") is not True:
             raise ValueError(f"{venue} {symbol} is not an active public spot market")
 
         current_ms = int(exchange.milliseconds() if now_ms is None else now_ms)
