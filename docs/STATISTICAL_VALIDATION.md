@@ -29,6 +29,10 @@ A small p-value is evidence against the joint no-positive-performance null under
 
 All bootstrap routines accept an explicit seed and return it with the report. The p-value uses the finite-sample correction (exceedances + 1) / (repetitions + 1), so it is never reported as exactly zero. Increase repetitions for final research review and record the selected block length before comparing candidates.
 
+## Integrated family assessment
+
+Call `assess_research_trial_family(family_snapshot, selected_trial_id=...)` with the object returned by the ledger matrix accessor. It applies the DSR estimator to the selected trial's net benchmark-relative differential (therefore an information-ratio basis) using the full attempted-trial count, and runs PBO, White Reality Check and SPA across all completed aligned columns. It preserves the family benchmark and dataset/cost hashes in the report. If the selected trial has zero volatility, the family report marks its DSR as undefined rather than blocking PBO and bootstrap diagnostics; zero-return cash comparators are valid for family PBO and benchmark-relative tests.
+
 ## Integration boundary
 
 These utilities are intentionally separate from order execution and model approval. They are not yet wired into the model promotion endpoint because the current promotion payload does not carry a canonical, aligned per-period return matrix or a durable experiment-family registry. Do not fabricate these inputs from fold-level summary metrics. The next integration step is an immutable experiment/trial ledger that records every attempted hypothesis, dataset and cost-model identity, plus aligned net return series and a frozen benchmark.

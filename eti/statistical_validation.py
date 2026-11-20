@@ -76,15 +76,22 @@ def deflated_sharpe_ratio(returns: Any, *, trials: int, risk_free_per_period: fl
     }
 
 def _score_columns(values: np.ndarray, metric: str) -> np.ndarray:
-    if metric == "mean": return np.mean(values, axis=0)
-    if metric == "sharpe": return np.mean(values, axis=0) / np.std(values, axis=0, ddof=1)
+    means = np.mean(values, axis=0)
+    if metric == "mean":
+        return means
+    if metric == "sharpe":
+        deviations = np.std(values, axis=0, ddof=1)
+        zero_volatility = deviations <= np.finfo(float).eps
+        if np.any(zero_volatility & (np.abs(means) > 1e-15)):
+            raise ValueError("zero-volatility strategies must have zero mean for Sharpe ranking")
+        return np.divide(means, deviations, out=np.zeros_like(means), where=~zero_volatility)
     raise ValueError("metric must be mean or sharpe")
 
 def probability_of_backtest_overfitting(values: Any, *, n_splits: int = 8, metric: str = "sharpe", max_combinations: int = 10000) -> dict[str, Any]:
     """Estimate PBO with combinatorially symmetric cross-validation (CSCV)."""
     if metric not in {"mean", "sharpe"}:
         raise ValueError("metric must be mean or sharpe")
-    returns = _return_matrix(values, require_nonzero_volatility=(metric == "sharpe"))
+    returns = _return_matrix(values, require_nonzero_volatility=False)
     if isinstance(n_splits, bool) or not isinstance(n_splits, int) or n_splits < 4 or n_splits % 2:
         raise ValueError("n_splits must be an even integer >= 4")
     if returns.shape[0] % n_splits:
@@ -109,11 +116,15 @@ def probability_of_backtest_overfitting(values: Any, *, n_splits: int = 8, metri
         logits.append(float(math.log(omega / (1.0 - omega))))
         selected_indices.append(selected)
         relative_ranks.append(omega)
-    pbo = float(np.mean(np.asarray(logits) <= 0.0))
+    logit_values = np.asarray(logits, dtype=float)
+    tie_tolerance = 1e-12
+    pbo = float(np.mean(logit_values < -tie_tolerance)
+                + 0.5 * np.mean(np.abs(logit_values) <= tie_tolerance))
     return {
         "method": "combinatorially_symmetric_cross_validation", "metric": metric,
         "observations": int(returns.shape[0]), "strategy_count": int(returns.shape[1]),
         "n_splits": n_splits, "combination_count": split_count, "pbo": pbo,
+        "tie_handling": "negative logits count 1; exact median-rank ties count 0.5; positive logits count 0",
         "median_logit_oos_rank": float(np.median(logits)), "mean_logit_oos_rank": float(np.mean(logits)),
         "selected_strategy_counts": {str(i): int(selected_indices.count(i)) for i in sorted(set(selected_indices))},
         "logit_oos_ranks": logits,
@@ -188,4 +199,90 @@ def hansen_spa_test(performance_differentials: Any, *, repetitions: int = 2000, 
         "recentered_strategy_count": int(np.sum(recentering != 0.0)),
         "reject_null_at_5pct": bool(p_value < 0.05),
         "warning": "SPA validity depends on a common benchmark, aligned net returns, defensible block length and complete strategy family. Bootstrap inference is approximate.",
+    }
+
+def assess_research_trial_family(
+    family: dict[str, Any],
+    *,
+    selected_trial_id: str,
+    bootstrap_repetitions: int = 2000,
+    block_length: int = 5,
+    seed: int = 42,
+    pbo_splits: int = 8,
+) -> dict[str, Any]:
+    """Run DSR/PBO/White-RC/SPA from one immutable ledger family snapshot.
+
+    DSR uses every started attempt (including failed attempts) as the trial
+    count. PBO and benchmark-relative bootstrap tests use only completed,
+    timestamp-aligned return columns supplied by the ledger.
+    """
+    if not isinstance(family, dict):
+        raise ValueError("family must be a research trial family object")
+    family_id = family.get("family_id")
+    benchmark_id = family.get("benchmark_id")
+    if not isinstance(family_id, str) or not family_id.strip():
+        raise ValueError("family_id is required")
+    if not isinstance(benchmark_id, str) or not benchmark_id.strip():
+        raise ValueError("benchmark_id is required")
+    trial_ids = family.get("trial_ids")
+    strategy_names = family.get("strategy_names")
+    if (not isinstance(trial_ids, list) or len(trial_ids) < 2
+            or not isinstance(strategy_names, list) or len(strategy_names) != len(trial_ids)):
+        raise ValueError("family must contain at least two completed trial IDs and matching strategy names")
+    if len(set(trial_ids)) != len(trial_ids) or any(not isinstance(item, str) or not item for item in trial_ids):
+        raise ValueError("completed trial IDs must be unique non-empty strings")
+    attempted = family.get("attempted_trial_count")
+    if isinstance(attempted, bool) or not isinstance(attempted, int) or attempted < len(trial_ids):
+        raise ValueError("attempted_trial_count cannot be less than completed trial count")
+    if selected_trial_id not in trial_ids:
+        raise ValueError("selected_trial_id must identify a completed trial in this family")
+    observation_times = family.get("observation_times")
+    if not isinstance(observation_times, list) or len(observation_times) < 8:
+        raise ValueError("family must include the aligned observation timestamp vector")
+    matrix = _return_matrix(family.get("net_return_differentials"), require_nonzero_volatility=False)
+    if matrix.shape != (len(observation_times), len(trial_ids)):
+        raise ValueError("family return matrix dimensions do not match timestamps and completed trial IDs")
+    selected_index = trial_ids.index(selected_trial_id)
+    selected_returns = matrix[:, selected_index]
+    if np.std(selected_returns, ddof=1) <= np.finfo(float).eps:
+        dsr = {
+            "method": "deflated_sharpe_ratio",
+            "status": "undefined_zero_volatility",
+            "observations": int(len(selected_returns)),
+            "trial_count": attempted,
+            "period_sharpe": None,
+            "dsr_probability": None,
+            "dsr_pass_95": False,
+            "warning": "Selected trial has zero volatility; DSR is undefined. Family PBO and benchmark-relative bootstrap tests are still reported.",
+        }
+    else:
+        dsr = deflated_sharpe_ratio(selected_returns, trials=attempted)
+    pbo = probability_of_backtest_overfitting(matrix, n_splits=pbo_splits, metric="sharpe")
+    white = white_reality_check(
+        matrix, repetitions=bootstrap_repetitions, block_length=block_length, seed=seed
+    )
+    spa = hansen_spa_test(
+        matrix, repetitions=bootstrap_repetitions, block_length=block_length, seed=seed
+    )
+    return {
+        "kind": "research_trial_family_statistical_assessment",
+        "family_id": family_id,
+        "benchmark_id": benchmark_id,
+        "training_data_sha256": family.get("training_data_sha256"),
+        "evaluation_data_sha256": family.get("evaluation_data_sha256"),
+        "cost_model_sha256": family.get("cost_model_sha256"),
+        "selected_trial_id": selected_trial_id,
+        "attempted_trial_count": attempted,
+        "completed_trial_count": len(trial_ids),
+        "failed_trial_count": family.get("failed_trial_count", 0),
+        "selected_trial_deflated_information_ratio": dsr,
+        "selected_trial_return_basis": "net strategy return differential versus the family benchmark",
+        "family_pbo": pbo,
+        "white_reality_check": white,
+        "hansen_spa": spa,
+        "warning": (
+            "This report consumes declared ledger inputs. It does not authenticate source data, "
+            "benchmark construction, cost evidence or completeness of registered trials; statistical "
+            "tests do not establish future profitability or authorize live trading."
+        ),
     }
