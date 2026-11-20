@@ -263,6 +263,12 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
             "daily_start_equity": daily_start_equity,
         },
         events,
+        decision_evidence={
+            "market_snapshot": market_snapshot,
+            "prediction": prediction,
+            "confidence": confidence,
+            "decision": decision_detail,
+        },
     )
     return {
         "status": updated["status"], "processed": True,
