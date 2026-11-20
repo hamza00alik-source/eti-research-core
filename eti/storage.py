@@ -343,6 +343,22 @@ class MemoryStore:
                 CREATE INDEX IF NOT EXISTS idx_paper_trades_session
                     ON paper_trades(owner_id, session_id, created_at);
 
+                CREATE TABLE IF NOT EXISTS paper_decisions (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES paper_sessions(id) ON DELETE CASCADE,
+                    owner_id TEXT NOT NULL,
+                    candle_at TEXT NOT NULL,
+                    market_snapshot_json TEXT NOT NULL,
+                    prediction INTEGER NOT NULL CHECK(prediction BETWEEN 0 AND 2),
+                    confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+                    decision_json TEXT NOT NULL,
+                    event_types_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(owner_id,session_id,candle_at)
+                );
+                CREATE INDEX IF NOT EXISTS idx_paper_decisions_session
+                    ON paper_decisions(owner_id, session_id, candle_at);
+
                 CREATE TABLE IF NOT EXISTS paper_portfolio_accounts (
                     id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
@@ -2363,6 +2379,28 @@ class MemoryStore:
             "updated_at": row["updated_at"],
         }
 
+    def list_paper_decisions(
+        self, owner_id: str, session_id: str, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        owner_id = _required_text(owner_id, "owner_id")
+        session_id = _required_text(session_id, "session_id", 128)
+        with self._connection() as conn:
+            rows = conn.execute(
+                """SELECT * FROM paper_decisions WHERE owner_id=? AND session_id=?
+                ORDER BY candle_at DESC LIMIT ?""",
+                (owner_id, session_id, limit),
+            ).fetchall()
+        return [{
+            "id": row["id"], "candle_at": row["candle_at"],
+            "market_snapshot": json.loads(row["market_snapshot_json"]),
+            "prediction": row["prediction"], "confidence": row["confidence"],
+            "decision": json.loads(row["decision_json"]),
+            "event_types": json.loads(row["event_types_json"]),
+            "created_at": row["created_at"],
+        } for row in rows]
+
     def list_paper_trades(self, owner_id: str, session_id: str, limit: int = 200) -> list[dict[str, Any]]:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
             raise ValueError("limit must be between 1 and 1000")
@@ -2451,6 +2489,7 @@ class MemoryStore:
     def apply_paper_tick(
         self, owner_id: str, session_id: str, candle_at: str,
         state: dict[str, Any], trade_events: list[dict[str, Any]],
+        decision_evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         owner_id = _required_text(owner_id, "owner_id")
         session_id = _required_text(session_id, "session_id", 128)
@@ -2486,6 +2525,25 @@ class MemoryStore:
                or event.get("event_type") not in {"entry", "exit", "risk_stop"}
                for event in trade_events):
             raise ValueError("paper tick trade event is invalid")
+        if decision_evidence is not None:
+            if not isinstance(decision_evidence, dict):
+                raise ValueError("paper decision evidence must be an object")
+            snapshot = decision_evidence.get("market_snapshot")
+            prediction = decision_evidence.get("prediction")
+            confidence = decision_evidence.get("confidence")
+            decision = decision_evidence.get("decision")
+            if (not isinstance(snapshot, dict)
+                    or snapshot.get("schema_version") != "eti.live_public_market_snapshot.v1"
+                    or not isinstance(snapshot.get("snapshot_sha256"), str)
+                    or not _SHA256_RE.fullmatch(snapshot["snapshot_sha256"])):
+                raise ValueError("paper decision market snapshot evidence is invalid")
+            if isinstance(prediction, bool) or not isinstance(prediction, int) or prediction not in {0, 1, 2}:
+                raise ValueError("paper decision prediction is invalid")
+            if (isinstance(confidence, bool) or not isinstance(confidence, (int, float))
+                    or not math.isfinite(confidence) or not 0 <= confidence <= 1):
+                raise ValueError("paper decision confidence is invalid")
+            if not isinstance(decision, dict):
+                raise ValueError("paper decision detail is invalid")
         now = _utc_now()
         with self._connection() as conn:
             row = conn.execute(
@@ -2508,6 +2566,18 @@ class MemoryStore:
                  state["max_drawdown"], state["daily_date"], state["daily_start_equity"],
                  candle_at, now, now, owner_id, session_id),
             )
+            if decision_evidence is not None:
+                conn.execute(
+                    """INSERT INTO paper_decisions
+                    (id,session_id,owner_id,candle_at,market_snapshot_json,prediction,
+                     confidence,decision_json,event_types_json,created_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    (str(uuid4()), session_id, owner_id, candle_at,
+                     _encode_json(decision_evidence["market_snapshot"]),
+                     decision_evidence["prediction"], decision_evidence["confidence"],
+                     _encode_json(decision_evidence["decision"]),
+                     _encode_json([event["event_type"] for event in trade_events]), now),
+                )
             for event in trade_events:
                 conn.execute(
                     """INSERT INTO paper_trades
