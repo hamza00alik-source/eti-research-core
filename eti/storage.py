@@ -16,6 +16,8 @@ import sqlite3
 from typing import Any, Iterator
 from uuid import uuid4
 
+from .model_identity import live_spot_model_ids
+
 
 MAX_JSON_BYTES = 65_536
 
@@ -846,6 +848,31 @@ class MemoryStore:
         return {"id": event_id, "owner_id": owner_id, "workspace_id": workspace_id,
                 "event_type": event_type, "payload": json.loads(encoded), "created_at": created_at}
 
+    def record_audit_event(
+        self, owner_id: str, event_type: str, payload: dict[str, Any],
+        workspace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist an account-scoped governance decision in the audit stream."""
+        owner_id = _required_text(owner_id, "owner_id")
+        event_type = _required_text(event_type, "event_type", 120)
+        if not isinstance(payload, dict):
+            raise ValueError("audit payload must be an object")
+        payload_json = _encode_json(payload)
+        if workspace_id is not None:
+            workspace_id = _required_text(workspace_id, "workspace_id")
+        event_id, now = str(uuid4()), _utc_now()
+        with self._connection() as conn:
+            conn.execute(
+                "INSERT INTO audit_events(id,owner_id,workspace_id,event_type,payload_json,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (event_id, owner_id, workspace_id, event_type, payload_json, now),
+            )
+        return {
+            "id": event_id, "owner_id": owner_id, "workspace_id": workspace_id,
+            "event_type": event_type, "payload": payload, "created_at": now,
+        }
+
+
     def list_audit_events(self, owner_id: str, limit: int = 100) -> list[dict[str, Any]]:
         owner_id = _required_text(owner_id, "owner_id")
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
@@ -1431,7 +1458,7 @@ class MemoryStore:
             if not isinstance(declared_lineage, dict):
                 raise ValueError("lineage must be a JSON object")
             import re
-            for digest_name in ("code_sha256", "config_sha256", "dataset_sha256"):
+            for digest_name in ("code_sha256", "config_sha256", "dataset_sha256", "cost_model_sha256"):
                 digest = declared_lineage.get(digest_name)
                 if digest is not None and (
                     not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
@@ -2184,11 +2211,17 @@ class MemoryStore:
             symbols = json.loads(row["symbols_json"])
             eligible = 0
             for symbol in symbols:
-                model_id = f"eti-{row['venue']}-{symbol.replace('/', '-').replace(':', '-')}-{row['timeframe']}".lower()
-                if conn.execute(
+                canonical_id, legacy_id = live_spot_model_ids(row["venue"], symbol, row["timeframe"])
+                approved = conn.execute(
                     "SELECT 1 FROM model_versions WHERE model_id=? AND lifecycle='approved' LIMIT 1",
-                    (model_id,),
-                ).fetchone():
+                    (canonical_id,),
+                ).fetchone()
+                if approved is None:
+                    approved = conn.execute(
+                        "SELECT 1 FROM model_versions WHERE model_id=? AND lifecycle='approved' LIMIT 1",
+                        (legacy_id,),
+                    ).fetchone()
+                if approved:
                     eligible += 1
             if eligible == 0:
                 raise ValueError("at least one approved model is required for the selected live watchlist")

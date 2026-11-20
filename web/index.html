@@ -167,7 +167,8 @@
 <form id="model-approve-form" class="inline-form">
 <label>Model ID<input name="model_id" required maxlength="120"></label>
 <label>Version<input name="version" required maxlength="80"></label>
-<button type="submit">Approve with this reviewer account</button>
+<label class="wide-field">Locked champion/challenger evidence and independent cost-evidence attestation (JSON)<textarea name="evidence" rows="10" spellcheck="false" required placeholder='{"comparison_family_size":1,"independent_cost_evidence_verified":true,"cost_evidence_sha256":"...64 lowercase hex...","cost_evidence_source":"independent exchange fee/spread/slippage evidence","cost_evidence_as_of":"2026-01-01T00:00:00Z","champion_report":{},"challenger_report":{}}'></textarea></label>
+<button type="submit">Review evidence and approve candidate</button>
 </form>
 <form id="model-retire-form" class="inline-form">
 <label>Model ID<input name="model_id" required maxlength="120"></label>
@@ -178,7 +179,7 @@
 <h3>Paper trading</h3>
 <p class="muted">Simulated funds only. Create a session using an approved model version, then start it to let ETI process completed public candles. No exchange account, API key, or live order is used. Default risk limits are conservative and cannot be relaxed here.</p>
 <form id="paper-session-form" class="registry-form">
- <label>Approved model ID<input name="model_id" placeholder="eti-mexc-btc-usdt-1h" required maxlength="120"></label>
+ <label>Approved model ID<input name="model_id" placeholder="eti-mexc-crypto-spot-btc-usdt-1h" required maxlength="120"></label>
  <label>Model version<input name="model_version" placeholder="research-…" required maxlength="80"></label>
  <label>Venue<select name="venue"><option value="mexc">MEXC spot</option><option value="binance">Binance spot</option></select></label>
  <label>Symbol<input name="symbol" value="BTC/USDT" required maxlength="40"></label>

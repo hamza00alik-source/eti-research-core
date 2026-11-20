@@ -21,19 +21,19 @@ def _live_store(tmp_path):
     store = MemoryStore(tmp_path / "live.sqlite3")
     store.create_workspace("owner", "live")
     store.register_model_version(
-        "eti-binance-btc-usdt-1h", "live-test",
+        "eti-binance-crypto-spot-btc-usdt-1h", "live-test",
         "artifact://sha256/" + "a" * 64, "a" * 64,
         {"features": FEATURE_COLUMNS}, ["crypto_spot"], "live-test-data",
         {"passed": True}, "calibrated", "trainer",
     )
-    store.approve_model_version("eti-binance-btc-usdt-1h", "live-test", "reviewer")
+    store.approve_model_version("eti-binance-crypto-spot-btc-usdt-1h", "live-test", "reviewer")
     store.register_model_version(
-        "eti-binance-eth-usdt-1h", "live-test",
+        "eti-binance-crypto-spot-eth-usdt-1h", "live-test",
         "artifact://sha256/" + "b" * 64, "b" * 64,
         {"features": FEATURE_COLUMNS}, ["crypto_spot"], "live-test-data",
         {"passed": True}, "calibrated", "trainer",
     )
-    store.approve_model_version("eti-binance-eth-usdt-1h", "live-test", "reviewer")
+    store.approve_model_version("eti-binance-crypto-spot-eth-usdt-1h", "live-test", "reviewer")
     store.upsert_exchange_credential("owner", "binance", "encrypted-key", "encrypted-secret", "1234")
     store.save_live_execution_profile(
         "owner", "binance", ["BTC/USDT", "ETH/USDT"], "1h", 1000.0,
@@ -43,6 +43,41 @@ def _live_store(tmp_path):
     )
     store.authorize_live_execution("owner")
     return store
+
+
+def test_approved_model_prefers_canonical_identity_over_legacy_fallback(tmp_path):
+    from eti.execution import _approved_model
+
+    store = _live_store(tmp_path)
+    store.register_model_version(
+        "eti-binance-btc-usdt-1h", "legacy",
+        "artifact://sha256/" + "c" * 64, "c" * 64,
+        {"features": FEATURE_COLUMNS}, ["crypto_spot"], "legacy-data",
+        {"passed": True}, "calibrated", "legacy-trainer",
+    )
+    store.approve_model_version("eti-binance-btc-usdt-1h", "legacy", "reviewer")
+
+    resolved = _approved_model(store, "binance", "BTC/USDT", "1h")
+    assert resolved is not None
+    assert resolved["model_id"] == "eti-binance-crypto-spot-btc-usdt-1h"
+
+
+def test_approved_model_supports_precanonical_crypto_spot_model(tmp_path):
+    from eti.execution import _approved_model
+
+    store = MemoryStore(tmp_path / "legacy-live.sqlite3")
+    store.create_workspace("owner", "legacy")
+    store.register_model_version(
+        "eti-binance-btc-usdt-1h", "legacy",
+        "artifact://sha256/" + "d" * 64, "d" * 64,
+        {"features": FEATURE_COLUMNS}, ["crypto_spot"], "legacy-data",
+        {"passed": True}, "calibrated", "legacy-trainer",
+    )
+    store.approve_model_version("eti-binance-btc-usdt-1h", "legacy", "reviewer")
+
+    resolved = _approved_model(store, "binance", "BTC/USDT", "1h")
+    assert resolved is not None
+    assert resolved["model_id"] == "eti-binance-btc-usdt-1h"
 
 
 def test_live_execution_is_disabled_until_owner_authorizes(tmp_path):
@@ -343,3 +378,33 @@ def test_authorized_live_profile_still_cannot_place_orders_while_global_gate_is_
     }
     assert calls == {"exchange_init": 0, "decrypt": 0}
     assert store.list_live_orders("owner") == []
+
+
+def test_live_authorization_accepts_canonical_model_identity(tmp_path):
+    store = MemoryStore(tmp_path / "canonical-auth.sqlite3")
+    store.create_workspace("owner", "live")
+    store.register_model_version(
+        "eti-binance-crypto-spot-btc-usdt-1h", "canonical",
+        "artifact://sha256/" + "e" * 64, "e" * 64,
+        {"features": FEATURE_COLUMNS}, ["crypto_spot"], "data",
+        {"passed": True}, "calibrated", "trainer",
+    )
+    store.approve_model_version("eti-binance-crypto-spot-btc-usdt-1h", "canonical", "reviewer")
+    store.upsert_exchange_credential("owner", "binance", "key", "secret", "1234")
+    store.save_live_execution_profile("owner", "binance", ["BTC/USDT"], "1h", 1000.0, {})
+    assert store.authorize_live_execution("owner")["enabled"] is True
+
+
+def test_live_authorization_retains_legacy_spot_compatibility(tmp_path):
+    store = MemoryStore(tmp_path / "legacy-auth.sqlite3")
+    store.create_workspace("owner", "live")
+    store.register_model_version(
+        "eti-binance-btc-usdt-1h", "legacy",
+        "artifact://sha256/" + "f" * 64, "f" * 64,
+        {"features": FEATURE_COLUMNS}, ["crypto_spot"], "data",
+        {"passed": True}, "calibrated", "trainer",
+    )
+    store.approve_model_version("eti-binance-btc-usdt-1h", "legacy", "reviewer")
+    store.upsert_exchange_credential("owner", "binance", "key", "secret", "1234")
+    store.save_live_execution_profile("owner", "binance", ["BTC/USDT"], "1h", 1000.0, {})
+    assert store.authorize_live_execution("owner")["enabled"] is True

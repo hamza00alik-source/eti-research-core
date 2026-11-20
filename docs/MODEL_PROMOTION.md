@@ -19,3 +19,19 @@ The statistical test is an exact one-sided sign test over non-tied fold-level ne
 - Repeatedly tuning after seeing the same holdout invalidates the evidence. Use a fresh locked holdout for a new comparison family.
 
 This is a governance primitive only. No model is automatically promoted and no live execution permission is granted.
+
+
+## Candidate registration and approval boundary
+
+Autonomous training workers register every result as a `candidate`; they do not approve models, even when the training report marks its internal evaluation checks as passed. Calibration and artifact-schema verification are necessary artifact-integrity checks, not sufficient economic evidence for promotion.
+
+A candidate can become approved only through a separately authorized review workflow that evaluates the locked champion/challenger evidence described above and records the human reviewer. A positive statistical comparison only establishes eligibility for human review; it does not itself approve the model. Existing approved models are not automatically demoted by this change.
+
+The worker's output therefore reports `approval_required=true` for newly registered candidates and never assigns `eti.quality_gate` as an automatic approval authority.
+
+
+## API approval workflow
+
+The authenticated model-approval endpoint requires paired `champion_report` and `challenger_report` fold evidence, `comparison_family_size`, and an explicit reviewer attestation that independent fee/spread/slippage evidence was inspected. The attestation includes a SHA-256 digest, source description and timezone-aware as-of timestamp, and is preserved in the audit event. The candidate must carry a non-empty experiment ID and complete code/configuration/training-data/cost-model SHA-256 lineage; the challenger evidence must match the same experiment ID and all four hashes. Missing or mismatched lineage is rejected rather than treated as optional. The endpoint also binds the challenger model hash to the registered artifact digest. Only after these checks does the separate reviewer account approve the candidate, and the artifact's server-side digest, feature schema and calibration are verified.
+
+The approval endpoint does not accept a Boolean `passed` flag as a substitute for fold evidence. The PWA registry form now collects the required evidence JSON. Evidence hashes, locked status and cost-evidence attestation are still reviewer-supplied declarations; the API does not independently authenticate source files, exchange fee schedules, market spreads, slippage observations, data access history or the comparison-family declaration. Reviewers must inspect the underlying evidence and disclose assumptions. The promotion gate is not live-order authorization.

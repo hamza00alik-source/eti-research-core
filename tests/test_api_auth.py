@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
@@ -170,6 +171,39 @@ def test_login_and_registration_are_rate_limited(tmp_path, monkeypatch):
         assert limited_register.status_code == 429
 
 
+
+
+def _promotion_payload(challenger_sha):
+    start = pd.Timestamp("2025-01-01T00:00:00Z")
+    folds = []
+    for index in range(5):
+        folds.append({
+            "test_start": (start + pd.Timedelta(days=30 * index)).isoformat(),
+            "test_end": (start + pd.Timedelta(days=30 * index + 20)).isoformat(),
+            "test_bars": 200, "net_return_bps": 20.0,
+            "max_drawdown": 0.02, "out_of_sample_ece": 0.03,
+        })
+    champion_folds = [{**item, "net_return_bps": 10.0} for item in folds]
+    return {
+        "comparison_family_size": 1,
+        "independent_cost_evidence_verified": True,
+        "cost_evidence_sha256": "2" * 64,
+        "cost_evidence_source": "independent exchange fee schedule and observed spread sample",
+        "cost_evidence_as_of": "2025-06-01T00:00:00Z",
+        "champion_report": {
+            "model_sha256": "c" * 64, "training_data_sha256": "b" * 64,
+            "evaluation_data_sha256": "d" * 64, "cost_model_sha256": "e" * 64,
+            "cost_adjusted": True, "evaluation_locked": True, "folds": champion_folds,
+        },
+        "challenger_report": {
+            "model_sha256": challenger_sha, "training_data_sha256": "b" * 64,
+            "evaluation_data_sha256": "d" * 64, "cost_model_sha256": "e" * 64,
+            "code_sha256": "f" * 64, "config_sha256": "1" * 64,
+            "experiment_id": "eti-exp-test-001",
+            "cost_adjusted": True, "evaluation_locked": True, "folds": folds,
+        },
+    }
+
 def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeypatch):
     class CalibratedStub:
         estimator = type("Estimator", (), {
@@ -201,7 +235,14 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
             "version": "0.3.0",
             "artifact_uri": "artifact://eti-core/0.3.0",
             "artifact_sha256": "a" * 64,
-            "input_schema": {"features": ["close", "volume"]},
+            "input_schema": {
+                "features": ["close", "volume"],
+                "lineage": {
+                    "dataset_sha256": "b" * 64, "cost_model_sha256": "e" * 64,
+                    "code_sha256": "f" * 64, "config_sha256": "1" * 64,
+                },
+            },
+            "experiment_id": "eti-exp-test-001",
             "supported_classes": ["crypto_spot"],
             "training_data_ref": "dataset:training-2026-11",
             "evaluation_report": {"passed": True, "balanced_accuracy": 0.61},
@@ -220,16 +261,77 @@ def test_model_registry_is_admin_governed_and_hides_candidates(tmp_path, monkeyp
 
         CalibratedStub.estimator.feature_names_in_ = np.array(["bad", "volume"])
         schema_mismatch = client.post(
-            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=_promotion_payload("a" * 64),
         )
         assert schema_mismatch.status_code == 409
         CalibratedStub.estimator.feature_names_in_ = np.array(["close", "volume"])
+        mismatched_evidence = client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=_promotion_payload("f" * 64),
+        )
+        assert mismatched_evidence.status_code == 409
+        wrong_dataset = _promotion_payload("a" * 64)
+        wrong_dataset["challenger_report"]["training_data_sha256"] = "9" * 64
+        assert client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=wrong_dataset,
+        ).status_code == 409
+        wrong_cost_model = _promotion_payload("a" * 64)
+        wrong_cost_model["challenger_report"]["cost_model_sha256"] = "3" * 64
+        assert client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=wrong_cost_model,
+        ).status_code == 409
+        wrong_code = _promotion_payload("a" * 64)
+        wrong_code["challenger_report"]["code_sha256"] = "2" * 64
+        assert client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=wrong_code,
+        ).status_code == 409
+        wrong_experiment = _promotion_payload("a" * 64)
+        wrong_experiment["challenger_report"]["experiment_id"] = "eti-exp-other"
+        assert client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=wrong_experiment,
+        ).status_code == 409
+        unverified_costs = _promotion_payload("a" * 64)
+        unverified_costs["independent_cost_evidence_verified"] = False
+        assert client.post(
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=unverified_costs,
+        ).status_code == 409
+
+        no_lineage_payload = {
+            **payload, "model_id": "eti-no-lineage", "version": "0.1.0",
+            "input_schema": {"features": ["close", "volume"]},
+            "experiment_id": "eti-exp-no-lineage",
+        }
+        assert client.post(
+            "/v1/models", headers=trainer_headers, json=no_lineage_payload
+        ).status_code == 201
+        no_lineage_approval = client.post(
+            "/v1/models/eti-no-lineage/0.1.0/approve",
+            headers=reviewer_headers, json=_promotion_payload("a" * 64),
+        )
+        assert no_lineage_approval.status_code == 409
+        assert "complete code/config/data/cost lineage" in no_lineage_approval.text
+        assert client.get(
+            "/v1/models/eti-no-lineage/0.1.0", headers=trainer_headers
+        ).json()["lifecycle"] == "candidate"
 
         approved = client.post(
-            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers
+            "/v1/models/eti-core/0.3.0/approve", headers=reviewer_headers,
+            json=_promotion_payload("a" * 64),
         )
         assert approved.status_code == 200, approved.text
         assert approved.json()["approved_by"] == "reviewer_admin"
+        assert approved.json()["promotion_assessment"]["promotion_eligible"] is True
+        audit = client.get("/v1/audit/events", headers=reviewer_headers).json()["items"]
+        promotion_event = next(item for item in audit if item["event_type"] == "model.promotion.approved")
+        assert promotion_event["payload"]["model_id"] == "eti-core"
+        assert promotion_event["payload"]["independent_cost_evidence_verified"] is True
+        assert promotion_event["payload"]["cost_evidence_sha256"] == "2" * 64
         visible = client.get("/v1/models", headers=regular_headers)
         assert len(visible.json()["items"]) == 1
         assert visible.json()["items"][0]["lifecycle"] == "approved"
@@ -325,7 +427,12 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
                 "features": ["feature_a", "feature_b"],
                 "department": "prediction", "model_role": "direction_classifier",
                 "market_types": ["spot"], "timeframes": ["1h"],
+                "lineage": {
+                    "dataset_sha256": "b" * 64, "cost_model_sha256": "e" * 64,
+                    "code_sha256": "f" * 64, "config_sha256": "1" * 64,
+                },
             },
+            "experiment_id": "eti-exp-test-001",
             "supported_classes": ["crypto_spot"],
             "training_data_ref": "synthetic-fixture",
             "evaluation_report": {"passed": True},
@@ -334,7 +441,7 @@ def test_approved_model_inference_endpoint(tmp_path, monkeypatch):
         assert registered.status_code == 201, registered.text
         approved = client.post(
             "/v1/models/eti-inference-test/0.1.0/approve",
-            headers=reviewer_headers,
+            headers=reviewer_headers, json=_promotion_payload(digest),
         )
         assert approved.status_code == 200
 

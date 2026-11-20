@@ -399,11 +399,14 @@ $('#model-approve-form').addEventListener('submit',async event=>{
  event.preventDefault();const form=new FormData(event.currentTarget);
  const modelId=encodeURIComponent(form.get('model_id'));
  const version=encodeURIComponent(form.get('version'));
+ let evidence;
+ try{evidence=JSON.parse(form.get('evidence'))}
+ catch(error){$('#model-message').textContent='Promotion evidence must be valid JSON.';return}
  try{
-  const result=await api('/v1/models/'+modelId+'/'+version+'/approve',{method:'POST'});
+  const result=await api('/v1/models/'+modelId+'/'+version+'/approve',{method:'POST',body:JSON.stringify(evidence)});
   $('#model-message').textContent='Model approved: '+result.model_id+' '+result.version+'.';
   await loadModels();
- }catch(error){$('#model-message').textContent='Approval failed: '+error.message+'. The reviewer must differ from the creator and the artifact must pass integrity, schema and calibration checks.'}
+ }catch(error){$('#model-message').textContent='Approval failed: '+error.message+'. A distinct reviewer, locked paired-fold evidence, cost-adjusted returns, drawdown and calibration checks are required.'}
 });
 $('#model-retire-form').addEventListener('submit',async event=>{
  event.preventDefault();const form=new FormData(event.currentTarget);
