@@ -2307,7 +2307,7 @@ class MemoryStore:
                 error_type = error_message = None
                 digest = snapshot.get("snapshot_sha256")
                 quote_timestamp = (snapshot.get("quote") or {}).get("timestamp")
-                if not isinstance(digest, str) or len(digest) != 64:
+                if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
                     raise ValueError("snapshot digest is invalid")
                 if not isinstance(quote_timestamp, str) or not quote_timestamp:
                     raise ValueError("snapshot quote timestamp is invalid")
