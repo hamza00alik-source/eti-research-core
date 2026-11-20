@@ -10,7 +10,7 @@ ETI now has a read-only public spot snapshot collector in `eti.live_market.captu
 - Quote and candle ages
 - A deterministic SHA-256 snapshot receipt
 
-The collector fails closed when the market is not active spot, a quote timestamp is missing, the quote is stale, bid/ask values are invalid, the latest completed candle is stale, or the venue cannot provide the required data. The default maximum quote age is 30 seconds; candle freshness is bounded to one timeframe interval.
+The collector fails closed when the market is not active spot, a quote timestamp is missing, the quote is stale, bid/ask values are invalid, the latest completed candle is stale, recent candles contain a gap, or the venue cannot provide the required data. The default maximum quote age is 30 seconds; candle freshness is bounded to one timeframe interval.
 
 The paper tick now requires a fresh, eligible snapshot aligned to the exact completed candle used for model features. It marks long positions at bid, simulates entries at ask plus configured slippage, and exits at bid minus configured slippage. Configured fees are still charged separately. Each paper fill event stores the quote timestamp, bid/ask, spread and snapshot digest for later audit. This is a conservative top-of-book approximation, not a queue-position, depth, partial-fill or market-impact model.
 
