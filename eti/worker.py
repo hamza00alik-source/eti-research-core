@@ -17,7 +17,7 @@ from typing import Any
 from uuid import uuid4
 
 from .agents import AgentCapabilityRegistry, default_capabilities
-from .paper import run_paper_tick
+from .paper import PaperSessionGap, run_paper_tick
 from .live_market import MarketDataUnavailable
 from .execution import run_live_tick
 from .storage import MemoryStore
@@ -54,7 +54,7 @@ class AgentWorker:
         session_id = payload.get("session_id")
         try:
             result = run_paper_tick(payload, self.store)
-        except MarketDataUnavailable as exc:
+        except (MarketDataUnavailable, PaperSessionGap) as exc:
             self.store.record_paper_feed_health(
                 owner_id, session_id, error=exc
             )
