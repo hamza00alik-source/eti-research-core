@@ -12,7 +12,7 @@ The implementation is split across stacked pull requests:
 - **#216 — runner integration:** registers candidates before fitting, persists candidate-specific outer-test return differentials, records failed attempts and enforces contiguous non-overlapping test windows.
 - **#217 — evidence trust boundary:** distinguishes client attestations from runner receipts, returns evidence status in diagnostics and cross-checks runner receipt hashes against frozen family declarations.
 
-All pull requests remain unmerged. Their dependency order must be preserved.
+Integration is complete on `main`. Prerequisite Phase 1 PR #211 and the Phase 2 stack (#212, #214, #215, #216, #217) are merged. PR #217 was merged into the #216 runner branch first to correct the failing diagnostics test; the resulting integrated tree was then merged to `main` through PR #216.
 
 ## Phase 2 exit gates
 
@@ -25,7 +25,7 @@ All pull requests remain unmerged. Their dependency order must be preserved.
 | Runner integration | Candidate trials registered before fitting and candidate-specific OOS returns persisted | Runner-generated snapshot fingerprint is a content receipt, not raw-data archival or provider authentication. |
 | Cost assumptions | Evidence-backed, instrument-specific, time-bounded cost model validation | Referenced source URLs/licences and venue costs are not independently fetched or measured by this ledger. |
 | Promotion and execution safety | No automatic promotion; human approval remains separate | Research diagnostics do not grant promotion, allocation or execution rights. Live execution remains disabled. |
-| Build and test | CI pipeline includes Python tests, JS syntax, Compose validation and production image build | A passing run for the current PR #217 head is still required before Phase 2 can be called CI-verified. |
+| Build and test | Integrated CI run 44573826676 passed Python tests, JS syntax, Compose validation and production image build | CI validates the tested code tree; it does not establish data-provider authenticity, cost accuracy or profitability. |
 
 ## Evidence trust levels
 
@@ -48,17 +48,27 @@ The ledger verifies the manifest digest and, for runner-captured receipts, cross
 
 ## Phase 2 completion status
 
-**Implementation complete and CI-verified on the integrated PR #217 merge ref; independent review and ordered PR integration remain pending.**
+**Phase 2 implementation and repository integration are complete on `main`.**
 
 Latest integrated validation:
-- GitHub Actions run [44573262669](https://github.com/hamza00alik-source/eti-research-core/actions/runs/44573262669) succeeded on 2026-11-19.
+- GitHub Actions run [44573826676](https://github.com/hamza00alik-source/eti-research-core/actions/runs/44573826676) succeeded on 2026-11-20 on the integrated #216 + #217 code tree, before its merge to `main`.
 - **604 passed, 1 skipped, 8 warnings**.
 - Python compilation, JavaScript syntax checks, Docker Compose validation and production container image build all passed.
 
-Remaining governance / acceptance gates:
+Merged integration commits:
+- #211 Phase 1 prerequisite: `374b033b32e9bb083d15eee901353c37e9951da6`
+- #212 statistical validation: `d340c55224fc51326755d6201cbf3c7fe6f5b4da`
+- #214 trial-family ledger: `7456a30565a54058121b54d150786b6b287a70a2`
+- #215 authenticated diagnostics API: `3fde00670753045ee0b875deddcf02e9360a2265`
+- #217 evidence-boundary fix merged into #216 branch: `8aef609e015c06ed80565c298d40169bf2a9a31a`
+- #216 runner and evidence integration to `main`: `430212e0614bdd304f86df72374f49e3bd7abf60`
 
-- Independent review confirms statistical implementation, candidate selection, trial-family accounting and evidence trust boundaries.
-- The stacked PRs are integrated in dependency order after review and explicit repository-owner authorization.
-- Phase 3 planning addresses raw immutable data artifact retention, provider/source verification, independently measured execution costs, trial-family completeness controls and stronger benchmark construction.
+Remaining proof before ETI can be considered economically or operationally ready:
+- Independent quantitative review of DSR assumptions, CSCV/PBO, bootstrap design, trial-family selection and candidate-selection bias.
+- Immutable raw market-data retention and independent provider/source verification.
+- Independently measured, instrument- and venue-specific fees, spreads, slippage and market impact; current returns use configured cost assumptions.
+- Controls that detect experiments omitted from the in-platform ledger and independently verify benchmark construction.
+- PostgreSQL migration and production deployment controls before multi-replica API/worker operation.
+- Genuine, untouched out-of-sample evaluation across multiple market regimes before any claim of a durable edge.
 
-The passing integrated CI establishes code/build validation, not independent source authenticity, cost accuracy, complete capture of off-platform experiments, or a profitable trading edge. ETI must continue to report economic performance as unproven until genuinely out-of-sample, independently costed evidence supports it.
+The passing integrated CI establishes code/build validation, not independent source authenticity, cost accuracy, complete capture of off-platform experiments, or a profitable trading edge. The current ETI economic research result remains NO-GO; ETI must continue to report performance as unproven until genuinely out-of-sample, independently costed evidence supports it. Live order execution remains disabled.
