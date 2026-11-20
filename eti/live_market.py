@@ -137,6 +137,8 @@ def capture_public_spot_snapshot(
         quote_age_ms = current_ms - quote_timestamp
         if quote_age_ms < 0 or quote_age_ms > max_quote_age_ms:
             raise MarketDataUnavailable("latest quote is stale or timestamped in the future")
+        if quote_timestamp < candle_close_ms:
+            raise MarketDataUnavailable("latest quote predates the completed candle close")
 
         try:
             bid = _finite_positive(ticker.get("bid"), "bid")
