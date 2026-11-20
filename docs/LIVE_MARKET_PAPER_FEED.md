@@ -59,6 +59,10 @@ The worker is not started implicitly by FastAPI. If it is stopped, paper session
 
 Do not start a session with a candidate merely because it is registered or calibrated. ETI requires an approved model, and the earlier BTC/USDT research result remains NO-GO for profitability. A paper session can validate plumbing and collect evidence; it cannot turn that result into a proven edge.
 
+## First supervised pilot
+
+See [FIRST_LIVE_PAPER_PILOT_RUNBOOK.md](FIRST_LIVE_PAPER_PILOT_RUNBOOK.md) for the guarded single-session setup, preflight checks, monitoring endpoints, pause criteria and acceptance gates.
+
 ## Next required work before a meaningful paper pilot
 
 1. Deploy the existing Compose `worker` service (already configured with `restart: unless-stopped`) and add host-level monitoring/alerts for worker liveness, SQLite health, rate-limit budgets and prolonged stale feed status.
