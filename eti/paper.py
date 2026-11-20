@@ -35,6 +35,10 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
     frame = CcxtPublicProvider(session["venue"]).fetch_ohlcv(
         session["symbol"], session["timeframe"], 200
     )
+    candle_at = frame.iloc[-1]["timestamp"].isoformat()
+    if session["last_processed_candle"] and candle_at <= session["last_processed_candle"]:
+        return {"status": session["status"], "processed": False, "reason": "candle_already_processed"}
+
     snapshot_provider = market_snapshot_provider or capture_public_spot_snapshot
     market_snapshot = snapshot_provider(session["venue"], session["symbol"], session["timeframe"])
     if (
@@ -52,7 +56,6 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
     price = float(quote.get("last", 0))
     if not np.isfinite([bid, ask, price]).all() or bid <= 0 or ask < bid or price <= 0:
         raise ValueError("live public quote contains invalid bid/ask/last values")
-    candle_at = frame.iloc[-1]["timestamp"].isoformat()
     snapshot_candle_at = market_snapshot.get("latest_completed_candle", {}).get("open_time")
     if snapshot_candle_at is None or pd.Timestamp(snapshot_candle_at) != pd.Timestamp(frame.iloc[-1]["timestamp"]):
         raise ValueError("live quote snapshot and feature candles are not aligned; retry the paper tick")
@@ -75,8 +78,6 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
     probabilities = probabilities[0]
     prediction = int(np.argmax(probabilities))
     confidence = float(probabilities[prediction])
-    if session["last_processed_candle"] and candle_at <= session["last_processed_candle"]:
-        return {"status": session["status"], "processed": False, "reason": "candle_already_processed"}
 
     risk_values = session["risk_config"]
     risk_config = RiskConfig(
