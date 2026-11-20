@@ -1299,10 +1299,20 @@ def register_research_trial(workspace_id: str, payload: ResearchTrialRegisterPay
     store = _memory_store()
     _require_workspace(store, account, workspace_id)
     try:
+        # API-submitted evidence is always wrapped as an unverified client attestation.
+        # A client cannot label its own payload as a trusted local MarketDataHub capture.
+        source_evidence = {}
+        if payload.source_evidence:
+            source_evidence = {
+                "schema_version": "eti.api_source_evidence.v1",
+                "attestation_origin": "authenticated_api_client",
+                "verification_status": "unverified_client_attestation",
+                "client_manifest": payload.source_evidence,
+            }
         return store.register_research_trial(account["id"], workspace_id, payload.family_id,
             payload.trial_id, payload.strategy_name, payload.config_sha256,
             payload.training_data_sha256, payload.evaluation_data_sha256,
-            payload.cost_model_sha256, payload.benchmark_id, payload.source_evidence)
+            payload.cost_model_sha256, payload.benchmark_id, source_evidence)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
     except ValueError as exc:
@@ -1374,12 +1384,29 @@ def get_research_trial_diagnostics(workspace_id: str, family_id: str,
             deviation = statistics.stdev(column)
             scores.append(mean / deviation if deviation > 1e-15 else 0.0)
         selected_trial_id = family["trial_ids"][max(range(len(scores)), key=scores.__getitem__)]
-        return assess_research_trial_family(
+        assessment = assess_research_trial_family(
             family, selected_trial_id=selected_trial_id,
             bootstrap_repetitions=payload.repetitions,
             block_length=payload.block_length, seed=payload.seed,
             pbo_splits=payload.n_splits,
         )
+        source_evidence = family.get("source_evidence") or {}
+        if not source_evidence:
+            evidence_status = "absent"
+        elif source_evidence.get("attestation_origin") == "authenticated_api_client":
+            evidence_status = "unverified_client_attestation"
+        elif source_evidence.get("capture_method") == "MarketDataHub.fetch":
+            evidence_status = "captured_value_fingerprint_only"
+        else:
+            evidence_status = "unverified_manifest"
+        # Keep the evidence receipt beside the statistics so exported diagnostics
+        # cannot lose the provenance and trust boundary of their inputs.
+        return {
+            **assessment,
+            "source_evidence": source_evidence,
+            "source_evidence_sha256": family.get("source_evidence_sha256"),
+            "source_evidence_status": evidence_status,
+        }
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="trial family not found") from exc
     except ValueError as exc:

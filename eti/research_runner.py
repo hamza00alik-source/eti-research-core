@@ -237,6 +237,16 @@ def run_approved_multi_market_research(
         if funding != 0 or funding_schedule:
             raise ValueError(f"{key} spot research cannot include derivative funding assumptions")
         snapshot = data_hub.fetch(instrument, timeframe, limit, min_rows=min_rows)
+        captured_provenance = dict(snapshot.provenance)
+        if trial_ledger is not None:
+            # Compute the receipt at the runner boundary from the exact values
+            # being evaluated. Do not rely on an adapter-supplied fingerprint.
+            from .market_data_hub import _ohlcv_snapshot_sha256
+            snapshot_digest = _ohlcv_snapshot_sha256(snapshot.frame)
+            claimed_digest = captured_provenance.get("source_snapshot_sha256")
+            if claimed_digest is not None and claimed_digest != snapshot_digest:
+                raise ValueError(f"{key} provider snapshot fingerprint does not match fetched OHLCV values")
+            captured_provenance["source_snapshot_sha256"] = snapshot_digest
         from .features import build_features, feature_columns_for_frame, make_labels
         frame = snapshot.frame
         feature_frame = build_features(frame)
@@ -271,7 +281,7 @@ def run_approved_multi_market_research(
             }
         prepared.append({
             "key": key, "instrument": instrument, "frame": frame,
-            "provenance": snapshot.provenance, "quality": snapshot.quality,
+            "provenance": captured_provenance, "quality": snapshot.quality,
             "fit_calls": fit_calls, "fee_bps": fee,
             "slippage_bps": slippage_component + spread / 2.0 + market_impact,
             "funding_bps_per_bar": funding, "funding_events": funding_schedule,
