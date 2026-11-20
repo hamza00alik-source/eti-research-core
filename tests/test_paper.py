@@ -35,6 +35,22 @@ def _candles(timestamp):
     })
 
 
+def _market_snapshot(frame, bid=99.9, ask=100.1, last=100.0):
+    return {
+        "schema_version": "eti.live_public_market_snapshot.v1",
+        "venue": "mexc", "market_type": "spot", "symbol": "BTC/USDT",
+        "quality": {"paper_eligible": True},
+        "quote": {
+            "bid": bid, "ask": ask, "last": last, "spread_bps": 20.0,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        },
+        "latest_completed_candle": {
+            "open_time": frame.iloc[-1]["timestamp"].isoformat(),
+        },
+        "snapshot_sha256": "c" * 64,
+    }
+
+
 def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path, monkeypatch):
     import eti.paper as paper
     store = MemoryStore(tmp_path / "paper.sqlite3")
@@ -70,7 +86,10 @@ def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path
         [[0.0] * len(FEATURE_COLUMNS)], columns=FEATURE_COLUMNS, index=[79]
     ))
 
-    opened = run_paper_tick({"owner_id": "owner", "session_id": session["id"]}, store)
+    opened = run_paper_tick(
+        {"owner_id": "owner", "session_id": session["id"]}, store,
+        market_snapshot_provider=lambda *args: _market_snapshot(_candles("2026-01-01")),
+    )
     assert opened["processed"] is True
     assert opened["live_execution"] is False
     assert opened["position_qty"] > 0
@@ -78,7 +97,10 @@ def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path
     assert opened["cash"] < 10000
 
     # The same completed candle is idempotent and cannot create a duplicate fill.
-    duplicate = run_paper_tick({"owner_id": "owner", "session_id": session["id"]}, store)
+    duplicate = run_paper_tick(
+        {"owner_id": "owner", "session_id": session["id"]}, store,
+        market_snapshot_provider=lambda *args: _market_snapshot(_candles("2026-01-01")),
+    )
     assert duplicate["processed"] is False
     assert len(store.list_paper_trades("owner", session["id"])) == 1
 
@@ -93,7 +115,10 @@ def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path
     monkeypatch.setattr(paper, "build_features", lambda frame: pd.DataFrame(
         [[0.0] * len(FEATURE_COLUMNS)], columns=FEATURE_COLUMNS, index=[79]
     ))
-    closed = run_paper_tick({"owner_id": "owner", "session_id": session["id"]}, store)
+    closed = run_paper_tick(
+        {"owner_id": "owner", "session_id": session["id"]}, store,
+        market_snapshot_provider=lambda *args: _market_snapshot(_candles("2026-01-02")),
+    )
     assert closed["processed"] is True
     assert closed["position_qty"] == 0
     assert closed["events"][0]["event_type"] == "exit"
@@ -189,9 +214,17 @@ def test_paper_tick_enforces_stop_loss_and_does_not_reenter_same_candle(tmp_path
         [[0.0] * len(FEATURE_COLUMNS)], columns=FEATURE_COLUMNS, index=[79]
     ))
 
-    opened = run_paper_tick({"owner_id": "owner", "session_id": session["id"]}, store)
+    opened = run_paper_tick(
+        {"owner_id": "owner", "session_id": session["id"]}, store,
+        market_snapshot_provider=lambda *args: _market_snapshot(_candles("2026-02-01")),
+    )
     assert opened["position_qty"] > 0
-    stopped = run_paper_tick({"owner_id": "owner", "session_id": session["id"]}, store)
+    stopped = run_paper_tick(
+        {"owner_id": "owner", "session_id": session["id"]}, store,
+        market_snapshot_provider=lambda *args: _market_snapshot(
+            _candles("2026-02-02"), bid=94.0, ask=94.1, last=94.0
+        ),
+    )
     assert stopped["position_qty"] == 0
     assert stopped["events"][0]["event_type"] == "risk_stop"
     assert stopped["events"][0]["risk_decision"]["reason"] == "fixed_five_percent_stop"
