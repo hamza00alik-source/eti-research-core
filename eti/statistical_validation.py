@@ -116,10 +116,11 @@ def probability_of_backtest_overfitting(values: Any, *, n_splits: int = 8, metri
         logits.append(float(math.log(omega / (1.0 - omega))))
         selected_indices.append(selected)
         relative_ranks.append(omega)
-    logit_values = np.asarray(logits, dtype=float)
-    tie_tolerance = 1e-12
-    pbo = float(np.mean(logit_values < -tie_tolerance)
-                + 0.5 * np.mean(np.abs(logit_values) <= tie_tolerance))
+    # Exact median-rank ties carry half weight instead of being classified
+    # as fully overfit. This gives an all-tied family PBO of 0.5.
+    logit_array = np.asarray(logits, dtype=float)
+    tied = np.isclose(logit_array, 0.0, rtol=0.0, atol=1e-12)
+    pbo = float((np.sum(logit_array < -1e-12) + 0.5 * np.sum(tied)) / len(logit_array))
     return {
         "method": "combinatorially_symmetric_cross_validation", "metric": metric,
         "observations": int(returns.shape[0]), "strategy_count": int(returns.shape[1]),
@@ -239,6 +240,26 @@ def assess_research_trial_family(
     observation_times = family.get("observation_times")
     if not isinstance(observation_times, list) or len(observation_times) < 8:
         raise ValueError("family must include the aligned observation timestamp vector")
+    # Circular block bootstrap and CSCV treat rows as equally spaced observations.
+    # Reject irregular timestamps here as well as at runner ingestion, because
+    # authenticated API clients can submit ledger trials directly.
+    from datetime import datetime
+    parsed_times = []
+    for index, value in enumerate(observation_times):
+        if not isinstance(value, str):
+            raise ValueError(f"observation_times[{index}] must be an ISO-8601 timestamp")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(f"observation_times[{index}] must be an ISO-8601 timestamp") from exc
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("research observation timestamps must include a timezone")
+        parsed_times.append(parsed.timestamp())
+    intervals = np.diff(np.asarray(parsed_times, dtype=float))
+    if np.any(intervals <= 0):
+        raise ValueError("research observation timestamps must be strictly increasing")
+    if not np.allclose(intervals, intervals[0], rtol=0.0, atol=1e-6):
+        raise ValueError("research observation timestamps must be equally spaced for block-bootstrap and CSCV diagnostics")
     matrix = _return_matrix(family.get("net_return_differentials"), require_nonzero_volatility=False)
     if matrix.shape != (len(observation_times), len(trial_ids)):
         raise ValueError("family return matrix dimensions do not match timestamps and completed trial IDs")
@@ -257,7 +278,22 @@ def assess_research_trial_family(
         }
     else:
         dsr = deflated_sharpe_ratio(selected_returns, trials=attempted)
-    pbo = probability_of_backtest_overfitting(matrix, n_splits=pbo_splits, metric="sharpe")
+    try:
+        pbo = probability_of_backtest_overfitting(matrix, n_splits=pbo_splits, metric="sharpe")
+    except ValueError as exc:
+        # CSCV requires equal-sized blocks. Preserve the other independent
+        # diagnostics when a valid OOS series cannot be partitioned evenly.
+        if "observation count must be divisible by n_splits" not in str(exc):
+            raise
+        pbo = {
+            "method": "combinatorially_symmetric_cross_validation",
+            "status": "not_computed",
+            "observations": int(matrix.shape[0]),
+            "strategy_count": int(matrix.shape[1]),
+            "n_splits": pbo_splits,
+            "reason": str(exc),
+            "warning": "PBO/CSCV was unavailable because the observation count cannot be divided into equal blocks; White Reality Check and Hansen SPA remain available.",
+        }
     white = white_reality_check(
         matrix, repetitions=bootstrap_repetitions, block_length=block_length, seed=seed
     )

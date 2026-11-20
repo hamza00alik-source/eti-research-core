@@ -366,6 +366,8 @@ class MemoryStore:
                     evaluation_data_sha256 TEXT NOT NULL,
                     cost_model_sha256 TEXT NOT NULL,
                     benchmark_id TEXT NOT NULL,
+                    source_evidence_json TEXT NOT NULL DEFAULT '{}',
+                    source_evidence_sha256 TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     UNIQUE(owner_id, workspace_id, family_id)
                 );
@@ -394,6 +396,23 @@ class MemoryStore:
                 CREATE INDEX IF NOT EXISTS idx_research_trials_family
                     ON research_trials(owner_id, workspace_id, family_id, status, created_at);
                 """
+            )
+            research_family_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(research_trial_families)").fetchall()
+            }
+            for column, definition in (
+                ("source_evidence_json", "TEXT NOT NULL DEFAULT '{}'"),
+                ("source_evidence_sha256", "TEXT NOT NULL DEFAULT ''"),
+            ):
+                if column not in research_family_columns:
+                    conn.execute(f"ALTER TABLE research_trial_families ADD COLUMN {column} {definition}")
+            # Backfill pre-manifest families with the canonical empty-manifest digest.
+            # This keeps existing families appendable after the schema migration.
+            empty_source_evidence_sha256 = hashlib.sha256(b"{}").hexdigest()
+            conn.execute(
+                """UPDATE research_trial_families SET source_evidence_sha256=?
+                WHERE source_evidence_sha256='' AND source_evidence_json='{}'""",
+                (empty_source_evidence_sha256,),
             )
             autonomy_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info(autonomy_profiles)").fetchall()
@@ -951,6 +970,7 @@ class MemoryStore:
         self, owner_id: str, workspace_id: str, family_id: str, trial_id: str,
         strategy_name: str, config_sha256: str, training_data_sha256: str,
         evaluation_data_sha256: str, cost_model_sha256: str, benchmark_id: str,
+        source_evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Register one immutable hypothesis attempt within a frozen comparison family."""
         owner_id = _required_text(owner_id, "owner_id")
@@ -959,6 +979,17 @@ class MemoryStore:
         trial_id = _required_text(trial_id, "trial_id", 160)
         strategy_name = _required_text(strategy_name, "strategy_name", 160)
         benchmark_id = _required_text(benchmark_id, "benchmark_id", 160)
+        if source_evidence is None:
+            source_evidence = {}
+        if not isinstance(source_evidence, dict):
+            raise ValueError("source_evidence must be a JSON object")
+        source_evidence_json = json.dumps(
+            source_evidence, ensure_ascii=False, allow_nan=False,
+            sort_keys=True, separators=(",", ":"),
+        )
+        if len(source_evidence_json.encode("utf-8")) > MAX_RESEARCH_SERIES_BYTES:
+            raise ValueError("source evidence manifest exceeds the research-series size limit")
+        source_evidence_sha256 = hashlib.sha256(source_evidence_json.encode("utf-8")).hexdigest()
         config_sha256 = _required_sha256(config_sha256, "config_sha256")
         training_data_sha256 = _required_sha256(training_data_sha256, "training_data_sha256")
         evaluation_data_sha256 = _required_sha256(evaluation_data_sha256, "evaluation_data_sha256")
@@ -974,21 +1005,24 @@ class MemoryStore:
                 "SELECT * FROM research_trial_families WHERE owner_id=? AND workspace_id=? AND family_id=?",
                 (owner_id, workspace_id, family_id),
             ).fetchone()
-            family_values = (training_data_sha256, evaluation_data_sha256, cost_model_sha256, benchmark_id)
+            family_values = (training_data_sha256, evaluation_data_sha256, cost_model_sha256,
+                             benchmark_id, source_evidence_json, source_evidence_sha256)
             if family is None:
                 conn.execute(
                     """INSERT INTO research_trial_families
                     (id,owner_id,workspace_id,family_id,training_data_sha256,evaluation_data_sha256,
-                     cost_model_sha256,benchmark_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)""",
+                     cost_model_sha256,benchmark_id,source_evidence_json,source_evidence_sha256,created_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                     (str(uuid4()), owner_id, workspace_id, family_id, *family_values, now),
                 )
             else:
                 existing = (
                     family["training_data_sha256"], family["evaluation_data_sha256"],
                     family["cost_model_sha256"], family["benchmark_id"],
+                    family["source_evidence_json"], family["source_evidence_sha256"],
                 )
                 if existing != family_values:
-                    raise ValueError("trial family dataset, evaluation, cost model and benchmark are immutable")
+                    raise ValueError("trial family data, cost, benchmark and source evidence are immutable")
             duplicate = conn.execute(
                 "SELECT 1 FROM research_trials WHERE owner_id=? AND workspace_id=? AND trial_id=?",
                 (owner_id, workspace_id, trial_id),
@@ -1153,6 +1187,37 @@ class MemoryStore:
                 "SELECT * FROM research_trials WHERE owner_id=? AND workspace_id=? AND family_id=? ORDER BY trial_id",
                 (owner_id, workspace_id, family_id),
             ).fetchall()
+        source_evidence_json = family["source_evidence_json"] or "{}"
+        source_evidence_sha256 = family["source_evidence_sha256"] or ""
+        if source_evidence_sha256:
+            expected_source_digest = hashlib.sha256(source_evidence_json.encode("utf-8")).hexdigest()
+            if expected_source_digest != source_evidence_sha256:
+                raise ValueError("source evidence manifest digest mismatch; family statistics are blocked")
+        source_evidence = json.loads(source_evidence_json)
+        if not isinstance(source_evidence, dict):
+            raise ValueError("source evidence manifest must be a JSON object")
+        if source_evidence.get("capture_method") == "MarketDataHub.fetch":
+            # Runner-captured receipts must cross-bind to the family declarations.
+            # A valid outer digest alone would not detect internally inconsistent claims.
+            snapshot_digest = source_evidence.get("source_snapshot_sha256")
+            provenance = source_evidence.get("source_provenance")
+            cost_model = source_evidence.get("cost_model")
+            cost_digest = source_evidence.get("cost_model_sha256")
+            if not isinstance(snapshot_digest, str) or not _SHA256_RE.fullmatch(snapshot_digest):
+                raise ValueError("captured source snapshot fingerprint is missing or invalid")
+            if not isinstance(provenance, dict) or provenance.get("source_snapshot_sha256") != snapshot_digest:
+                raise ValueError("captured source provenance does not match its snapshot fingerprint")
+            if source_evidence.get("training_data_sha256") != family["training_data_sha256"]:
+                raise ValueError("captured training-data fingerprint does not match the trial family")
+            if source_evidence.get("evaluation_data_sha256") != family["evaluation_data_sha256"]:
+                raise ValueError("captured evaluation-data fingerprint does not match the trial family")
+            if not isinstance(cost_model, dict) or not isinstance(cost_digest, str):
+                raise ValueError("captured transaction-cost model evidence is incomplete")
+            actual_cost_digest = hashlib.sha256(json.dumps(
+                cost_model, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")).hexdigest()
+            if actual_cost_digest != cost_digest or cost_digest != family["cost_model_sha256"]:
+                raise ValueError("captured transaction-cost model fingerprint mismatch")
         completed = [row for row in rows if row["status"] == "completed"]
         if len(completed) < 2:
             raise ValueError("at least two completed trials are required for family statistics")
@@ -1188,6 +1253,8 @@ class MemoryStore:
             "evaluation_data_sha256": family["evaluation_data_sha256"],
             "cost_model_sha256": family["cost_model_sha256"],
             "benchmark_id": family["benchmark_id"],
+            "source_evidence": source_evidence,
+            "source_evidence_sha256": source_evidence_sha256 or None,
             "registered_trial_count": len(rows),
             "attempted_trial_count": counts["running"] + counts["completed"] + counts["failed"],
             "completed_trial_count": counts["completed"],

@@ -244,6 +244,15 @@ def run_nested_calibrated_walk_forward(
         test_candidate_metrics[selected]["accuracy"] = float(
             accuracy_score(test_y, selected_test_pred)
         )
+        # Preserve each candidate's frozen out-of-sample decision stream.
+        for candidate_name in test_candidate_metrics:
+            candidate_predictions = (
+                selected_test_pred if candidate_name == selected
+                else predictions_by_candidate[candidate_name]
+            )
+            test_candidate_metrics[candidate_name]["test_predictions"] = (
+                candidate_predictions.astype(int).tolist()
+            )
         results.append({
             "fold": number,
             "selected_candidate": selected,

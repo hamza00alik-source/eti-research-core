@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Multiple-testing-aware validation is only meaningful when ETI records the hypotheses actually attempted. The SQLite research ledger stores an append-only trial identity within a frozen comparison family and records a single terminal outcome for each started attempt.
+Multiple-testing-aware validation is only meaningful when ETI records the hypotheses actually attempted. The SQLite research ledger stores an append-only trial identity within a frozen comparison family and records a single terminal outcome for each started attempt. The approved research runner now registers and starts each nested candidate before fitting, then completes it with its candidate-specific outer-test return differential series.
 
 ## Family contract
 
@@ -10,9 +10,12 @@ The first trial registered in a family freezes:
 - training-data SHA-256;
 - evaluation-data SHA-256;
 - cost-model SHA-256;
-- benchmark identifier.
+- benchmark identifier;
+- an immutable source-evidence manifest and its SHA-256 digest (when created by the approved local runner).
 
-Every later trial in that family must repeat the exact same values. A family cannot silently change its dataset, cost assumptions or benchmark midway through a comparison. Each trial also records its strategy name and configuration SHA-256.
+The approved runner now fingerprints the exact validated OHLCV snapshot at the MarketDataHub boundary using a stable UTC-timestamp / IEEE-754 value serialization. It binds that snapshot digest, provider adapter identity, capture time, source provenance, data-quality report, validated cost-model object and its digest, plus the derived training/evaluation row hashes into one family manifest. The ledger stores the manifest and verifies its digest before returning diagnostics. Later trials must repeat the same manifest byte-for-byte.
+
+The authenticated public registration API accepts an optional client manifest only as an explicitly unverified attestation. ETI wraps it in an `eti.api_source_evidence.v1` envelope with `attestation_origin=authenticated_api_client` and `verification_status=unverified_client_attestation`; a client cannot claim the trusted local-runner capture method at the envelope level. API-created families without a manifest retain an empty receipt. Diagnostics return the receipt and a machine-readable evidence status alongside the statistical results, so exported reports retain the trust boundary. A local runner manifest's snapshot fingerprint binds captured values, but does not authenticate the upstream provider. A content fingerprint proves which values were captured, not that the upstream provider was truthful, complete, licensed or manipulation-free. It also cannot prove that every experiment outside ETI was disclosed.
 
 ## Trial lifecycle
 
@@ -35,11 +38,14 @@ The family matrix accessor includes only completed trials, recomputes each store
 - The integrated assessment applies the DSR estimator to the selected trial's net benchmark-relative differential (an information-ratio basis) and uses the full attempted-trial count; do not use only the completed shortlist. If the selected trial has zero volatility, DSR is reported as undefined while the other family diagnostics remain available.
 - If a failed attempt has no return series, it is counted for multiple-testing penalty but is not fabricated into the return matrix.
 - Use the family benchmark ID, evaluation-data hash and cost-model hash as mandatory inputs to downstream report provenance.
+- CSCV/PBO requires an observation count divisible by the requested split count. If not, the integrated assessment marks PBO as not computed but still returns the block-bootstrap diagnostics.
 
 ## Limitations and next integration
 
 Trial-family identifiers are scoped to an owner and workspace. Reusing a trial identifier within that scope is rejected, while independent workspaces may use the same local identifier.
 
-This first ledger is a storage primitive. It is not yet connected to an authenticated API or the autonomous research runner. Callers must obtain owner_id from the authenticated principal and must register each attempted hypothesis before execution. The ledger validates declared hashes and alignment but cannot authenticate source data, independently verify costs, or prove the benchmark was correctly constructed. SQLite remains a single-instance store; multi-replica deployment requires a PostgreSQL migration.
+The ledger is connected to authenticated, workspace-scoped API endpoints and the approved research runner. The runner records the two current nested candidates against a common no-trade benchmark. Ledger recording requires step_size == test_size, unique observations, and timestamps exactly one configured candle interval apart; this prevents row-based block bootstraps from treating gaps as adjacent observations. If registration succeeds but starting fails, the registered-only trial remains visible and is excluded from attempted counts; only successfully started trials are marked failed after a run error. The ledger verifies the persisted source-manifest digest and exact captured-value fingerprint for runner-created families, but cannot independently authenticate the upstream provider, independently measure venue costs, or prove the benchmark was correctly constructed. API clients may optionally submit a source-evidence manifest; ETI wraps it as an unverified client attestation and diagnostics expose that status. Its digest protects persisted integrity, not truthfulness. Legacy/API-created families may still have an empty manifest. It also cannot prove that all experiments performed outside ETI were registered.
+
+The aggregate training-row and evaluation-row hashes describe the union of rows used across expanding walk-forward folds. They are not globally disjoint: an earlier outer-test observation can legitimately enter the training set of a later fold. Each fold's own test window remains chronologically held out from that fold's training data. SQLite remains a single-instance store; multi-replica deployment requires a PostgreSQL migration.
 
 The ledger does not approve models, create signals, allocate capital or place orders. Live order execution remains hard-disabled.
