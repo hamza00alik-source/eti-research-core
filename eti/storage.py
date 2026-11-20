@@ -306,6 +306,22 @@ class MemoryStore:
                 CREATE INDEX IF NOT EXISTS idx_paper_sessions_owner
                     ON paper_sessions(owner_id, workspace_id, status);
 
+                CREATE TABLE IF NOT EXISTS paper_feed_health (
+                    session_id TEXT PRIMARY KEY REFERENCES paper_sessions(id) ON DELETE CASCADE,
+                    owner_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('healthy','degraded','unavailable')),
+                    consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK(consecutive_failures >= 0),
+                    last_attempt_at TEXT NOT NULL,
+                    last_success_at TEXT,
+                    last_error_type TEXT,
+                    last_error_message TEXT,
+                    last_snapshot_sha256 TEXT,
+                    last_quote_timestamp TEXT,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_paper_feed_health_owner
+                    ON paper_feed_health(owner_id, status, updated_at);
+
                 CREATE TABLE IF NOT EXISTS paper_trades (
                     id TEXT PRIMARY KEY,
                     session_id TEXT NOT NULL REFERENCES paper_sessions(id) ON DELETE CASCADE,
@@ -2261,6 +2277,91 @@ class MemoryStore:
                 (owner_id, workspace_id),
             ).fetchall()
         return [self._paper_session_dict(row) for row in rows]
+
+    def record_paper_feed_health(
+        self, owner_id: str, session_id: str, *,
+        snapshot: dict[str, Any] | None = None,
+        error: Exception | None = None,
+    ) -> dict[str, Any]:
+        owner_id = _required_text(owner_id, "owner_id")
+        session_id = _required_text(session_id, "session_id", 128)
+        if (snapshot is None) == (error is None):
+            raise ValueError("provide exactly one of snapshot or error")
+        now = _utc_now()
+        with self._connection() as conn:
+            session = conn.execute(
+                "SELECT id FROM paper_sessions WHERE owner_id=? AND id=?",
+                (owner_id, session_id),
+            ).fetchone()
+            if session is None:
+                raise LookupError("paper session not found")
+            previous = conn.execute(
+                "SELECT consecutive_failures FROM paper_feed_health WHERE session_id=? AND owner_id=?",
+                (session_id, owner_id),
+            ).fetchone()
+            failures = int(previous["consecutive_failures"]) if previous else 0
+            if snapshot is not None:
+                if not isinstance(snapshot, dict):
+                    raise ValueError("snapshot must be an object")
+                status, failures = "healthy", 0
+                error_type = error_message = None
+                digest = snapshot.get("snapshot_sha256")
+                quote_timestamp = (snapshot.get("quote") or {}).get("timestamp")
+                if not isinstance(digest, str) or len(digest) != 64:
+                    raise ValueError("snapshot digest is invalid")
+                if not isinstance(quote_timestamp, str) or not quote_timestamp:
+                    raise ValueError("snapshot quote timestamp is invalid")
+                last_success = now
+            else:
+                failures += 1
+                status = "unavailable" if failures >= 3 else "degraded"
+                error_type = type(error).__name__
+                error_message = str(error)[:240]
+                digest = None
+                quote_timestamp = None
+                last_success = None
+            conn.execute(
+                """INSERT INTO paper_feed_health
+                (session_id,owner_id,status,consecutive_failures,last_attempt_at,last_success_at,
+                 last_error_type,last_error_message,last_snapshot_sha256,last_quote_timestamp,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                  status=excluded.status,
+                  consecutive_failures=excluded.consecutive_failures,
+                  last_attempt_at=excluded.last_attempt_at,
+                  last_success_at=COALESCE(excluded.last_success_at,paper_feed_health.last_success_at),
+                  last_error_type=excluded.last_error_type,
+                  last_error_message=excluded.last_error_message,
+                  last_snapshot_sha256=COALESCE(excluded.last_snapshot_sha256,paper_feed_health.last_snapshot_sha256),
+                  last_quote_timestamp=COALESCE(excluded.last_quote_timestamp,paper_feed_health.last_quote_timestamp),
+                  updated_at=excluded.updated_at
+                """,
+                (session_id, owner_id, status, failures, now, last_success,
+                 error_type, error_message, digest, quote_timestamp, now),
+            )
+        return self.get_paper_feed_health(owner_id, session_id)
+
+    def get_paper_feed_health(self, owner_id: str, session_id: str) -> dict[str, Any] | None:
+        owner_id = _required_text(owner_id, "owner_id")
+        session_id = _required_text(session_id, "session_id", 128)
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM paper_feed_health WHERE owner_id=? AND session_id=?",
+                (owner_id, session_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "session_id": row["session_id"], "status": row["status"],
+            "consecutive_failures": row["consecutive_failures"],
+            "last_attempt_at": row["last_attempt_at"],
+            "last_success_at": row["last_success_at"],
+            "last_error_type": row["last_error_type"],
+            "last_error_message": row["last_error_message"],
+            "last_snapshot_sha256": row["last_snapshot_sha256"],
+            "last_quote_timestamp": row["last_quote_timestamp"],
+            "updated_at": row["updated_at"],
+        }
 
     def list_paper_trades(self, owner_id: str, session_id: str, limit: int = 200) -> list[dict[str, Any]]:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
