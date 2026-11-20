@@ -98,6 +98,8 @@ def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path
     assert opened["events"][0]["price"] == pytest.approx(100.1 * (1 + 8 / 10000))
     assert opened["quote"]["bid"] == 99.9
     assert opened["market_snapshot_sha256"] == "c" * 64
+    assert opened["events"][0]["market_snapshot_sha256"] == "c" * 64
+    assert opened["events"][0]["quote_timestamp"] == "2026-01-01T00:00:00+00:00"
     assert opened["cash"] < 10000
 
     # The same completed candle is idempotent and cannot create a duplicate fill.
