@@ -85,6 +85,12 @@ def capture_public_spot_snapshot(
             raw, columns=["timestamp", "open", "high", "low", "close", "volume"]
         ))
         completed = drop_incomplete_candles(frame, interval_ms, current_ms)
+        if len(completed) >= 2:
+            latest_gap_ms = (
+                completed["timestamp"].iloc[-1] - completed["timestamp"].iloc[-2]
+            ).total_seconds() * 1000
+            if latest_gap_ms > interval_ms * 1.5:
+                raise ValueError("recent completed OHLCV candles contain a data gap")
         candle = completed.iloc[-1]
         candle_open_ms = int(pd.Timestamp(candle["timestamp"]).timestamp() * 1000)
         candle_close_ms = candle_open_ms + interval_ms
