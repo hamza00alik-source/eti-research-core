@@ -67,6 +67,9 @@ def archive_ohlcv_snapshot(frame: pd.DataFrame, archive_root: str | os.PathLike[
     root = Path(archive_root).expanduser().resolve()
     directory = root / relative.parent
     directory.mkdir(parents=True, exist_ok=True)
+    directory = directory.resolve()
+    if root not in directory.parents:
+        raise ValueError("archive object directory escapes archive root")
     destination = directory / relative.name
 
     descriptor, temporary_name = tempfile.mkstemp(prefix=".eti-", dir=directory)
