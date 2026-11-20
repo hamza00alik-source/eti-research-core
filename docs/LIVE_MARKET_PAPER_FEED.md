@@ -12,7 +12,7 @@ ETI now has a read-only public spot snapshot collector in `eti.live_market.captu
 
 The collector fails closed when the market is not active spot, a quote timestamp is missing, the quote is stale, bid/ask values are invalid, the latest completed candle is stale, recent candles contain a gap, or the venue cannot provide the required data. The default maximum quote age is 30 seconds; candle freshness is bounded to one timeframe interval.
 
-The paper tick now requires a fresh, eligible snapshot aligned to the exact completed candle used for model features. It marks long positions at bid, simulates entries at ask plus configured slippage, and exits at bid minus configured slippage. Configured fees are still charged separately. Each paper fill event stores the quote timestamp, bid/ask, spread and snapshot digest for later audit. This is a conservative top-of-book approximation, not a queue-position, depth, partial-fill or market-impact model.
+The paper tick now requires a fresh, eligible snapshot aligned to the exact completed candle used for model features. Temporary exchange/network failures, stale or malformed quote data, stale candles and candle gaps are classified as retryable market-data failures. The durable worker retries a scheduled paper tick up to three attempts before marking that task failed. It marks long positions at bid, simulates entries at ask plus configured slippage, and exits at bid minus configured slippage. Configured fees are still charged separately. Each paper fill event stores the quote timestamp, bid/ask, spread and snapshot digest for later audit. This is a conservative top-of-book approximation, not a queue-position, depth, partial-fill or market-impact model.
 
 ## Run a single snapshot
 
@@ -40,6 +40,10 @@ Supported public spot venue clients are subject to CCXT and venue endpoint avail
 - Quote and OHLCV are separate REST requests. The paper tick checks candle alignment and rejects mismatches, but a venue can still change between requests.
 - Current paper fills remain simulated and cannot prove future execution quality or profitability.
 - Live order execution remains hard-disabled.
+
+## Feed supervision and health
+
+The existing ETI durable worker remains the scheduler; it polls running paper sessions at their configured candle interval. It now records per-session feed health in SQLite and exposes it through the authenticated `GET /v1/paper/sessions/{session_id}/health` endpoint. Health states are `healthy`, `degraded` (one or two consecutive failures), and `unavailable` (three or more consecutive failures). A successful eligible snapshot resets the consecutive-failure counter and stores the last quote timestamp and snapshot digest. The worker emits payload-free structured health events. This is supervised REST polling with bounded task retries, not a separate always-on WebSocket stream.
 
 ## Next required work before a meaningful paper pilot
 
