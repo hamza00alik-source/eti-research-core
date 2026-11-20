@@ -47,7 +47,7 @@ The existing ETI durable worker remains the scheduler; it polls running paper se
 
 ## Next required work before a meaningful paper pilot
 
-1. Run the durable worker under an external process supervisor with automatic restart, bounded backoff, heartbeat monitoring, rate-limit budgets and operational alerts.
+1. Deploy the existing Compose `worker` service (already configured with `restart: unless-stopped`) and add host-level monitoring/alerts for worker liveness, SQLite health, rate-limit budgets and prolonged stale feed status.
 2. Add longer-retention archival and integrity verification for the per-candle decision ledger, including periodic backups and restore tests.
 3. Add depth-aware simulated fills, partial fills, rejects, cancel/replace lifecycle and venue-specific fee schedules.
 4. Add restart/replay determinism, monitoring, alerting and a runbook.
