@@ -40,7 +40,22 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
         raise MarketDataUnavailable("public OHLCV history request failed") from exc
     if frame is None or frame.empty:
         raise MarketDataUnavailable("public OHLCV history is empty")
-    candle_at = frame.iloc[-1]["timestamp"].isoformat()
+    try:
+        candle_times = pd.to_datetime(frame["timestamp"], utc=True, errors="raise")
+        interval_seconds = pd.to_timedelta(session["timeframe"]).total_seconds()
+        deltas = candle_times.diff().dropna().dt.total_seconds()
+        if (
+            not candle_times.is_monotonic_increasing
+            or candle_times.duplicated().any()
+            or (deltas <= 0).any()
+            or ((deltas - interval_seconds).abs() > interval_seconds * 0.5).any()
+        ):
+            raise MarketDataUnavailable("paper feature history contains missing or irregular candles")
+    except MarketDataUnavailable:
+        raise
+    except Exception as exc:
+        raise MarketDataUnavailable("paper feature history timestamps are invalid") from exc
+    candle_at = candle_times.iloc[-1].isoformat()
     if session["last_processed_candle"] and candle_at <= session["last_processed_candle"]:
         return {"status": session["status"], "processed": False, "reason": "candle_already_processed"}
 
