@@ -98,9 +98,22 @@ def capture_public_spot_snapshot(
             frame = validate_ohlcv(pd.DataFrame(
                 raw, columns=["timestamp", "open", "high", "low", "close", "volume"]
             ))
-            completed = drop_incomplete_candles(frame, interval_ms, current_ms)
         except Exception as exc:
             raise MarketDataUnavailable("venue returned invalid OHLCV data") from exc
+
+        try:
+            ticker = exchange.fetch_ticker(symbol)
+        except Exception as exc:
+            raise MarketDataUnavailable("exchange ticker request failed") from exc
+        if not isinstance(ticker, dict):
+            raise MarketDataUnavailable("venue returned an invalid ticker")
+        # Take the local/exchange clock after the quote request so network latency
+        # does not make a newly fetched ticker appear to be future-dated.
+        current_ms = int(exchange.milliseconds() if now_ms is None else now_ms)
+        try:
+            completed = drop_incomplete_candles(frame, interval_ms, current_ms)
+        except Exception as exc:
+            raise MarketDataUnavailable("venue returned invalid completed-candle data") from exc
         if completed.empty:
             raise MarketDataUnavailable("venue returned no completed OHLCV candles")
         if len(completed) >= 2:
@@ -115,16 +128,6 @@ def capture_public_spot_snapshot(
         candle_age_ms = current_ms - candle_close_ms
         if candle_age_ms < 0 or candle_age_ms > interval_ms * max_candle_age_intervals:
             raise MarketDataUnavailable("latest completed candle is stale")
-
-        try:
-            ticker = exchange.fetch_ticker(symbol)
-        except Exception as exc:
-            raise MarketDataUnavailable("exchange ticker request failed") from exc
-        if not isinstance(ticker, dict):
-            raise MarketDataUnavailable("venue returned an invalid ticker")
-        # Take the local/exchange clock after the quote request so network latency
-        # does not make a newly fetched ticker appear to be future-dated.
-        current_ms = int(exchange.milliseconds() if now_ms is None else now_ms)
         quote_timestamp = ticker.get("timestamp")
         if (isinstance(quote_timestamp, bool)
                 or not isinstance(quote_timestamp, (int, float))
