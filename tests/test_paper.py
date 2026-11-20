@@ -104,6 +104,11 @@ def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path
     assert persisted["market_snapshot_sha256"] == "c" * 64
     assert persisted["bid"] == 99.9
     assert persisted["ask"] == 100.1
+    decisions = store.list_paper_decisions("owner", session["id"])
+    assert len(decisions) == 1
+    assert decisions[0]["market_snapshot"]["snapshot_sha256"] == "c" * 64
+    assert decisions[0]["prediction"] == 2
+    assert decisions[0]["event_types"] == ["entry"]
     assert opened["cash"] < 10000
 
     # The same completed candle is idempotent and cannot create a duplicate fill.
@@ -133,6 +138,7 @@ def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path
     assert closed["position_qty"] == 0
     assert closed["events"][0]["event_type"] == "exit"
     assert len(store.list_paper_trades("owner", session["id"])) == 2
+    assert len(store.list_paper_decisions("owner", session["id"])) == 2
 
 
 def test_paper_session_requires_approved_crypto_spot_model(tmp_path):
