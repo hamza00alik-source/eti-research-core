@@ -65,3 +65,13 @@ def test_archive_rejects_naive_timestamps(tmp_path):
     data["timestamp"] = data["timestamp"].dt.tz_localize(None)
     with pytest.raises(ValueError, match="timezone-aware"):
         archive_ohlcv_snapshot(data, tmp_path)
+
+def test_archive_rejects_symlinked_hash_directory_escape(tmp_path):
+    probe = archive_ohlcv_snapshot(frame(), tmp_path / "probe")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / probe["sha256"][:2]).symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="directory escapes"):
+        archive_ohlcv_snapshot(frame(), root)
