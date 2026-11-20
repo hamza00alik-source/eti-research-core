@@ -16,6 +16,8 @@ import pandas as pd
 
 from .data import drop_incomplete_candles, validate_ohlcv
 
+_SUPPORTED_PUBLIC_SPOT_VENUES = {"binance", "mexc", "coinbaseexchange", "kraken"}
+
 
 def _finite_positive(value: Any, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -54,6 +56,8 @@ def capture_public_spot_snapshot(
         raise ValueError("venue is required")
     if not isinstance(symbol, str) or not symbol.strip():
         raise ValueError("symbol is required")
+    if venue.strip().lower() not in _SUPPORTED_PUBLIC_SPOT_VENUES:
+        raise ValueError("venue is not in ETI supported public spot venue allowlist")
     if isinstance(max_quote_age_ms, bool) or not isinstance(max_quote_age_ms, int) or max_quote_age_ms <= 0:
         raise ValueError("max_quote_age_ms must be a positive integer")
     if (isinstance(max_candle_age_intervals, bool)
