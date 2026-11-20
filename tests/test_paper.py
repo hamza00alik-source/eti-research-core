@@ -134,7 +134,7 @@ def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path
         def __init__(self, venue):
             pass
         def fetch_ohlcv(self, symbol, timeframe, limit):
-            frame = _candles("2026-01-02")
+            frame = _candles("2026-01-01T01:00:00")
             return frame
     monkeypatch.setattr(paper, "CcxtPublicProvider", NextProvider)
     monkeypatch.setattr(paper, "build_features", lambda frame: pd.DataFrame(
@@ -142,7 +142,7 @@ def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path
     ))
     closed = run_paper_tick(
         {"owner_id": "owner", "session_id": session["id"]}, store,
-        market_snapshot_provider=lambda *args: _market_snapshot(_candles("2026-01-02")),
+        market_snapshot_provider=lambda *args: _market_snapshot(_candles("2026-01-01T01:00:00")),
     )
     assert closed["processed"] is True
     assert closed["position_qty"] == 0
@@ -222,7 +222,7 @@ def test_paper_tick_enforces_stop_loss_and_does_not_reenter_same_candle(tmp_path
             price = 100.0 if type(self).calls == 1 else 94.0
             return pd.DataFrame({
                 "timestamp": pd.date_range(
-                    "2026-02-01" if self.calls == 1 else "2026-02-02",
+                    "2026-02-01" if self.calls == 1 else "2026-02-01T01:00:00",
                     periods=80, freq="h", tz="UTC"
                 ),
                 "open": [price] * 80, "high": [price * 1.01] * 80,
@@ -248,7 +248,7 @@ def test_paper_tick_enforces_stop_loss_and_does_not_reenter_same_candle(tmp_path
     stopped = run_paper_tick(
         {"owner_id": "owner", "session_id": session["id"]}, store,
         market_snapshot_provider=lambda *args: _market_snapshot(
-            _candles("2026-02-02"), bid=94.0, ask=94.1, last=94.0
+            _candles("2026-02-01T01:00:00"), bid=94.0, ask=94.1, last=94.0
         ),
     )
     assert stopped["position_qty"] == 0
