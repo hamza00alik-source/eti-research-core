@@ -165,8 +165,10 @@ async function loadPaperSessions(){
     ' · Equity '+Number(session.equity).toFixed(2)+' · Cash '+Number(session.cash).toFixed(2)+
     ' · Realized P/L '+Number(session.realized_pnl).toFixed(2)+
     ' · Max drawdown '+(Number(session.max_drawdown)*100).toFixed(2)+'%';
+   const feedView=document.createElement('p');feedView.textContent='Feed health not checked.';
    const historyView=document.createElement('pre');historyView.textContent='Trade history not loaded.';
-   card.append(title,details,historyView);
+   const decisionsView=document.createElement('pre');decisionsView.textContent='Per-candle decision audit not loaded.';
+   card.append(title,details,feedView,historyView,decisionsView);
    if(session.status!=='stopped'){
     const button=document.createElement('button');
     button.type='button';button.className='secondary-button';
@@ -181,6 +183,33 @@ async function loadPaperSessions(){
     });
     card.append(button);
    }
+   const healthButton=document.createElement('button');healthButton.type='button';healthButton.className='secondary-button';
+   healthButton.textContent='Refresh feed health';
+   healthButton.addEventListener('click',async()=>{
+    healthButton.disabled=true;
+    try{
+     const health=await api('/v1/paper/sessions/'+encodeURIComponent(session.id)+'/health');
+     const feed=health.feed_health||{};
+     feedView.textContent='Feed '+String(feed.status||'unknown').toUpperCase()+
+      ' · Freshness '+String(feed.freshness_status||'unknown')+
+      ' · Consecutive failures '+Number(feed.consecutive_failures||0)+
+      (feed.last_attempt_at?' · Last attempt '+feed.last_attempt_at:'')+
+      (feed.last_error_message?' · Last error '+feed.last_error_message:'');
+     healthButton.textContent='Feed health refreshed';
+    }catch(error){feedView.textContent='Feed health unavailable: '+error.message}
+    finally{healthButton.disabled=false}
+   });
+   const decisionsButton=document.createElement('button');decisionsButton.type='button';decisionsButton.className='secondary-button';
+   decisionsButton.textContent='Refresh decision audit';
+   decisionsButton.addEventListener('click',async()=>{
+    decisionsButton.disabled=true;
+    try{
+     const audit=await api('/v1/paper/sessions/'+encodeURIComponent(session.id)+'/decisions?limit=50');
+     decisionsView.textContent=JSON.stringify(audit.items,null,2);
+     decisionsButton.textContent='Decision audit refreshed';
+    }catch(error){decisionsView.textContent='Decision audit unavailable: '+error.message}
+    finally{decisionsButton.disabled=false}
+   });
    const trades=document.createElement('button');trades.type='button';trades.className='secondary-button';
    trades.textContent='Refresh trade history';
    trades.addEventListener('click',async()=>{
@@ -190,7 +219,7 @@ async function loadPaperSessions(){
      trades.textContent='Trade history refreshed';
     }catch(error){$('#paper-message').textContent=error.message}
    });
-   card.append(trades);list.append(card);
+   card.append(healthButton,decisionsButton,trades);list.append(card);
   }
  }catch(error){list.textContent='Paper sessions unavailable: '+error.message}
 }
