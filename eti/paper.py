@@ -18,6 +18,10 @@ from .live_market import MarketDataUnavailable, capture_public_spot_snapshot
 from .risk import RiskEngine, RiskRequest
 
 
+class PaperSessionGap(ValueError):
+    """A paper session missed one or more completed bars and must be restarted."""
+
+
 def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=None) -> dict[str, Any]:
     owner_id = payload.get("owner_id")
     session_id = payload.get("session_id")
@@ -60,6 +64,15 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
     candle_at = candle_times.iloc[-1].isoformat()
     if session["last_processed_candle"] and candle_at <= session["last_processed_candle"]:
         return {"status": session["status"], "processed": False, "reason": "candle_already_processed"}
+    if session["last_processed_candle"]:
+        previous_candle = pd.Timestamp(session["last_processed_candle"])
+        current_candle = pd.Timestamp(candle_at)
+        expected_interval = pd.to_timedelta(session["timeframe"])
+        if current_candle - previous_candle > expected_interval * 1.5:
+            store.set_paper_session_status(owner_id, session_id, "stopped")
+            raise PaperSessionGap(
+                "paper session missed one or more completed candles; start a new session to avoid silent gaps"
+            )
 
     snapshot_provider = market_snapshot_provider or capture_public_spot_snapshot
     try:
