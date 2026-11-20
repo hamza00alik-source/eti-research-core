@@ -355,3 +355,44 @@ def test_worker_retries_paper_feed_three_times_then_marks_unavailable(tmp_path, 
     health = store.get_paper_feed_health("owner", session["id"])
     assert health["status"] == "unavailable"
     assert health["consecutive_failures"] == 3
+
+
+def test_paper_tick_rejects_tampered_market_snapshot_digest(tmp_path, monkeypatch):
+    import eti.paper as paper
+    from eti.live_market import MarketDataUnavailable
+
+    store = MemoryStore(tmp_path / "paper-snapshot-tamper.sqlite3")
+    workspace = store.create_workspace("owner", "paper")
+    _approved_model(store)
+    session = store.create_paper_session(
+        "owner", workspace["id"], "eti-mexc-btc-usdt-1h", "paper-test",
+        "mexc", "BTC/USDT", "1h", 1000.0, {},
+    )
+    store.set_paper_session_status("owner", session["id"], "running")
+
+    class FakeProvider:
+        def __init__(self, venue):
+            pass
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            return _candles("2026-03-01")
+
+    class FakeArtifacts:
+        def load_model(self, uri, digest):
+            return _FakeModel()
+
+    monkeypatch.setattr(paper, "CcxtPublicProvider", FakeProvider)
+    monkeypatch.setattr(paper, "ModelArtifactStore", FakeArtifacts)
+    monkeypatch.setattr(paper, "build_features", lambda frame: pd.DataFrame(
+        [[0.0] * len(FEATURE_COLUMNS)], columns=FEATURE_COLUMNS, index=[79]
+    ))
+    snapshot = _market_snapshot(_candles("2026-03-01"))
+    snapshot["snapshot_sha256"] = "0" * 64
+    with pytest.raises(MarketDataUnavailable, match="digest verification failed"):
+        run_paper_tick(
+            {"owner_id": "owner", "session_id": session["id"]}, store,
+            market_snapshot_provider=lambda *args: snapshot,
+        )
+    unchanged = store.get_paper_session("owner", session["id"])
+    assert unchanged["last_processed_candle"] is None
+    assert unchanged["cash"] == 1000.0
+    assert store.list_paper_decisions("owner", session["id"]) == []
