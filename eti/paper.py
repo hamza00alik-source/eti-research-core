@@ -2,19 +2,27 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import hashlib
+import json
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from .artifacts import ModelArtifactStore
 from .config import RiskConfig
 from .features import build_features
 from .portfolio import PortfolioLimits, assess_portfolio
 from .providers import CcxtPublicProvider
+from .live_market import MarketDataUnavailable, capture_public_spot_snapshot
 from .risk import RiskEngine, RiskRequest
 
 
-def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
+class PaperSessionGap(ValueError):
+    """A paper session missed one or more completed bars and must be restarted."""
+
+
+def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=None) -> dict[str, Any]:
     owner_id = payload.get("owner_id")
     session_id = payload.get("session_id")
     if not isinstance(owner_id, str) or not owner_id or not isinstance(session_id, str) or not session_id:
@@ -30,9 +38,99 @@ def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
         store.set_paper_session_status(owner_id, session_id, "stopped")
         return {"status": "stopped", "processed": False, "reason": "model_not_approved"}
 
-    frame = CcxtPublicProvider(session["venue"]).fetch_ohlcv(
-        session["symbol"], session["timeframe"], 200
-    )
+    try:
+        frame = CcxtPublicProvider(session["venue"]).fetch_ohlcv(
+            session["symbol"], session["timeframe"], 200
+        )
+    except Exception as exc:
+        raise MarketDataUnavailable("public OHLCV history request failed") from exc
+    if frame is None or frame.empty:
+        raise MarketDataUnavailable("public OHLCV history is empty")
+    try:
+        candle_times = pd.to_datetime(frame["timestamp"], utc=True, errors="raise")
+        interval_seconds = pd.to_timedelta(session["timeframe"]).total_seconds()
+        deltas = candle_times.diff().dropna().dt.total_seconds()
+        if (
+            not candle_times.is_monotonic_increasing
+            or candle_times.duplicated().any()
+            or (deltas <= 0).any()
+            or ((deltas - interval_seconds).abs() > interval_seconds * 0.5).any()
+        ):
+            raise MarketDataUnavailable("paper feature history contains missing or irregular candles")
+    except MarketDataUnavailable:
+        raise
+    except Exception as exc:
+        raise MarketDataUnavailable("paper feature history timestamps are invalid") from exc
+    candle_at = candle_times.iloc[-1].isoformat()
+    if session["last_processed_candle"] and candle_at <= session["last_processed_candle"]:
+        return {"status": session["status"], "processed": False, "reason": "candle_already_processed"}
+    if session["last_processed_candle"]:
+        previous_candle = pd.Timestamp(session["last_processed_candle"])
+        current_candle = pd.Timestamp(candle_at)
+        expected_interval = pd.to_timedelta(session["timeframe"])
+        if current_candle - previous_candle > expected_interval * 1.5:
+            store.set_paper_session_status(owner_id, session_id, "stopped")
+            raise PaperSessionGap(
+                "paper session missed one or more completed candles; start a new session to avoid silent gaps"
+            )
+
+    snapshot_provider = market_snapshot_provider or capture_public_spot_snapshot
+    try:
+        market_snapshot = snapshot_provider(session["venue"], session["symbol"], session["timeframe"])
+    except MarketDataUnavailable:
+        raise
+    except Exception as exc:
+        raise MarketDataUnavailable("public quote snapshot request failed") from exc
+    quality = market_snapshot.get("quality") if isinstance(market_snapshot, dict) else None
+    if (
+        not isinstance(market_snapshot, dict)
+        or not isinstance(quality, dict)
+        or market_snapshot.get("schema_version") != "eti.live_public_market_snapshot.v1"
+        or market_snapshot.get("venue") != session["venue"]
+        or market_snapshot.get("symbol") != session["symbol"]
+        or market_snapshot.get("market_type") != "spot"
+        or market_snapshot.get("timeframe") != session["timeframe"]
+        or quality.get("paper_eligible") is not True
+        or quality.get("quote_fresh") is not True
+        or quality.get("candle_fresh") is not True
+    ):
+        raise MarketDataUnavailable("fresh, eligible public spot market snapshot is required")
+    try:
+        canonical_snapshot = {
+            key: value for key, value in market_snapshot.items()
+            if key != "snapshot_sha256"
+        }
+        calculated_digest = hashlib.sha256(json.dumps(
+            canonical_snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")).hexdigest()
+    except (TypeError, ValueError) as exc:
+        raise MarketDataUnavailable("public market snapshot is not canonical JSON") from exc
+    if market_snapshot.get("snapshot_sha256") != calculated_digest:
+        raise MarketDataUnavailable("public market snapshot digest verification failed")
+    quote = market_snapshot.get("quote")
+    if not isinstance(quote, dict):
+        raise MarketDataUnavailable("public market snapshot quote is invalid")
+    bid = float(quote.get("bid", 0))
+    ask = float(quote.get("ask", 0))
+    price = float(quote.get("last", 0))
+    if not np.isfinite([bid, ask, price]).all() or bid <= 0 or ask < bid or price <= 0:
+        raise MarketDataUnavailable("live public quote contains invalid bid/ask/last values")
+    candle_evidence = market_snapshot.get("latest_completed_candle")
+    if not isinstance(candle_evidence, dict):
+        raise MarketDataUnavailable("public market snapshot completed-candle evidence is invalid")
+    snapshot_candle_at = candle_evidence.get("open_time")
+    if snapshot_candle_at is None or pd.Timestamp(snapshot_candle_at) != pd.Timestamp(frame.iloc[-1]["timestamp"]):
+        raise MarketDataUnavailable("live quote snapshot and feature candles are not aligned; retry the paper tick")
+    try:
+        quote_time = pd.to_datetime(quote.get("timestamp"), utc=True, errors="raise")
+        candle_close_time = pd.to_datetime(candle_evidence.get("close_time"), utc=True, errors="raise")
+        if quote_time < candle_close_time:
+            raise MarketDataUnavailable("live quote predates the completed feature candle close")
+    except MarketDataUnavailable:
+        raise
+    except Exception as exc:
+        raise MarketDataUnavailable("public market snapshot timestamps are invalid") from exc
+
     features = build_features(frame).dropna()
     if features.empty:
         raise ValueError("no completed candle has a full feature set")
@@ -51,10 +149,6 @@ def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
     probabilities = probabilities[0]
     prediction = int(np.argmax(probabilities))
     confidence = float(probabilities[prediction])
-    price = float(frame.iloc[-1]["close"])
-    candle_at = frame.iloc[-1]["timestamp"].isoformat()
-    if session["last_processed_candle"] and candle_at <= session["last_processed_candle"]:
-        return {"status": session["status"], "processed": False, "reason": "candle_already_processed"}
 
     risk_values = session["risk_config"]
     risk_config = RiskConfig(
@@ -87,7 +181,7 @@ def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
     if session["daily_date"] != daily_date:
         daily_date, daily_start_equity = daily_date, float(session["equity"])
 
-    mark_equity = cash + quantity * price
+    mark_equity = cash + quantity * bid
     peak_equity = max(peak_equity, mark_equity)
     drawdown = max(0.0, 1.0 - mark_equity / peak_equity) if peak_equity > 0 else 1.0
     daily_pnl_fraction = (
@@ -107,13 +201,13 @@ def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
         daily_pnl_fraction <= -risk_config.max_daily_loss
         or drawdown >= risk_config.max_drawdown
     )
-    stop_breach = quantity > 0 and entry_price is not None and price <= float(entry_price) * 0.95
+    stop_breach = quantity > 0 and entry_price is not None and bid <= float(entry_price) * 0.95
     exit_guard = risk_breach or stop_breach
     should_exit = quantity > 0 and (
         prediction != 2 or confidence < confidence_threshold or exit_guard
     )
     if should_exit:
-        fill_price = price * (1.0 - slippage_rate)
+        fill_price = bid * (1.0 - slippage_rate)
         notional = quantity * fill_price
         fee = notional * fee_rate
         pnl = notional - fee - position_cost
@@ -124,6 +218,10 @@ def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
             "quantity": quantity, "price": fill_price, "notional": notional,
             "fee": fee, "slippage_bps": slippage_bps, "realized_pnl": pnl,
             "prediction": prediction, "confidence": confidence,
+            "bid": bid, "ask": ask,
+            "spread_bps": float(quote.get("spread_bps", 0.0)),
+            "quote_timestamp": quote.get("timestamp"),
+            "market_snapshot_sha256": market_snapshot.get("snapshot_sha256"),
             "risk_decision": {"reason": "daily_loss_or_drawdown_limit" if risk_breach else ("fixed_five_percent_stop" if stop_breach else "model_signal_exit"),
                               "live_execution": False},
         })
@@ -131,10 +229,10 @@ def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
 
     if quantity <= 0 and prediction == 2 and confidence >= confidence_threshold and not exit_guard:
         requested = mark_equity * risk_config.max_position_fraction
-        stop_price = price * 0.95
+        stop_price = bid * 0.95
         risk_decision = RiskEngine(risk_config).assess(RiskRequest(
             equity=max(mark_equity, 1e-9),
-            entry_price=price,
+            entry_price=ask,
             stop_price=stop_price,
             requested_notional=requested,
             gross_exposure=0.0,
@@ -160,7 +258,7 @@ def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
             cash / (1.0 + fee_rate) if cash > 0 else 0.0,
         )
         if risk_decision.approved and portfolio and portfolio.approved and allowed_notional > 0:
-            fill_price = price * (1.0 + slippage_rate)
+            fill_price = ask * (1.0 + slippage_rate)
             fee = allowed_notional * fee_rate
             quantity = allowed_notional / fill_price
             cash -= allowed_notional + fee
@@ -175,6 +273,10 @@ def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
                 "event_type": "entry", "quantity": quantity, "price": fill_price,
                 "notional": allowed_notional, "fee": fee, "slippage_bps": slippage_bps,
                 "realized_pnl": 0.0, "prediction": prediction, "confidence": confidence,
+                "bid": bid, "ask": ask,
+                "spread_bps": float(quote.get("spread_bps", 0.0)),
+                "quote_timestamp": quote.get("timestamp"),
+                "market_snapshot_sha256": market_snapshot.get("snapshot_sha256"),
                 "risk_decision": decision_detail,
             })
         else:
@@ -185,7 +287,7 @@ def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
                 "live_execution": False,
             }
 
-    equity = cash + quantity * price
+    equity = cash + quantity * bid
     peak_equity = max(peak_equity, equity)
     max_drawdown = max(float(session["max_drawdown"]),
                        max(0.0, 1.0 - equity / peak_equity) if peak_equity > 0 else 1.0)
@@ -207,11 +309,21 @@ def run_paper_tick(payload: dict[str, Any], store) -> dict[str, Any]:
             "daily_start_equity": daily_start_equity,
         },
         events,
+        decision_evidence={
+            "market_snapshot": market_snapshot,
+            "prediction": prediction,
+            "confidence": confidence,
+            "decision": decision_detail,
+        },
     )
     return {
         "status": updated["status"], "processed": True,
         "session_id": session_id, "symbol": session["symbol"],
         "candle_at": candle_at, "price": price,
+        "quote": {"bid": bid, "ask": ask, "last": price,
+                  "spread_bps": float(quote.get("spread_bps", 0.0)),
+                  "timestamp": quote.get("timestamp")},
+        "market_snapshot_sha256": market_snapshot.get("snapshot_sha256"),
         "prediction": prediction, "probabilities": {
             "short": float(probabilities[0]), "flat": float(probabilities[1]),
             "long": float(probabilities[2]),

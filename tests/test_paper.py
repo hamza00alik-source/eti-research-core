@@ -1,5 +1,9 @@
+import hashlib
+import json
+
 import numpy as np
 import pandas as pd
+import pytest
 
 from eti.features import FEATURE_COLUMNS
 from eti.paper import run_paper_tick
@@ -33,6 +37,33 @@ def _candles(timestamp):
         "low": [99.0] * 80, "close": [100.0] * 80,
         "volume": [1000.0] * 80,
     })
+
+
+def _market_snapshot(frame, bid=99.9, ask=100.1, last=100.0):
+    candle_open = pd.Timestamp(frame.iloc[-1]["timestamp"])
+    candle_close = candle_open + pd.Timedelta(hours=1)
+    quote_timestamp = (candle_close + pd.Timedelta(seconds=5)).isoformat()
+    snapshot = {
+        "schema_version": "eti.live_public_market_snapshot.v1",
+        "venue": "mexc", "market_type": "spot", "symbol": "BTC/USDT",
+        "timeframe": "1h",
+        "quality": {
+            "paper_eligible": True, "quote_fresh": True, "candle_fresh": True,
+            "authenticated_data": False, "order_execution": False,
+        },
+        "quote": {
+            "bid": bid, "ask": ask, "last": last, "spread_bps": 20.0,
+            "timestamp": quote_timestamp,
+        },
+        "latest_completed_candle": {
+            "open_time": candle_open.isoformat(),
+            "close_time": candle_close.isoformat(),
+        },
+    }
+    snapshot["snapshot_sha256"] = hashlib.sha256(json.dumps(
+        snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")).hexdigest()
+    return snapshot
 
 
 def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path, monkeypatch):
@@ -70,15 +101,35 @@ def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path
         [[0.0] * len(FEATURE_COLUMNS)], columns=FEATURE_COLUMNS, index=[79]
     ))
 
-    opened = run_paper_tick({"owner_id": "owner", "session_id": session["id"]}, store)
+    opened = run_paper_tick(
+        {"owner_id": "owner", "session_id": session["id"]}, store,
+        market_snapshot_provider=lambda *args: _market_snapshot(_candles("2026-01-01")),
+    )
     assert opened["processed"] is True
     assert opened["live_execution"] is False
     assert opened["position_qty"] > 0
     assert opened["events"][0]["event_type"] == "entry"
+    assert opened["events"][0]["price"] == pytest.approx(100.1 * (1 + 8 / 10000))
+    assert opened["quote"]["bid"] == 99.9
+    assert opened["market_snapshot_sha256"] == _market_snapshot(_candles("2026-01-01"))["snapshot_sha256"]
+    assert opened["events"][0]["market_snapshot_sha256"] == opened["market_snapshot_sha256"]
+    assert opened["events"][0]["quote_timestamp"] == "2026-01-04T08:00:05+00:00"
+    persisted = store.list_paper_trades("owner", session["id"])[0]["market_evidence"]
+    assert persisted["market_snapshot_sha256"] == opened["market_snapshot_sha256"]
+    assert persisted["bid"] == 99.9
+    assert persisted["ask"] == 100.1
+    decisions = store.list_paper_decisions("owner", session["id"])
+    assert len(decisions) == 1
+    assert decisions[0]["market_snapshot"]["snapshot_sha256"] == opened["market_snapshot_sha256"]
+    assert decisions[0]["prediction"] == 2
+    assert decisions[0]["event_types"] == ["entry"]
     assert opened["cash"] < 10000
 
     # The same completed candle is idempotent and cannot create a duplicate fill.
-    duplicate = run_paper_tick({"owner_id": "owner", "session_id": session["id"]}, store)
+    duplicate = run_paper_tick(
+        {"owner_id": "owner", "session_id": session["id"]}, store,
+        market_snapshot_provider=lambda *args: _market_snapshot(_candles("2026-01-01")),
+    )
     assert duplicate["processed"] is False
     assert len(store.list_paper_trades("owner", session["id"])) == 1
 
@@ -87,17 +138,21 @@ def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path
         def __init__(self, venue):
             pass
         def fetch_ohlcv(self, symbol, timeframe, limit):
-            frame = _candles("2026-01-02")
+            frame = _candles("2026-01-01T01:00:00")
             return frame
     monkeypatch.setattr(paper, "CcxtPublicProvider", NextProvider)
     monkeypatch.setattr(paper, "build_features", lambda frame: pd.DataFrame(
         [[0.0] * len(FEATURE_COLUMNS)], columns=FEATURE_COLUMNS, index=[79]
     ))
-    closed = run_paper_tick({"owner_id": "owner", "session_id": session["id"]}, store)
+    closed = run_paper_tick(
+        {"owner_id": "owner", "session_id": session["id"]}, store,
+        market_snapshot_provider=lambda *args: _market_snapshot(_candles("2026-01-01T01:00:00")),
+    )
     assert closed["processed"] is True
     assert closed["position_qty"] == 0
     assert closed["events"][0]["event_type"] == "exit"
     assert len(store.list_paper_trades("owner", session["id"])) == 2
+    assert len(store.list_paper_decisions("owner", session["id"])) == 2
 
 
 def test_paper_session_requires_approved_crypto_spot_model(tmp_path):
@@ -171,7 +226,7 @@ def test_paper_tick_enforces_stop_loss_and_does_not_reenter_same_candle(tmp_path
             price = 100.0 if type(self).calls == 1 else 94.0
             return pd.DataFrame({
                 "timestamp": pd.date_range(
-                    "2026-02-01" if self.calls == 1 else "2026-02-02",
+                    "2026-02-01" if self.calls == 1 else "2026-02-01T01:00:00",
                     periods=80, freq="h", tz="UTC"
                 ),
                 "open": [price] * 80, "high": [price * 1.01] * 80,
@@ -189,9 +244,210 @@ def test_paper_tick_enforces_stop_loss_and_does_not_reenter_same_candle(tmp_path
         [[0.0] * len(FEATURE_COLUMNS)], columns=FEATURE_COLUMNS, index=[79]
     ))
 
-    opened = run_paper_tick({"owner_id": "owner", "session_id": session["id"]}, store)
+    opened = run_paper_tick(
+        {"owner_id": "owner", "session_id": session["id"]}, store,
+        market_snapshot_provider=lambda *args: _market_snapshot(_candles("2026-02-01")),
+    )
     assert opened["position_qty"] > 0
-    stopped = run_paper_tick({"owner_id": "owner", "session_id": session["id"]}, store)
+    stopped = run_paper_tick(
+        {"owner_id": "owner", "session_id": session["id"]}, store,
+        market_snapshot_provider=lambda *args: _market_snapshot(
+            _candles("2026-02-01T01:00:00"), bid=94.0, ask=94.1, last=94.0
+        ),
+    )
     assert stopped["position_qty"] == 0
     assert stopped["events"][0]["event_type"] == "risk_stop"
     assert stopped["events"][0]["risk_decision"]["reason"] == "fixed_five_percent_stop"
+
+
+def test_paper_feed_health_degrades_after_failures_and_recovers(tmp_path):
+    from eti.live_market import MarketDataUnavailable
+    store = MemoryStore(tmp_path / "paper-feed-health.sqlite3")
+    workspace = store.create_workspace("owner", "paper")
+    _approved_model(store)
+    session = store.create_paper_session(
+        "owner", workspace["id"], "eti-mexc-btc-usdt-1h", "paper-test",
+        "mexc", "BTC/USDT", "1h", 1000.0, {},
+    )
+    first = store.record_paper_feed_health(
+        "owner", session["id"], error=MarketDataUnavailable("temporary quote outage")
+    )
+    assert first["status"] == "degraded"
+    assert first["consecutive_failures"] == 1
+    assert first["last_error_type"] == "MarketDataUnavailable"
+
+    second = store.record_paper_feed_health(
+        "owner", session["id"], error=MarketDataUnavailable("temporary quote outage")
+    )
+    assert second["status"] == "degraded"
+    assert second["consecutive_failures"] == 2
+
+    third = store.record_paper_feed_health(
+        "owner", session["id"], error=MarketDataUnavailable("temporary quote outage")
+    )
+    assert third["status"] == "unavailable"
+    assert third["consecutive_failures"] == 3
+
+    recovered = store.record_paper_feed_health(
+        "owner", session["id"],
+        snapshot={
+            "snapshot_sha256": "d" * 64,
+            "quote": {"timestamp": "2026-11-20T10:00:00+00:00"},
+        },
+    )
+    assert recovered["status"] == "healthy"
+    assert recovered["consecutive_failures"] == 0
+    assert recovered["last_error_type"] is None
+    assert recovered["last_snapshot_sha256"] == "d" * 64
+
+
+def test_worker_paper_tick_wrapper_records_retryable_feed_failure(tmp_path, monkeypatch):
+    from eti.agents import AgentCapabilityRegistry
+    from eti.live_market import MarketDataUnavailable
+    import eti.worker as worker_module
+
+    store = MemoryStore(tmp_path / "paper-feed-worker.sqlite3")
+    workspace = store.create_workspace("owner", "paper")
+    _approved_model(store)
+    session = store.create_paper_session(
+        "owner", workspace["id"], "eti-mexc-btc-usdt-1h", "paper-test",
+        "mexc", "BTC/USDT", "1h", 1000.0, {},
+    )
+    worker = worker_module.AgentWorker(store, registry=AgentCapabilityRegistry())
+
+    def unavailable(payload, store):
+        raise MarketDataUnavailable("temporary quote outage")
+
+    monkeypatch.setattr(worker_module, "run_paper_tick", unavailable)
+    with pytest.raises(MarketDataUnavailable):
+        worker._run_paper_tick_supervised({
+            "owner_id": "owner", "session_id": session["id"],
+        })
+    health = store.get_paper_feed_health("owner", session["id"])
+    assert health["status"] == "degraded"
+    assert health["consecutive_failures"] == 1
+
+
+def test_worker_retries_paper_feed_three_times_then_marks_unavailable(tmp_path, monkeypatch):
+    from eti.live_market import MarketDataUnavailable
+    import eti.worker as worker_module
+
+    store = MemoryStore(tmp_path / "paper-feed-retry.sqlite3")
+    workspace = store.create_workspace("owner", "paper")
+    _approved_model(store)
+    session = store.create_paper_session(
+        "owner", workspace["id"], "eti-mexc-btc-usdt-1h", "paper-test",
+        "mexc", "BTC/USDT", "1h", 1000.0, {},
+    )
+    store.set_paper_session_status("owner", session["id"], "running")
+    assert store.enqueue_due_paper_tasks() == 1
+
+    def unavailable(payload, store):
+        raise MarketDataUnavailable("temporary quote outage")
+
+    monkeypatch.setattr(worker_module, "run_paper_tick", unavailable)
+    worker = worker_module.AgentWorker(store)
+    first = worker.run_once()
+    assert first["status"] == "queued"
+    assert first["attempt_count"] == 1
+    second = worker.run_once()
+    assert second["status"] == "queued"
+    assert second["attempt_count"] == 2
+    third = worker.run_once()
+    assert third["status"] == "failed"
+    assert third["attempt_count"] == 3
+    health = store.get_paper_feed_health("owner", session["id"])
+    assert health["status"] == "unavailable"
+    assert health["consecutive_failures"] == 3
+
+
+def test_paper_tick_rejects_tampered_market_snapshot_digest(tmp_path, monkeypatch):
+    import eti.paper as paper
+    from eti.live_market import MarketDataUnavailable
+
+    store = MemoryStore(tmp_path / "paper-snapshot-tamper.sqlite3")
+    workspace = store.create_workspace("owner", "paper")
+    _approved_model(store)
+    session = store.create_paper_session(
+        "owner", workspace["id"], "eti-mexc-btc-usdt-1h", "paper-test",
+        "mexc", "BTC/USDT", "1h", 1000.0, {},
+    )
+    store.set_paper_session_status("owner", session["id"], "running")
+
+    class FakeProvider:
+        def __init__(self, venue):
+            pass
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            return _candles("2026-03-01")
+
+    class FakeArtifacts:
+        def load_model(self, uri, digest):
+            return _FakeModel()
+
+    monkeypatch.setattr(paper, "CcxtPublicProvider", FakeProvider)
+    monkeypatch.setattr(paper, "ModelArtifactStore", FakeArtifacts)
+    monkeypatch.setattr(paper, "build_features", lambda frame: pd.DataFrame(
+        [[0.0] * len(FEATURE_COLUMNS)], columns=FEATURE_COLUMNS, index=[79]
+    ))
+    snapshot = _market_snapshot(_candles("2026-03-01"))
+    snapshot["snapshot_sha256"] = "0" * 64
+    with pytest.raises(MarketDataUnavailable, match="digest verification failed"):
+        run_paper_tick(
+            {"owner_id": "owner", "session_id": session["id"]}, store,
+            market_snapshot_provider=lambda *args: snapshot,
+        )
+    unchanged = store.get_paper_session("owner", session["id"])
+    assert unchanged["last_processed_candle"] is None
+    assert unchanged["cash"] == 1000.0
+    assert store.list_paper_decisions("owner", session["id"]) == []
+
+
+def test_paper_session_stops_when_worker_misses_a_completed_candle(tmp_path, monkeypatch):
+    import eti.paper as paper
+    from eti.paper import PaperSessionGap
+
+    store = MemoryStore(tmp_path / "paper-session-gap.sqlite3")
+    workspace = store.create_workspace("owner", "paper")
+    _approved_model(store)
+    session = store.create_paper_session(
+        "owner", workspace["id"], "eti-mexc-btc-usdt-1h", "paper-test",
+        "mexc", "BTC/USDT", "1h", 1000.0, {},
+    )
+    store.set_paper_session_status("owner", session["id"], "running")
+
+    class FakeProvider:
+        calls = 0
+        def __init__(self, venue):
+            pass
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            type(self).calls += 1
+            start = "2026-04-01" if type(self).calls == 1 else "2026-04-01T02:00:00"
+            return _candles(start)
+
+    class FakeArtifacts:
+        def load_model(self, uri, digest):
+            return _FakeModel()
+
+    monkeypatch.setattr(paper, "CcxtPublicProvider", FakeProvider)
+    monkeypatch.setattr(paper, "ModelArtifactStore", FakeArtifacts)
+    monkeypatch.setattr(paper, "build_features", lambda frame: pd.DataFrame(
+        [[0.0] * len(FEATURE_COLUMNS)], columns=FEATURE_COLUMNS, index=[79]
+    ))
+
+    first_frame = _candles("2026-04-01")
+    first = run_paper_tick(
+        {"owner_id": "owner", "session_id": session["id"]}, store,
+        market_snapshot_provider=lambda *args: _market_snapshot(first_frame),
+    )
+    assert first["processed"] is True
+
+    second_frame = _candles("2026-04-01T02:00:00")
+    with pytest.raises(PaperSessionGap, match="missed one or more completed candles"):
+        run_paper_tick(
+            {"owner_id": "owner", "session_id": session["id"]}, store,
+            market_snapshot_provider=lambda *args: _market_snapshot(second_frame),
+        )
+    stopped = store.get_paper_session("owner", session["id"])
+    assert stopped["status"] == "stopped"
+    assert stopped["last_processed_candle"] == first["candle_at"]
+    assert len(store.list_paper_decisions("owner", session["id"])) == 1

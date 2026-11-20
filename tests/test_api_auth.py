@@ -680,3 +680,61 @@ def test_paper_portfolio_api_is_authenticated_owner_scoped_and_explicitly_attest
             json={"as_of": "2026-11-16T10:01:00Z", "equity": 1000, "cash": 1001, "positions": []},
         )
         assert invalid.status_code == 422
+
+
+def test_paper_feed_health_api_is_authenticated_and_owner_scoped(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETI_DATABASE_PATH", str(tmp_path / "paper-feed-health-api.sqlite3"))
+    monkeypatch.setenv("ETI_AUTH_SECRET", "server-only-secret-value-at-least-32-bytes")
+    monkeypatch.setenv("ETI_REGISTRATION_KEY", "private-invite-code-123456")
+    with TestClient(app) as client:
+        owner = _register(client, "paper_health_owner")
+        other = _register(client, "paper_health_other")
+        owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+        other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+        workspace = client.post(
+            "/v1/workspaces", headers=owner_headers,
+            json={"name": "paper feed health"},
+        ).json()
+        store = MemoryStore()
+        store.register_model_version(
+            "eti-mexc-btc-usdt-1h", "paper-health-test",
+            "artifact://sha256/" + "e" * 64, "e" * 64,
+            {"features": ["ret_1"]}, ["crypto_spot"], "test-dataset",
+            {"passed": True}, "calibrated", "test",
+        )
+        store.approve_model_version(
+            "eti-mexc-btc-usdt-1h", "paper-health-test", "reviewer"
+        )
+        created = client.post("/v1/paper/sessions", headers=owner_headers, json={
+            "model_id": "eti-mexc-btc-usdt-1h",
+            "model_version": "paper-health-test",
+            "venue": "mexc", "symbol": "BTC/USDT", "timeframe": "1h",
+            "initial_cash": 1000, "workspace_id": workspace["id"],
+        })
+        assert created.status_code == 201, created.text
+        session_id = created.json()["session"]["id"]
+
+        path = f"/v1/paper/sessions/{session_id}/health"
+        assert client.get(path).status_code == 401
+        decisions_path = f"/v1/paper/sessions/{session_id}/decisions"
+        assert client.get(decisions_path).status_code == 401
+        decisions = client.get(decisions_path, headers=owner_headers)
+        assert decisions.status_code == 200
+        assert decisions.json()["items"] == []
+        assert decisions.json()["live_execution_enabled"] is False
+        initial = client.get(path, headers=owner_headers)
+        assert initial.status_code == 200
+        assert initial.json()["feed_health"]["status"] == "not_checked"
+        store.record_paper_feed_health(
+            owner["account"]["id"], session_id,
+            snapshot={
+                "snapshot_sha256": "f" * 64,
+                "quote": {"timestamp": "2026-11-20T10:00:00+00:00"},
+            },
+        )
+        healthy = client.get(path, headers=owner_headers)
+        assert healthy.status_code == 200
+        assert healthy.json()["feed_health"]["status"] == "healthy"
+        assert healthy.json()["live_execution_enabled"] is False
+        denied = client.get(path, headers=other_headers)
+        assert denied.status_code == 404

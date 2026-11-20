@@ -405,6 +405,24 @@ def list_live_execution_orders(limit: int = Query(default=100, ge=1, le=500),
             "per_trade_approval": False}
 
 
+class PaperSessionPayload(BaseModel):
+    model_id: str = Field(min_length=1, max_length=120)
+    model_version: str = Field(min_length=1, max_length=80)
+    venue: str = Field(default="mexc", pattern="^(binance|mexc)$")
+    symbol: str = Field(min_length=3, max_length=40)
+    timeframe: str = Field(default="1h", pattern="^(1h|4h|1d)$")
+    initial_cash: float = Field(gt=0, le=1000000000)
+    workspace_id: str | None = Field(default=None, min_length=1, max_length=128)
+    max_risk_per_trade: float = Field(default=0.005, gt=0, le=0.005)
+    max_position_fraction: float = Field(default=0.10, gt=0, le=0.10)
+    max_gross_exposure: float = Field(default=0.25, gt=0, le=0.25)
+    max_daily_loss: float = Field(default=0.02, gt=0, le=0.02)
+    max_drawdown: float = Field(default=0.08, gt=0, le=0.08)
+    fee_bps: float = Field(default=6.0, ge=0, le=100)
+    slippage_bps: float = Field(default=8.0, ge=0, le=100)
+    confidence_threshold: float = Field(default=0.55, ge=0.50, le=0.95)
+
+
 @app.get("/v1/paper/sessions")
 def list_paper_sessions(workspace_id: str | None = None,
                         account: dict[str, str] = Depends(current_account)):
@@ -472,6 +490,36 @@ def pause_paper_session(session_id: str,
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"session": session, "mode": "paper_only", "live_execution_enabled": False}
+
+
+@app.get("/v1/paper/sessions/{session_id}/health")
+def get_paper_session_health(session_id: str,
+                             account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    session = store.get_paper_session(account["id"], session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="paper session not found")
+    health = store.get_paper_feed_health(account["id"], session_id)
+    return {
+        "session_id": session_id,
+        "feed_health": health or {"status": "not_checked", "consecutive_failures": 0},
+        "paper_only": True,
+        "live_execution_enabled": False,
+    }
+
+
+@app.get("/v1/paper/sessions/{session_id}/decisions")
+def list_paper_decisions(session_id: str, limit: int = Query(default=200, ge=1, le=1000),
+                         account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    session = store.get_paper_session(account["id"], session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="paper session not found")
+    return {
+        "items": store.list_paper_decisions(account["id"], session_id, limit),
+        "mode": "paper_only",
+        "live_execution_enabled": False,
+    }
 
 
 @app.get("/v1/paper/sessions/{session_id}/trades")
@@ -785,24 +833,6 @@ class ModelVersionPayload(BaseModel):
     model_role: str | None = Field(default=None, min_length=1, max_length=80)
     experiment_id: str | None = Field(default=None, min_length=1, max_length=128)
     lineage: dict[str, Any] | None = None
-
-class PaperSessionPayload(BaseModel):
-    model_id: str = Field(min_length=1, max_length=120)
-    model_version: str = Field(min_length=1, max_length=80)
-    venue: str = Field(default="mexc", pattern="^(binance|mexc)$")
-    symbol: str = Field(min_length=3, max_length=40)
-    timeframe: str = Field(default="1h", pattern="^(1h|4h|1d)$")
-    initial_cash: float = Field(gt=0, le=1000000000)
-    workspace_id: str | None = Field(default=None, min_length=1, max_length=128)
-    max_risk_per_trade: float = Field(default=0.005, gt=0, le=0.005)
-    max_position_fraction: float = Field(default=0.10, gt=0, le=0.10)
-    max_gross_exposure: float = Field(default=0.25, gt=0, le=0.25)
-    max_daily_loss: float = Field(default=0.02, gt=0, le=0.02)
-    max_drawdown: float = Field(default=0.08, gt=0, le=0.08)
-    fee_bps: float = Field(default=6.0, ge=0, le=100)
-    slippage_bps: float = Field(default=8.0, ge=0, le=100)
-    confidence_threshold: float = Field(default=0.55, ge=0.50, le=0.95)
-
 
 class PaperSessionStatusPayload(BaseModel):
     status: str = Field(pattern="^(running|paused)$")

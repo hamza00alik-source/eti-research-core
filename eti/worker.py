@@ -17,7 +17,8 @@ from typing import Any
 from uuid import uuid4
 
 from .agents import AgentCapabilityRegistry, default_capabilities
-from .paper import run_paper_tick
+from .paper import PaperSessionGap, run_paper_tick
+from .live_market import MarketDataUnavailable
 from .execution import run_live_tick
 from .storage import MemoryStore
 from .model_identity import model_id_for_instrument
@@ -35,7 +36,7 @@ class AgentWorker:
         self.store = store or MemoryStore()
         self.registry = registry or default_capabilities()
         if "paper.tick" not in self.registry.capabilities():
-            self.registry.register("paper.tick", lambda payload: run_paper_tick(payload, self.store))
+            self.registry.register("paper.tick", self._run_paper_tick_supervised)
         if "live.tick" not in self.registry.capabilities():
             self.registry.register("live.tick", lambda payload: run_live_tick(payload, self.store))
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 3600:
@@ -46,6 +47,38 @@ class AgentWorker:
         self.workspace_id = workspace_id
         self.lease_seconds = lease_seconds
         self.worker_id = str(uuid4())
+
+    def _run_paper_tick_supervised(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Run one paper decision and persist public-feed health without masking failures."""
+        owner_id = payload.get("owner_id")
+        session_id = payload.get("session_id")
+        try:
+            result = run_paper_tick(payload, self.store)
+        except (MarketDataUnavailable, PaperSessionGap) as exc:
+            self.store.record_paper_feed_health(
+                owner_id, session_id, error=exc
+            )
+            self._log_event(
+                "paper.market_feed.unavailable",
+                session_id=session_id,
+                error_type=type(exc).__name__,
+            )
+            raise
+        if result.get("processed") is True:
+            quote = result.get("quote") or {}
+            self.store.record_paper_feed_health(
+                owner_id, session_id,
+                snapshot={
+                    "snapshot_sha256": result.get("market_snapshot_sha256"),
+                    "quote": {"timestamp": quote.get("timestamp")},
+                },
+            )
+            self._log_event(
+                "paper.market_feed.healthy",
+                session_id=session_id,
+                snapshot_sha256=result.get("market_snapshot_sha256"),
+            )
+        return result
 
     @staticmethod
     def _log_event(event: str, **fields: Any) -> None:
