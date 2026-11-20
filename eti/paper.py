@@ -146,6 +146,10 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
             "quantity": quantity, "price": fill_price, "notional": notional,
             "fee": fee, "slippage_bps": slippage_bps, "realized_pnl": pnl,
             "prediction": prediction, "confidence": confidence,
+            "bid": bid, "ask": ask,
+            "spread_bps": float(quote.get("spread_bps", 0.0)),
+            "quote_timestamp": quote.get("timestamp"),
+            "market_snapshot_sha256": market_snapshot.get("snapshot_sha256"),
             "risk_decision": {"reason": "daily_loss_or_drawdown_limit" if risk_breach else ("fixed_five_percent_stop" if stop_breach else "model_signal_exit"),
                               "live_execution": False},
         })
@@ -197,6 +201,10 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
                 "event_type": "entry", "quantity": quantity, "price": fill_price,
                 "notional": allowed_notional, "fee": fee, "slippage_bps": slippage_bps,
                 "realized_pnl": 0.0, "prediction": prediction, "confidence": confidence,
+                "bid": bid, "ask": ask,
+                "spread_bps": float(quote.get("spread_bps", 0.0)),
+                "quote_timestamp": quote.get("timestamp"),
+                "market_snapshot_sha256": market_snapshot.get("snapshot_sha256"),
                 "risk_decision": decision_detail,
             })
         else:
