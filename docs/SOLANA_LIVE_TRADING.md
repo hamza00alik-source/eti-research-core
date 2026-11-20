@@ -34,3 +34,27 @@ The current implementation uses Jupiter's managed landing path. Quotes and execu
 ## Configuration
 
 Set `JUPITER_API_KEY` in the backend environment for production rate limits. Keyless requests are intended only for low-rate prototyping. Do not commit the API key.
+
+
+## Solana token screening foundation (added in Phase 3)
+
+`eti.solana_token_risk` now provides a deterministic, read-only first-pass policy
+for candidate tokens. It evaluates mint/freeze authority, largest-holder
+concentration, reported pool liquidity, pool age, and an external sell-simulation
+result. Missing or malformed evidence never defaults to safe. The result is
+`PASS`, `WATCH`, or `REJECT`, with a numeric score, evidence completeness,
+and explicit reason codes.
+
+Default initial screening thresholds are intentionally conservative:
+- Reject active mint authority and active freeze authority.
+- Require a successful sell simulation.
+- Require at least USD 25,000 reported liquidity.
+- Require a pool age of at least two hours.
+- Flag a largest-holder share above 20%.
+- Token verification is optional by default and can be required by policy.
+
+These are configurable engineering defaults, not empirically validated
+profitability thresholds. The module does not yet fetch evidence itself; it
+requires trusted upstream providers and must be integrated with live token
+discovery, on-chain RPC, holder aggregation, and a real transaction simulation
+before any candidate can reach execution. A PASS is not a safety guarantee.
