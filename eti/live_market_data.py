@@ -69,6 +69,7 @@ class BinanceSpotKlineFeed:
         self.max_event_age_ms = max_event_age_ms
         self.allowed_future_skew_ms = allowed_future_skew_ms
         self.last_open_time_ms: int | None = None
+        self.last_candle: ClosedKline | None = None
 
     @property
     def url(self) -> str:
@@ -143,14 +144,18 @@ class BinanceSpotKlineFeed:
         previous = self.last_open_time_ms
         if previous is None:
             self.last_open_time_ms = candle.open_time_ms
+            self.last_candle = candle
             return True
         if candle.open_time_ms == previous:
+            if candle != self.last_candle:
+                raise ValueError("conflicting duplicate closed candle")
             return False
         if candle.open_time_ms < previous:
             raise ValueError("out-of-order closed candle")
         if candle.open_time_ms != previous + self.interval_ms:
             raise ValueError("closed-candle gap detected; resynchronization required")
         self.last_open_time_ms = candle.open_time_ms
+        self.last_candle = candle
         return True
 
     def connect(self, *, timeout_seconds: float = 10.0):
