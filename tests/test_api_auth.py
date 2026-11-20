@@ -705,14 +705,12 @@ def test_paper_feed_health_api_is_authenticated_and_owner_scoped(tmp_path, monke
         store.approve_model_version(
             "eti-mexc-btc-usdt-1h", "paper-health-test", "reviewer"
         )
-        created = client.post("/v1/paper/sessions", headers=owner_headers, json={
-            "model_id": "eti-mexc-btc-usdt-1h",
-            "model_version": "paper-health-test",
-            "venue": "mexc", "symbol": "BTC/USDT", "timeframe": "1h",
-            "initial_cash": 1000, "workspace_id": workspace["id"],
-        })
-        assert created.status_code == 201, created.text
-        session_id = created.json()["session"]["id"]
+        session = store.create_paper_session(
+            owner["account"]["id"], workspace["id"],
+            "eti-mexc-btc-usdt-1h", "paper-health-test",
+            "mexc", "BTC/USDT", "1h", 1000.0, {},
+        )
+        session_id = session["id"]
 
         path = f"/v1/paper/sessions/{session_id}/health"
         assert client.get(path).status_code == 401
