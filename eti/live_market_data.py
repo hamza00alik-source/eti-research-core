@@ -147,7 +147,13 @@ class BinanceSpotKlineFeed:
             self.last_candle = candle
             return True
         if candle.open_time_ms == previous:
-            if candle != self.last_candle:
+            prior = self.last_candle
+            same_values = prior is not None and (
+                candle.close_time_ms == prior.close_time_ms
+                and (candle.open, candle.high, candle.low, candle.close, candle.volume)
+                    == (prior.open, prior.high, prior.low, prior.close, prior.volume)
+            )
+            if not same_values:
                 raise ValueError("conflicting duplicate closed candle")
             return False
         if candle.open_time_ms < previous:
