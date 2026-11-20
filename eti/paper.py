@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import hashlib
+import json
 from typing import Any
 
 import numpy as np
@@ -72,9 +74,24 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
         or market_snapshot.get("venue") != session["venue"]
         or market_snapshot.get("symbol") != session["symbol"]
         or market_snapshot.get("market_type") != "spot"
+        or market_snapshot.get("timeframe") != session["timeframe"]
         or market_snapshot.get("quality", {}).get("paper_eligible") is not True
+        or market_snapshot.get("quality", {}).get("quote_fresh") is not True
+        or market_snapshot.get("quality", {}).get("candle_fresh") is not True
     ):
         raise MarketDataUnavailable("fresh, eligible public spot market snapshot is required")
+    try:
+        canonical_snapshot = {
+            key: value for key, value in market_snapshot.items()
+            if key != "snapshot_sha256"
+        }
+        calculated_digest = hashlib.sha256(json.dumps(
+            canonical_snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")).hexdigest()
+    except (TypeError, ValueError) as exc:
+        raise MarketDataUnavailable("public market snapshot is not canonical JSON") from exc
+    if market_snapshot.get("snapshot_sha256") != calculated_digest:
+        raise MarketDataUnavailable("public market snapshot digest verification failed")
     quote = market_snapshot.get("quote", {})
     bid = float(quote.get("bid", 0))
     ask = float(quote.get("ask", 0))
