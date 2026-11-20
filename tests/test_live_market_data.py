@@ -83,3 +83,15 @@ def test_sequence_guard_deduplicates_and_rejects_gaps_and_reordering():
 def test_url_is_public_spot_stream():
     feed = BinanceSpotKlineFeed("BTC/USDT", "1m")
     assert feed.url == "wss://stream.binance.com:9443/ws/btcusdt@kline_1m"
+
+def test_receive_refreshes_clock_for_each_message():
+    feed = BinanceSpotKlineFeed("BTC/USDT", "1h")
+    first = message(closed=False)
+    second = message()
+    class FakeSocket:
+        items = iter([json.dumps(first), json.dumps(second)])
+        def recv(self):
+            return next(self.items)
+    clocks = iter([1_800_000_003_599, 1_800_000_003_600])
+    candle = feed.receive_closed_candle(FakeSocket(), clock_ms=lambda: next(clocks))
+    assert candle.close == 101
