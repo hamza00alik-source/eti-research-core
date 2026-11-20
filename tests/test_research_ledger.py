@@ -78,11 +78,22 @@ def test_trial_family_persists_and_verifies_source_evidence_manifest(tmp_path):
         cost_model, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")).hexdigest()
     snapshot_digest = _digest("1")
+    archive_digest = _digest("2")
+    archive_receipt = {
+        "schema_version": "eti.ohlcv_archive_receipt.v1",
+        "sha256": archive_digest,
+        "source_snapshot_sha256": snapshot_digest,
+        "relative_path": f"{archive_digest[:2]}/{archive_digest}.json",
+    }
     manifest = {
         "schema_version": "eti.research_source_evidence.v1",
         "capture_method": "MarketDataHub.fetch",
         "source_snapshot_sha256": snapshot_digest,
-        "source_provenance": {"source_snapshot_sha256": snapshot_digest},
+        "raw_data_archive": archive_receipt,
+        "source_provenance": {
+            "source_snapshot_sha256": snapshot_digest,
+            "raw_data_archive": archive_receipt,
+        },
         "cost_model": cost_model,
         "cost_model_sha256": cost_digest,
         "training_data_sha256": _digest("d"),
@@ -128,11 +139,22 @@ def test_runner_capture_manifest_rejects_cross_binding_mismatch(tmp_path):
         cost_model, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")).hexdigest()
     snapshot_digest = _digest("1")
+    archive_digest = _digest("2")
+    archive_receipt = {
+        "schema_version": "eti.ohlcv_archive_receipt.v1",
+        "sha256": archive_digest,
+        "source_snapshot_sha256": snapshot_digest,
+        "relative_path": f"{archive_digest[:2]}/{archive_digest}.json",
+    }
     manifest = {
         "schema_version": "eti.research_source_evidence.v1",
         "capture_method": "MarketDataHub.fetch",
         "source_snapshot_sha256": snapshot_digest,
-        "source_provenance": {"source_snapshot_sha256": snapshot_digest},
+        "raw_data_archive": archive_receipt,
+        "source_provenance": {
+            "source_snapshot_sha256": snapshot_digest,
+            "raw_data_archive": archive_receipt,
+        },
         "cost_model": cost_model,
         "cost_model_sha256": cost_digest,
         "training_data_sha256": _digest("d"),
@@ -145,8 +167,22 @@ def test_runner_capture_manifest_rejects_cross_binding_mismatch(tmp_path):
         store.complete_research_trial(
             "owner-a", workspace["id"], trial_id, _timestamps(), [value] * 8,
         )
-    # Tamper with the manifest and recompute its outer digest to model a
-    # self-consistent but internally contradictory evidence receipt.
+    # A self-consistent outer digest cannot hide a contradictory archive receipt.
+    manifest["raw_data_archive"]["source_snapshot_sha256"] = _digest("3")
+    encoded = json.dumps(
+        manifest, ensure_ascii=False, allow_nan=False,
+        sort_keys=True, separators=(",", ":"),
+    )
+    with sqlite3.connect(store.database_path) as conn:
+        conn.execute(
+            "UPDATE research_trial_families SET source_evidence_json=?,source_evidence_sha256=?",
+            (encoded, hashlib.sha256(encoded.encode("utf-8")).hexdigest()),
+        )
+    with pytest.raises(ValueError, match="raw-data archive receipt does not match"):
+        store.get_research_trial_matrix("owner-a", workspace["id"], "family-2026-01")
+
+    # Then test a separate internally contradictory transaction-cost receipt.
+    manifest["raw_data_archive"]["source_snapshot_sha256"] = snapshot_digest
     manifest["cost_model_sha256"] = _digest("e")
     encoded = json.dumps(
         manifest, ensure_ascii=False, allow_nan=False,

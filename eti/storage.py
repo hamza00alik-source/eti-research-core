@@ -1207,6 +1207,24 @@ class MemoryStore:
                 raise ValueError("captured source snapshot fingerprint is missing or invalid")
             if not isinstance(provenance, dict) or provenance.get("source_snapshot_sha256") != snapshot_digest:
                 raise ValueError("captured source provenance does not match its snapshot fingerprint")
+            archive_receipt = source_evidence.get("raw_data_archive")
+            if archive_receipt is not None:
+                if not isinstance(archive_receipt, dict):
+                    raise ValueError("captured raw-data archive receipt must be an object")
+                archive_digest = archive_receipt.get("sha256")
+                expected_archive_path = (
+                    f"{archive_digest[:2]}/{archive_digest}.json"
+                    if isinstance(archive_digest, str) and _SHA256_RE.fullmatch(archive_digest)
+                    else None
+                )
+                if (
+                    archive_receipt.get("schema_version") != "eti.ohlcv_archive_receipt.v1"
+                    or expected_archive_path is None
+                    or archive_receipt.get("relative_path") != expected_archive_path
+                    or archive_receipt.get("source_snapshot_sha256") != snapshot_digest
+                    or provenance.get("raw_data_archive") != archive_receipt
+                ):
+                    raise ValueError("captured raw-data archive receipt does not match its snapshot fingerprint")
             if source_evidence.get("training_data_sha256") != family["training_data_sha256"]:
                 raise ValueError("captured training-data fingerprint does not match the trial family")
             if source_evidence.get("evaluation_data_sha256") != family["evaluation_data_sha256"]:

@@ -247,7 +247,7 @@ def test_spot_short_economic_evaluation_is_blocked_until_borrow_costs_supported(
         )
 
 
-def test_runner_records_every_candidate_in_the_trial_ledger(monkeypatch):
+def test_runner_records_every_candidate_in_the_trial_ledger(monkeypatch, tmp_path):
     import eti.research_runner as runner
     from types import SimpleNamespace
 
@@ -289,6 +289,7 @@ def test_runner_records_every_candidate_in_the_trial_ledger(monkeypatch):
             "test_size": 100, "step_size": 100,
         }), hub=FakeHub(variable_volume=True),
         trial_ledger=ledger, owner_id="owner-1", workspace_id="workspace-1",
+        evidence_archive_dir=tmp_path / "evidence",
     )
     market = result["markets"]["kraken:spot:BTC/USD"]
     assert market["status"] == "evaluated"
@@ -299,6 +300,13 @@ def test_runner_records_every_candidate_in_the_trial_ledger(monkeypatch):
     manifests = [record[10] for record in ledger.registered]
     assert all(item["schema_version"] == "eti.research_source_evidence.v1" for item in manifests)
     assert all(item["capture_method"] == "MarketDataHub.fetch" for item in manifests)
+    assert all(item["raw_data_archive"]["schema_version"] == "eti.ohlcv_archive_receipt.v1" for item in manifests)
+    from eti.research_evidence import verify_ohlcv_archive
+    assert verify_ohlcv_archive(manifests[0]["raw_data_archive"], tmp_path / "evidence")["verified"]
+    assert all(
+        item["raw_data_archive"]["source_snapshot_sha256"] == item["source_snapshot_sha256"]
+        for item in manifests
+    )
     assert all(item["training_data_sha256"] == record[6] for item, record in zip(manifests, ledger.registered))
     assert market["report"]["trial_ledger"]["source_evidence_sha256"]
     assert market["report"]["trial_ledger"]["completed_candidate_count"] == 2

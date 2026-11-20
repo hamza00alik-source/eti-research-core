@@ -2,9 +2,9 @@ name: ETI research core checks
 
 on:
   push:
-    branches: [main, "feature/**", "phase2/**"]
+    branches: [main, "feature/**", "phase2/**", "phase3/**"]
   pull_request:
-    branches: [main, "phase1/**", "phase2/**"]
+    branches: [main, "phase1/**", "phase2/**", "phase3/**"]
 
 jobs:
   test:
