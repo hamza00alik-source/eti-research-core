@@ -490,6 +490,20 @@ def get_paper_session_health(session_id: str,
     }
 
 
+@app.get("/v1/paper/sessions/{session_id}/decisions")
+def list_paper_decisions(session_id: str, limit: int = Query(default=200, ge=1, le=1000),
+                         account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    session = store.get_paper_session(account["id"], session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="paper session not found")
+    return {
+        "items": store.list_paper_decisions(account["id"], session_id, limit),
+        "mode": "paper_only",
+        "live_execution_enabled": False,
+    }
+
+
 @app.get("/v1/paper/sessions/{session_id}/trades")
 def list_paper_trades(session_id: str, limit: int = Query(default=200, ge=1, le=1000),
                       account: dict[str, str] = Depends(current_account)):
