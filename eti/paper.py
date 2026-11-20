@@ -5,6 +5,7 @@ from dataclasses import asdict
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from .artifacts import ModelArtifactStore
 from .config import RiskConfig
