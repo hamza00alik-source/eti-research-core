@@ -306,3 +306,36 @@ def test_worker_paper_tick_wrapper_records_retryable_feed_failure(tmp_path, monk
     health = store.get_paper_feed_health("owner", session["id"])
     assert health["status"] == "degraded"
     assert health["consecutive_failures"] == 1
+
+
+def test_worker_retries_paper_feed_three_times_then_marks_unavailable(tmp_path, monkeypatch):
+    from eti.live_market import MarketDataUnavailable
+    import eti.worker as worker_module
+
+    store = MemoryStore(tmp_path / "paper-feed-retry.sqlite3")
+    workspace = store.create_workspace("owner", "paper")
+    _approved_model(store)
+    session = store.create_paper_session(
+        "owner", workspace["id"], "eti-mexc-btc-usdt-1h", "paper-test",
+        "mexc", "BTC/USDT", "1h", 1000.0, {},
+    )
+    store.set_paper_session_status("owner", session["id"], "running")
+    assert store.enqueue_due_paper_tasks() == 1
+
+    def unavailable(payload, store):
+        raise MarketDataUnavailable("temporary quote outage")
+
+    monkeypatch.setattr(worker_module, "run_paper_tick", unavailable)
+    worker = worker_module.AgentWorker(store)
+    first = worker.run_once()
+    assert first["status"] == "queued"
+    assert first["attempt_count"] == 1
+    second = worker.run_once()
+    assert second["status"] == "queued"
+    assert second["attempt_count"] == 2
+    third = worker.run_once()
+    assert third["status"] == "failed"
+    assert third["attempt_count"] == 3
+    health = store.get_paper_feed_health("owner", session["id"])
+    assert health["status"] == "unavailable"
+    assert health["consecutive_failures"] == 3
