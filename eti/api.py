@@ -474,6 +474,22 @@ def pause_paper_session(session_id: str,
     return {"session": session, "mode": "paper_only", "live_execution_enabled": False}
 
 
+@app.get("/v1/paper/sessions/{session_id}/health")
+def get_paper_session_health(session_id: str,
+                             account: dict[str, str] = Depends(current_account)):
+    store = _memory_store()
+    session = store.get_paper_session(account["id"], session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="paper session not found")
+    health = store.get_paper_feed_health(account["id"], session_id)
+    return {
+        "session_id": session_id,
+        "feed_health": health or {"status": "not_checked", "consecutive_failures": 0},
+        "paper_only": True,
+        "live_execution_enabled": False,
+    }
+
+
 @app.get("/v1/paper/sessions/{session_id}/trades")
 def list_paper_trades(session_id: str, limit: int = Query(default=200, ge=1, le=1000),
                       account: dict[str, str] = Depends(current_account)):
