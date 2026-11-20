@@ -43,7 +43,7 @@ Supported public spot venue clients are subject to CCXT and venue endpoint avail
 
 ## Feed supervision and health
 
-The existing ETI durable worker remains the scheduler; it polls running paper sessions at their configured candle interval. It now records per-session feed health in SQLite and exposes it through the authenticated `GET /v1/paper/sessions/{session_id}/health` endpoint. Health states are `healthy`, `degraded` (one or two consecutive failures), and `unavailable` (three or more consecutive failures). A successful eligible snapshot resets the consecutive-failure counter and stores the last quote timestamp and snapshot digest. The worker emits payload-free structured health events. This is supervised REST polling with bounded task retries, not a separate always-on WebSocket stream.
+The existing ETI durable worker remains the scheduler; it polls running paper sessions at their configured candle interval. It now records per-session feed health in SQLite and exposes it through the authenticated `GET /v1/paper/sessions/{session_id}/health` endpoint. Health states are `healthy`, `degraded` (one or two consecutive failures), and `unavailable` (three or more consecutive failures); a separate freshness field turns `stale` if the worker has not attempted a feed check for more than two candle intervals. A successful eligible snapshot resets the consecutive-failure counter and stores the last quote timestamp and snapshot digest. The worker emits payload-free structured health events. This is supervised REST polling with bounded task retries, not a separate always-on WebSocket stream.
 
 ## Next required work before a meaningful paper pilot
 
