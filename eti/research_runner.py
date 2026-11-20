@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -80,6 +82,7 @@ def run_approved_multi_market_research(
     owner_id: str | None = None,
     workspace_id: str | None = None,
     trial_family_prefix: str = "eti-run",
+    evidence_archive_dir: str | os.PathLike[str] | None = None,
 ) -> dict[str, Any]:
     """Run only explicitly approved candidates after complete budget preflight.
 
@@ -247,6 +250,14 @@ def run_approved_multi_market_research(
             if claimed_digest is not None and claimed_digest != snapshot_digest:
                 raise ValueError(f"{key} provider snapshot fingerprint does not match fetched OHLCV values")
             captured_provenance["source_snapshot_sha256"] = snapshot_digest
+            from .research_evidence import archive_ohlcv_snapshot
+            archive_root = (
+                Path(evidence_archive_dir).expanduser()
+                if evidence_archive_dir is not None
+                else Path(os.environ.get("ETI_RESEARCH_EVIDENCE_DIR", "data/research_evidence")).expanduser()
+            )
+            archive_receipt = archive_ohlcv_snapshot(snapshot.frame, archive_root)
+            captured_provenance["raw_data_archive"] = archive_receipt
         from .features import build_features, feature_columns_for_frame, make_labels
         frame = snapshot.frame
         feature_frame = build_features(frame)
@@ -320,6 +331,7 @@ def run_approved_multi_market_research(
                     "schema_version": "eti.research_source_evidence.v1",
                     "capture_method": "MarketDataHub.fetch",
                     "source_snapshot_sha256": item["provenance"].get("source_snapshot_sha256"),
+                    "raw_data_archive": item["provenance"].get("raw_data_archive"),
                     "source_provenance": item["provenance"],
                     "data_quality": item["quality"],
                     "cost_model": item["transaction_cost_model"],
