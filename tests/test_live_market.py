@@ -110,3 +110,15 @@ def test_capture_rejects_stale_completed_candle():
             "binance", "BTC/USDT", "1m",
             exchange_factory=factory_for(exchange), now_ms=NOW,
         )
+
+
+def test_capture_rejects_recent_completed_candle_gap():
+    exchange = FakeExchange(candles=[
+        [NOW - 210_000, 99, 101, 98, 100, 12],
+        [NOW - 90_000, 101, 103, 100, 102, 14],
+    ])
+    with pytest.raises(ValueError, match="data gap"):
+        capture_public_spot_snapshot(
+            "binance", "BTC/USDT", "1m",
+            exchange_factory=factory_for(exchange), now_ms=NOW,
+        )
