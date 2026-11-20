@@ -100,6 +100,10 @@ def test_sequence_guard_rejects_conflicting_duplicate_candle():
     feed = BinanceSpotKlineFeed("BTC/USDT", "1h")
     first = feed.parse(message(), now_ms=1_800_000_003_600)
     assert feed.accept_sequence(first) is True
+    retransmit = feed.parse(
+        message(event_ms=1_800_000_003_600), now_ms=1_800_000_003_600
+    )
+    assert feed.accept_sequence(retransmit) is False
     changed = feed.parse(message(close="100.5"), now_ms=1_800_000_003_600)
     with pytest.raises(ValueError, match="conflicting duplicate"):
         feed.accept_sequence(changed)
