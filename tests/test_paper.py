@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -37,10 +40,14 @@ def _candles(timestamp):
 
 
 def _market_snapshot(frame, bid=99.9, ask=100.1, last=100.0):
-    return {
+    snapshot = {
         "schema_version": "eti.live_public_market_snapshot.v1",
         "venue": "mexc", "market_type": "spot", "symbol": "BTC/USDT",
-        "quality": {"paper_eligible": True},
+        "timeframe": "1h",
+        "quality": {
+            "paper_eligible": True, "quote_fresh": True, "candle_fresh": True,
+            "authenticated_data": False, "order_execution": False,
+        },
         "quote": {
             "bid": bid, "ask": ask, "last": last, "spread_bps": 20.0,
             "timestamp": "2026-01-01T00:00:00+00:00",
@@ -48,8 +55,11 @@ def _market_snapshot(frame, bid=99.9, ask=100.1, last=100.0):
         "latest_completed_candle": {
             "open_time": frame.iloc[-1]["timestamp"].isoformat(),
         },
-        "snapshot_sha256": "c" * 64,
     }
+    snapshot["snapshot_sha256"] = hashlib.sha256(json.dumps(
+        snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")).hexdigest()
+    return snapshot
 
 
 def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path, monkeypatch):
@@ -97,16 +107,16 @@ def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path
     assert opened["events"][0]["event_type"] == "entry"
     assert opened["events"][0]["price"] == pytest.approx(100.1 * (1 + 8 / 10000))
     assert opened["quote"]["bid"] == 99.9
-    assert opened["market_snapshot_sha256"] == "c" * 64
-    assert opened["events"][0]["market_snapshot_sha256"] == "c" * 64
+    assert opened["market_snapshot_sha256"] == _market_snapshot(_candles("2026-01-01"))["snapshot_sha256"]
+    assert opened["events"][0]["market_snapshot_sha256"] == opened["market_snapshot_sha256"]
     assert opened["events"][0]["quote_timestamp"] == "2026-01-01T00:00:00+00:00"
     persisted = store.list_paper_trades("owner", session["id"])[0]["market_evidence"]
-    assert persisted["market_snapshot_sha256"] == "c" * 64
+    assert persisted["market_snapshot_sha256"] == opened["market_snapshot_sha256"]
     assert persisted["bid"] == 99.9
     assert persisted["ask"] == 100.1
     decisions = store.list_paper_decisions("owner", session["id"])
     assert len(decisions) == 1
-    assert decisions[0]["market_snapshot"]["snapshot_sha256"] == "c" * 64
+    assert decisions[0]["market_snapshot"]["snapshot_sha256"] == opened["market_snapshot_sha256"]
     assert decisions[0]["prediction"] == 2
     assert decisions[0]["event_types"] == ["entry"]
     assert opened["cash"] < 10000
