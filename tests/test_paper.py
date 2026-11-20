@@ -238,3 +238,71 @@ def test_paper_tick_enforces_stop_loss_and_does_not_reenter_same_candle(tmp_path
     assert stopped["position_qty"] == 0
     assert stopped["events"][0]["event_type"] == "risk_stop"
     assert stopped["events"][0]["risk_decision"]["reason"] == "fixed_five_percent_stop"
+
+
+def test_paper_feed_health_degrades_after_failures_and_recovers(tmp_path):
+    from eti.live_market import MarketDataUnavailable
+    store = MemoryStore(tmp_path / "paper-feed-health.sqlite3")
+    workspace = store.create_workspace("owner", "paper")
+    _approved_model(store)
+    session = store.create_paper_session(
+        "owner", workspace["id"], "eti-mexc-btc-usdt-1h", "paper-test",
+        "mexc", "BTC/USDT", "1h", 1000.0, {},
+    )
+    first = store.record_paper_feed_health(
+        "owner", session["id"], error=MarketDataUnavailable("temporary quote outage")
+    )
+    assert first["status"] == "degraded"
+    assert first["consecutive_failures"] == 1
+    assert first["last_error_type"] == "MarketDataUnavailable"
+
+    second = store.record_paper_feed_health(
+        "owner", session["id"], error=MarketDataUnavailable("temporary quote outage")
+    )
+    assert second["status"] == "degraded"
+    assert second["consecutive_failures"] == 2
+
+    third = store.record_paper_feed_health(
+        "owner", session["id"], error=MarketDataUnavailable("temporary quote outage")
+    )
+    assert third["status"] == "unavailable"
+    assert third["consecutive_failures"] == 3
+
+    recovered = store.record_paper_feed_health(
+        "owner", session["id"],
+        snapshot={
+            "snapshot_sha256": "d" * 64,
+            "quote": {"timestamp": "2026-11-20T10:00:00+00:00"},
+        },
+    )
+    assert recovered["status"] == "healthy"
+    assert recovered["consecutive_failures"] == 0
+    assert recovered["last_error_type"] is None
+    assert recovered["last_snapshot_sha256"] == "d" * 64
+
+
+def test_worker_paper_tick_wrapper_records_retryable_feed_failure(tmp_path, monkeypatch):
+    from eti.agents import AgentCapabilityRegistry
+    from eti.live_market import MarketDataUnavailable
+    import eti.worker as worker_module
+
+    store = MemoryStore(tmp_path / "paper-feed-worker.sqlite3")
+    workspace = store.create_workspace("owner", "paper")
+    _approved_model(store)
+    session = store.create_paper_session(
+        "owner", workspace["id"], "eti-mexc-btc-usdt-1h", "paper-test",
+        "mexc", "BTC/USDT", "1h", 1000.0, {},
+    )
+    worker = worker_module.AgentWorker(store, registry=AgentCapabilityRegistry())
+
+    def unavailable(payload, store):
+        raise MarketDataUnavailable("temporary quote outage")
+
+    monkeypatch.setattr(worker_module, "run_paper_tick", unavailable)
+    with pytest.raises(MarketDataUnavailable):
+        worker._run_paper_tick_supervised({
+            "owner_id": "owner", "session_id": session["id"],
+        })
+    health = store.get_paper_feed_health("owner", session["id"])
+    assert health["status"] == "degraded"
+    assert health["consecutive_failures"] == 1
