@@ -40,6 +40,9 @@ def _candles(timestamp):
 
 
 def _market_snapshot(frame, bid=99.9, ask=100.1, last=100.0):
+    candle_open = pd.Timestamp(frame.iloc[-1]["timestamp"])
+    candle_close = candle_open + pd.Timedelta(hours=1)
+    quote_timestamp = (candle_close + pd.Timedelta(seconds=5)).isoformat()
     snapshot = {
         "schema_version": "eti.live_public_market_snapshot.v1",
         "venue": "mexc", "market_type": "spot", "symbol": "BTC/USDT",
@@ -50,10 +53,11 @@ def _market_snapshot(frame, bid=99.9, ask=100.1, last=100.0):
         },
         "quote": {
             "bid": bid, "ask": ask, "last": last, "spread_bps": 20.0,
-            "timestamp": "2026-01-01T00:00:00+00:00",
+            "timestamp": quote_timestamp,
         },
         "latest_completed_candle": {
-            "open_time": frame.iloc[-1]["timestamp"].isoformat(),
+            "open_time": candle_open.isoformat(),
+            "close_time": candle_close.isoformat(),
         },
     }
     snapshot["snapshot_sha256"] = hashlib.sha256(json.dumps(
@@ -109,7 +113,7 @@ def test_paper_tick_opens_and_closes_long_position_with_simulated_fills(tmp_path
     assert opened["quote"]["bid"] == 99.9
     assert opened["market_snapshot_sha256"] == _market_snapshot(_candles("2026-01-01"))["snapshot_sha256"]
     assert opened["events"][0]["market_snapshot_sha256"] == opened["market_snapshot_sha256"]
-    assert opened["events"][0]["quote_timestamp"] == "2026-01-01T00:00:00+00:00"
+    assert opened["events"][0]["quote_timestamp"] == "2026-01-04T08:00:05+00:00"
     persisted = store.list_paper_trades("owner", session["id"])[0]["market_evidence"]
     assert persisted["market_snapshot_sha256"] == opened["market_snapshot_sha256"]
     assert persisted["bid"] == 99.9
