@@ -20,6 +20,16 @@ _SCHEMA = "eti.ohlcv_archive.v1"
 _COLUMNS = ["timestamp", "open", "high", "low", "close", "volume"]
 
 
+def _source_snapshot_sha256(rows: list[list[Any]]) -> str:
+    payload = {
+        "schema_version": "eti.ohlcv_snapshot.v1",
+        "columns": _COLUMNS,
+        "rows": rows,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _canonical_payload(frame: pd.DataFrame) -> bytes:
     if not isinstance(frame, pd.DataFrame) or any(c not in frame.columns for c in _COLUMNS):
         raise ValueError("OHLCV archive requires a DataFrame with timestamp and OHLCV columns")
@@ -77,6 +87,7 @@ def archive_ohlcv_snapshot(frame: pd.DataFrame, archive_root: str | os.PathLike[
         return {
             "schema_version": "eti.ohlcv_archive_receipt.v1",
             "sha256": digest,
+            "source_snapshot_sha256": _source_snapshot_sha256(json.loads(payload)["rows"]),
             "relative_path": relative.as_posix(),
             "byte_size": len(payload),
             "row_count": len(frame),
@@ -120,6 +131,9 @@ def verify_ohlcv_archive(receipt: dict[str, Any], archive_root: str | os.PathLik
         raise ValueError("archived OHLCV schema mismatch")
     if decoded.get("row_count") != receipt.get("row_count") or len(decoded.get("rows", [])) != receipt.get("row_count"):
         raise ValueError("archived OHLCV row count mismatch")
+    source_digest = _source_snapshot_sha256(decoded["rows"])
+    if source_digest != receipt.get("source_snapshot_sha256"):
+        raise ValueError("archived OHLCV snapshot fingerprint mismatch")
     if len(payload) != receipt.get("byte_size"):
         raise ValueError("archived OHLCV byte size mismatch")
     return {"verified": True, "sha256": digest, "row_count": decoded["row_count"], "byte_size": len(payload)}
