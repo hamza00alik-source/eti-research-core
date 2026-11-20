@@ -27,6 +27,10 @@ This is **content-addressed, tamper-evident local storage**, not a claim of cryp
 
 The automated tests cover deterministic content addressing, changed-data separation, digest tampering, path traversal, non-finite values, naive timestamps and runner-to-ledger receipt integration.
 
+## Live public market and paper-feed slice
+
+See [LIVE_MARKET_PAPER_FEED.md](LIVE_MARKET_PAPER_FEED.md) for the read-only CCXT spot snapshot collector and the paper engine's fresh bid/ask pricing. This is REST polling, not a continuous WebSocket service; simulated fills still do not model order-book depth, queue position, partial fills or market impact. Live execution remains disabled.
+
 ## Remaining Phase 3 work
 
 1. Add provider-specific source identity and raw-response capture where legally and technically available; independently reconcile samples against a second source.
