@@ -10,7 +10,8 @@ from dataclasses import dataclass
 import json
 import math
 import re
-from typing import Any
+import time
+from typing import Any, Callable
 from urllib.parse import quote
 
 import pandas as pd
@@ -163,11 +164,12 @@ class BinanceSpotKlineFeed:
         return websocket.create_connection(self.url, timeout=float(timeout_seconds),
                                            enable_multithread=False)
 
-    def receive_closed_candle(self, socket, *, now_ms: int) -> ClosedKline:
-        """Read until one completed candle arrives; caller handles socket timeouts."""
+    def receive_closed_candle(self, socket, *, clock_ms: Callable[[], int] | None = None) -> ClosedKline:
+        """Read one completed candle using a fresh clock value for every message."""
+        clock = clock_ms or (lambda: time.time_ns() // 1_000_000)
         while True:
             message = socket.recv()
-            candle = self.parse(message, now_ms=now_ms)
+            candle = self.parse(message, now_ms=clock())
             if candle is None:
                 continue
             if self.accept_sequence(candle):
