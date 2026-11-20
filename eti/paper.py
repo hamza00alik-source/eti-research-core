@@ -68,16 +68,18 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
         raise
     except Exception as exc:
         raise MarketDataUnavailable("public quote snapshot request failed") from exc
+    quality = market_snapshot.get("quality") if isinstance(market_snapshot, dict) else None
     if (
         not isinstance(market_snapshot, dict)
+        or not isinstance(quality, dict)
         or market_snapshot.get("schema_version") != "eti.live_public_market_snapshot.v1"
         or market_snapshot.get("venue") != session["venue"]
         or market_snapshot.get("symbol") != session["symbol"]
         or market_snapshot.get("market_type") != "spot"
         or market_snapshot.get("timeframe") != session["timeframe"]
-        or market_snapshot.get("quality", {}).get("paper_eligible") is not True
-        or market_snapshot.get("quality", {}).get("quote_fresh") is not True
-        or market_snapshot.get("quality", {}).get("candle_fresh") is not True
+        or quality.get("paper_eligible") is not True
+        or quality.get("quote_fresh") is not True
+        or quality.get("candle_fresh") is not True
     ):
         raise MarketDataUnavailable("fresh, eligible public spot market snapshot is required")
     try:
@@ -92,7 +94,9 @@ def run_paper_tick(payload: dict[str, Any], store, *, market_snapshot_provider=N
         raise MarketDataUnavailable("public market snapshot is not canonical JSON") from exc
     if market_snapshot.get("snapshot_sha256") != calculated_digest:
         raise MarketDataUnavailable("public market snapshot digest verification failed")
-    quote = market_snapshot.get("quote", {})
+    quote = market_snapshot.get("quote")
+    if not isinstance(quote, dict):
+        raise MarketDataUnavailable("public market snapshot quote is invalid")
     bid = float(quote.get("bid", 0))
     ask = float(quote.get("ask", 0))
     price = float(quote.get("last", 0))
