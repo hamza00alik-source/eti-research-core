@@ -34,6 +34,23 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 
 The authenticated agent capability market.coverage returns a machine-readable matrix of implemented research sources, supported market types, live execution boundaries and unsupported products. It reports implementation capability only; it does not probe venue uptime, guarantee historical candle depth, or certify a symbol as tradable. Use market.discover and market.snapshot to test a specific instrument and its actual data response.
 
+## Optional Qwen Queen advisory
+
+Qwen is an optional external research reviewer, not ETI's trading model or execution engine. It is disabled by default. To enable the allowlisted `queen.qwen_advisory` capability, configure these server-side environment variables on the worker:
+
+```bash
+ETI_QWEN_ENABLED=1
+ETI_QWEN_API_KEY=<provider-api-key>
+ETI_QWEN_MODEL=<model-id-enabled-in-your-provider-region>
+ETI_QWEN_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+ETI_QWEN_TIMEOUT_SECONDS=8
+ETI_QWEN_MAX_CALLS_PER_PROCESS=10
+```
+
+Use the exact endpoint and model available in your Alibaba Cloud Model Studio region. Keep the provider's free-quota-only setting enabled if you intend to avoid paid fallback. The application-side request cap is per worker process, not a cross-replica or billing guarantee; provider billing controls remain authoritative. Never put the API key in Git, the mobile app, or chat.
+
+The gateway forwards only a bounded allowlist of market-research fields. It does not send exchange keys, owner identifiers, balances or arbitrary user prompts. It accepts only `watch`, `avoid` or `insufficient_data`; network failures, malformed responses and exhausted request budgets fail closed. Qwen cannot issue buy/sell instructions, place orders, change risk limits, approve models or override the live-order kill switch. ETI's own models continue to be trained and evaluated independently.
+
 ## Architecture implemented
 
 | Layer | Current state |

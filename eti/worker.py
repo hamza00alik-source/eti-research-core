@@ -10,6 +10,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import math
+import os
 import sqlite3
 import threading
 import time
@@ -113,6 +114,39 @@ class AgentWorker:
                           "symbol": payload["symbol"], "timeframe": payload["timeframe"]},
                          separators=(",", ":")), flush=True)
 
+    def _enqueue_qwen_market_review(self, task: dict[str, Any], result: dict[str, Any]) -> None:
+        """Optionally queue a redacted Qwen review after an autonomous market snapshot."""
+        task_input = task.get("input")
+        if (os.getenv("ETI_QWEN_ENABLED", "0").strip().lower() not in {"1", "true", "yes"}
+                or task.get("target_capability") != "market.snapshot"
+                or task.get("requester") != "eti.autonomy.supervisor"
+                or not isinstance(task_input, dict)
+                or task_input.get("scheduled_by") != "eti.autonomy.supervisor"
+                or not isinstance(result, dict)):
+            return
+        existing = self.store.list_agent_tasks(task["owner_id"], task["workspace_id"], limit=500)
+        if any(item.get("input", {}).get("source_snapshot_task_id") == task["id"]
+               and item.get("target_capability") == "queen.qwen_advisory" for item in existing):
+            return
+        payload = {
+            "symbol": task_input.get("symbol"),
+            "venue": task_input.get("venue", "mexc"),
+            "timeframe": task_input.get("timeframe", "1h"),
+            "market_regime": result.get("trend_context"),
+            "market_context": {
+                "indicators": result.get("indicators"),
+                "data_quality": result.get("data_quality"),
+                "research_ranking": result.get("research_ranking"),
+            },
+            "source_snapshot_task_id": task["id"],
+        }
+        queued = self.store.create_agent_task(
+            task["owner_id"], task["workspace_id"], "eti.autonomy.supervisor",
+            "queen.qwen_advisory", payload, max_attempts=1,
+        )
+        self._log_event("autonomy.qwen_market_review_queued",
+                        snapshot_task_id=task["id"], advisory_task_id=queued["id"],
+                        symbol=payload["symbol"])
     def _enqueue_discovered_model_training(
         self, task: dict[str, Any], result: dict[str, Any]
     ) -> None:
@@ -341,6 +375,8 @@ class AgentWorker:
                 result["portfolio_snapshot"] = task_input["_eti_validated_portfolio_snapshot"]
             if capability == "model.train_research":
                 result = self._register_model_candidate(result)
+            if capability == "market.snapshot":
+                self._enqueue_qwen_market_review(task, result)
             status, retryable = "completed", False
         except LookupError as exc:
             error_type = type(exc).__name__
