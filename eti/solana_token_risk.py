@@ -15,12 +15,13 @@ from typing import Any, Mapping
 @dataclass(frozen=True)
 class SolanaTokenEvidence:
     mint: str
-    mint_authority_active: bool | None
-    freeze_authority_active: bool | None
-    top_holder_fraction: float | None
-    liquidity_usd: float | None
-    pool_age_hours: float | None
-    sell_simulation_passed: bool | None
+    # Missing provider fields must remain unknown rather than making the adapter crash.
+    mint_authority_active: bool | None = None
+    freeze_authority_active: bool | None = None
+    top_holder_fraction: float | None = None
+    liquidity_usd: float | None = None
+    pool_age_hours: float | None = None
+    sell_simulation_passed: bool | None = None
     token_program: str | None = None
     verified: bool | None = None
     source: str | None = None
