@@ -28,6 +28,7 @@ from .specialists import (
 from .strategy_evaluation import run_strategy_walk_forward
 from .market_data_hub import build_public_market_hub
 from .multi_market_intelligence import train_multi_market_intelligence_specialists
+from .qwen_advisor import queen_qwen_advisory
 
 
 AgentHandler = Callable[[dict[str, Any]], dict[str, Any]]
@@ -665,4 +666,5 @@ def default_capabilities() -> AgentCapabilityRegistry:
     registry.register("macro.as_of", macro_as_of_specialist)
     registry.register("execution.cost_estimate", execution_cost_specialist)
     registry.register("learning.economic_assess", learning_economic_assessment_specialist)
+    registry.register("queen.qwen_advisory", queen_qwen_advisory)
     return registry
