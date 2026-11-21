@@ -110,3 +110,37 @@ def test_qwen_requires_key_and_model_when_enabled(monkeypatch):
     monkeypatch.setenv("ETI_QWEN_MODEL", "qwen-test")
     with pytest.raises(ValueError, match="API_KEY"):
         advisor.queen_qwen_advisory({"symbol": "BTC/USDT"})
+
+def test_autonomous_snapshot_queues_qwen_review_only_when_enabled(tmp_path, monkeypatch):
+    from eti.agents import AgentCapabilityRegistry
+    from eti.storage import MemoryStore
+    from eti.worker import AgentWorker
+
+    monkeypatch.setenv("ETI_QWEN_ENABLED", "1")
+    store = MemoryStore(tmp_path / "qwen-worker.sqlite3")
+    workspace = store.create_workspace("owner", "research")
+    source = store.create_agent_task(
+        "owner", workspace["id"], "eti.autonomy.supervisor", "market.snapshot",
+        {"venue": "mexc", "symbol": "SOL/USDT", "timeframe": "1h",
+         "scheduled_by": "eti.autonomy.supervisor"},
+    )
+    registry = AgentCapabilityRegistry()
+    registry.register("market.snapshot", lambda payload: {
+        "trend_context": "bullish", "indicators": {"rsi_14": 55.0},
+        "data_quality": {"status": "valid"}, "research_ranking": {"score": 0.4},
+    })
+    registry.register("queen.qwen_advisory", lambda payload: {
+        "kind": "queen_qwen_advisory", "status": "disabled",
+        "execution_authority": False, "orders_submitted": False,
+    })
+    worker = AgentWorker(store, registry)
+    first = worker.run_once()
+    assert first["id"] == source["id"]
+    queued = store.list_agent_tasks("owner", workspace["id"], status="queued")
+    assert len(queued) == 1
+    assert queued[0]["target_capability"] == "queen.qwen_advisory"
+    assert queued[0]["input"]["symbol"] == "SOL/USDT"
+    assert queued[0]["input"]["market_regime"] == "bullish"
+    second = worker.run_once()
+    assert second["target_capability"] == "queen.qwen_advisory"
+    assert second["status"] == "completed"
