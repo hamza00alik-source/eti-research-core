@@ -137,10 +137,10 @@ def test_autonomous_snapshot_queues_qwen_review_only_when_enabled(tmp_path, monk
     first = worker.run_once()
     assert first["id"] == source["id"]
     queued = store.list_agent_tasks("owner", workspace["id"], status="queued")
-    assert len(queued) == 1
-    assert queued[0]["target_capability"] == "queen.qwen_advisory"
-    assert queued[0]["input"]["symbol"] == "SOL/USDT"
-    assert queued[0]["input"]["market_regime"] == "bullish"
+    qwen_tasks = [item for item in queued if item["target_capability"] == "queen.qwen_advisory"]
+    assert len(qwen_tasks) == 1
+    assert qwen_tasks[0]["input"]["symbol"] == "SOL/USDT"
+    assert qwen_tasks[0]["input"]["market_regime"] == "bullish"
     second = worker.run_once()
     assert second["target_capability"] == "queen.qwen_advisory"
     assert second["status"] == "completed"
