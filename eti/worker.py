@@ -161,8 +161,11 @@ class AgentWorker:
         tasks = self.store.list_agent_tasks(task["owner_id"], task["workspace_id"], limit=500)
         def matches(item: dict[str, Any]) -> bool:
             data = item.get("input")
-            return (item.get("status") == "completed" and isinstance(data, dict)
-                    and data.get("symbol") == symbol and data.get("timeframe") == timeframe)
+            if (item.get("status") != "completed" or not isinstance(data, dict)
+                    or data.get("symbol") != symbol or data.get("timeframe") != timeframe):
+                return False
+            return all(data.get(key) == task_input.get(key)
+                       for key in ("venue", "asset_class", "market_type"))
         strategies = [x for x in tasks if x.get("target_capability") == "strategy.walk_forward"
                       and x.get("requester") == "eti.autonomy.supervisor" and matches(x)]
         models = [x for x in tasks if x.get("target_capability") == "model.train_research"
