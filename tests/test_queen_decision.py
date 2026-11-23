@@ -107,6 +107,10 @@ def test_worker_joins_matching_research_and_queues_hold_only_evidence_review():
                  "target_capability": "model.train_research",
                  "input": {"symbol": "SOL/USDT", "timeframe": "1h"},
                  "result": {"evaluation_passed": True, "registry": {"lifecycle": "candidate"}}},
+                {"id": "qwen-1", "status": "queued", "requester": "eti.autonomy.supervisor",
+                 "target_capability": "queen.qwen_advisory",
+                 "input": {"symbol": "SOL/USDT", "venue": "mexc", "asset_class": "crypto",
+                           "market_type": "spot", "timeframe": "1h", "source_snapshot_task_id": "snap-1"}},
             ]
         def list_agent_tasks(self, *args, **kwargs):
             return self.tasks
@@ -122,6 +126,15 @@ def test_worker_joins_matching_research_and_queues_hold_only_evidence_review():
         "id": "model-1", "owner_id": "owner", "workspace_id": "workspace",
         "target_capability": "model.train_research",
         "input": {"symbol": "SOL/USDT", "timeframe": "1h"},
+    })
+    assert len(worker.store.created) == 0
+    worker.store.tasks[-1]["status"] = "completed"
+    worker.store.tasks[-1]["result"] = {"status": "provider_unavailable", "recommendation": "insufficient_data"}
+    worker._enqueue_queen_trade_review({
+        "id": "qwen-1", "owner_id": "owner", "workspace_id": "workspace",
+        "target_capability": "queen.qwen_advisory",
+        "input": {"symbol": "SOL/USDT", "venue": "mexc", "asset_class": "crypto",
+                  "market_type": "spot", "timeframe": "1h"},
     })
     assert len(worker.store.created) == 1
     review = worker.store.created[0]["input"]
