@@ -131,6 +131,8 @@ class AgentWorker:
         payload = {
             "symbol": task_input.get("symbol"),
             "venue": task_input.get("venue", "mexc"),
+            "asset_class": task_input.get("asset_class", "crypto"),
+            "market_type": task_input.get("market_type", "spot"),
             "timeframe": task_input.get("timeframe", "1h"),
             "market_regime": result.get("trend_context"),
             "market_context": {
@@ -147,6 +149,90 @@ class AgentWorker:
         self._log_event("autonomy.qwen_market_review_queued",
                         snapshot_task_id=task["id"], advisory_task_id=queued["id"],
                         symbol=payload["symbol"])
+    def _enqueue_queen_trade_review(self, task: dict[str, Any]) -> None:
+        """Join matching model and strategy results into a fail-closed Queen review."""
+        capability = task.get("target_capability")
+        if capability not in {"strategy.walk_forward", "model.train_research", "queen.qwen_advisory"}:
+            return
+        task_input = task.get("input")
+        if not isinstance(task_input, dict):
+            return
+        symbol, timeframe = task_input.get("symbol"), task_input.get("timeframe")
+        if not isinstance(symbol, str) or not isinstance(timeframe, str):
+            return
+        tasks = self.store.list_agent_tasks(task["owner_id"], task["workspace_id"], limit=500)
+        def matches(item: dict[str, Any]) -> bool:
+            data = item.get("input")
+            if (item.get("status") != "completed" or not isinstance(data, dict)
+                    or data.get("symbol") != symbol or data.get("timeframe") != timeframe):
+                return False
+            return all(data.get(key) == task_input.get(key)
+                       for key in ("venue", "asset_class", "market_type"))
+        strategies = [x for x in tasks if x.get("target_capability") == "strategy.walk_forward"
+                      and x.get("requester") == "eti.autonomy.supervisor" and matches(x)]
+        models = [x for x in tasks if x.get("target_capability") == "model.train_research"
+                  and x.get("requester") == "eti.autonomy.model_training" and matches(x)]
+        snapshots = [x for x in tasks if x.get("target_capability") == "market.snapshot"
+                     and x.get("requester") == "eti.autonomy.supervisor" and matches(x)]
+        if not strategies or not models or not snapshots:
+            return
+        strategy_task, model_task, snapshot_task = strategies[0], models[0], snapshots[0]
+        existing = [x for x in tasks if x.get("target_capability") == "queen.trade_review"]
+        if any(isinstance(x.get("input"), dict)
+               and x["input"].get("source_strategy_task_id") == strategy_task["id"]
+               and x["input"].get("source_model_task_id") == model_task["id"] for x in existing):
+            return
+        from datetime import datetime, timezone
+        snapshot = snapshot_task.get("result") if isinstance(snapshot_task.get("result"), dict) else {}
+        strategy = strategy_task.get("result") if isinstance(strategy_task.get("result"), dict) else {}
+        model = model_task.get("result") if isinstance(model_task.get("result"), dict) else {}
+        quality = snapshot.get("data_quality") if isinstance(snapshot.get("data_quality"), dict) else {}
+        age_seconds = None
+        try:
+            stamp = datetime.fromisoformat(str(snapshot.get("latest_completed_candle", "")).replace("Z", "+00:00"))
+            if stamp.tzinfo is not None and stamp.utcoffset() is not None:
+                age_seconds = (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()
+        except (TypeError, ValueError):
+            pass
+        summary = strategy.get("summary") if isinstance(strategy.get("summary"), dict) else {}
+        folds = strategy.get("folds") if isinstance(strategy.get("folds"), list) else []
+        evaluation = model.get("evaluation") if isinstance(model.get("evaluation"), dict) else {}
+        assumptions = strategy.get("cost_assumptions_bps") if isinstance(strategy.get("cost_assumptions_bps"), dict) else {}
+        fee, slip = assumptions.get("fee"), assumptions.get("slippage")
+        cost = (float(fee) + float(slip)) * 2 if all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v)) and v >= 0
+            for v in (fee, slip)) else None
+        registry = model.get("registry") if isinstance(model.get("registry"), dict) else {}
+        qwen_tasks = [x for x in tasks if x.get("target_capability") == "queen.qwen_advisory"
+                      and isinstance(x.get("input"), dict)
+                      and x["input"].get("source_snapshot_task_id") == snapshot_task["id"]]
+        if any(x.get("status") in {"queued", "running"} for x in qwen_tasks):
+            return
+        qwen = next((x.get("result") for x in qwen_tasks
+                     if x.get("status") == "completed" and isinstance(x.get("result"), dict)), None)
+        net_return = summary.get("mean_test_net_return")
+        drawdown = summary.get("mean_test_max_drawdown")
+        payload = {
+            "symbol": symbol, "timeframe": timeframe,
+            "market_evidence": {"status": "valid" if quality.get("status") in {"fresh", "valid"} else quality.get("status", "unknown"),
+                                "candle_age_seconds": age_seconds, "spread_bps": None},
+            "model_evidence": {"status": "validated" if registry.get("lifecycle") == "approved" and model.get("evaluation_passed") is True else "candidate",
+                               "probability_up": None, "oos_net_edge_bps": None, "oos_observations": None, "expected_edge_bps": None},
+            "strategy_evidence": {"status": "candidate",
+                                  "oos_net_return_bps": float(net_return) * 10000 if isinstance(net_return, (int, float)) and not isinstance(net_return, bool) else None,
+                                  "oos_trades": None, "oos_max_drawdown": drawdown if isinstance(drawdown, (int, float)) and not isinstance(drawdown, bool) else None,
+                                  "oos_folds": len(folds), "two_x_cost_positive_folds": summary.get("two_x_cost_positive_return_folds")},
+            "cost_evidence": {"status": "estimated", "round_trip_cost_bps": cost,
+                              "source": "configured_assumptions_not_independently_verified"},
+            "risk_evidence": {"approved": False, "hard_blocks": ["live_portfolio_risk_snapshot_not_bound_to_research_review"]},
+            "qwen_advisory": qwen or {"status": "not_available", "recommendation": "insufficient_data"},
+            "source_snapshot_task_id": snapshot_task["id"],
+            "source_strategy_task_id": strategy_task["id"], "source_model_task_id": model_task["id"],
+        }
+        queued = self.store.create_agent_task(task["owner_id"], task["workspace_id"],
+            "eti.autonomy.supervisor", "queen.trade_review", payload, max_attempts=1)
+        self._log_event("autonomy.queen_trade_review_queued", review_task_id=queued["id"],
+                        strategy_task_id=strategy_task["id"], model_task_id=model_task["id"], symbol=symbol)
     def _enqueue_discovered_model_training(
         self, task: dict[str, Any], result: dict[str, Any]
     ) -> None:
@@ -444,6 +530,7 @@ class AgentWorker:
             try:
                 self._enqueue_strategy_followup(task)
                 self._enqueue_discovered_model_training(task, result)
+                self._enqueue_queen_trade_review(updated)
             except Exception:
                 print("ETI_STRATEGY_FOLLOWUP_ENQUEUE_FAILED", flush=True)
         return updated
