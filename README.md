@@ -34,6 +34,14 @@ ETI is a research-first quantitative and AI trading intelligence project. The v0
 
 The authenticated agent capability market.coverage returns a machine-readable matrix of implemented research sources, supported market types, live execution boundaries and unsupported products. It reports implementation capability only; it does not probe venue uptime, guarantee historical candle depth, or certify a symbol as tradable. Use market.discover and market.snapshot to test a specific instrument and its actual data response.
 
+## Queen evidence-gated trade review
+
+The allowlisted `queen.trade_review` capability combines independently produced market, model, strategy, transaction-cost and deterministic-risk evidence into a bounded research disposition. It returns `paper_candidate` only when every required evidence gate passes; otherwise it returns `hold` with explicit blockers. Its current thresholds are conservative engineering defaults, not calibrated profitability guarantees.
+
+Qwen is optional: its `avoid` advice can add a hold blocker, but it cannot approve a candidate, clear a failed deterministic risk gate, promote a model or authorize execution. Missing or unavailable Qwen advice never substitutes for missing specialist evidence. The capability never creates an order or selects a buy/sell side. A `paper_candidate` still requires the separate paper engine and is not a live-trading permission.
+
+Required evidence fields are defined in `eti/queen_decision.py`; callers must supply independently validated out-of-sample model and strategy results, current market quality, validated transaction costs and a positive deterministic risk decision.
+
 ## Optional Qwen Queen advisory
 
 Qwen is an optional external research reviewer, not ETI's trading model or execution engine. It is disabled by default. To enable the allowlisted `queen.qwen_advisory` capability, configure these server-side environment variables on the worker:
