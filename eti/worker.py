@@ -131,6 +131,8 @@ class AgentWorker:
         payload = {
             "symbol": task_input.get("symbol"),
             "venue": task_input.get("venue", "mexc"),
+            "asset_class": task_input.get("asset_class", "crypto"),
+            "market_type": task_input.get("market_type", "spot"),
             "timeframe": task_input.get("timeframe", "1h"),
             "market_regime": result.get("trend_context"),
             "market_context": {
@@ -150,7 +152,7 @@ class AgentWorker:
     def _enqueue_queen_trade_review(self, task: dict[str, Any]) -> None:
         """Join matching model and strategy results into a fail-closed Queen review."""
         capability = task.get("target_capability")
-        if capability not in {"strategy.walk_forward", "model.train_research"}:
+        if capability not in {"strategy.walk_forward", "model.train_research", "queen.qwen_advisory"}:
             return
         task_input = task.get("input")
         if not isinstance(task_input, dict):
@@ -204,6 +206,8 @@ class AgentWorker:
         qwen_tasks = [x for x in tasks if x.get("target_capability") == "queen.qwen_advisory"
                       and isinstance(x.get("input"), dict)
                       and x["input"].get("source_snapshot_task_id") == snapshot_task["id"]]
+        if any(x.get("status") in {"queued", "running"} for x in qwen_tasks):
+            return
         qwen = next((x.get("result") for x in qwen_tasks
                      if x.get("status") == "completed" and isinstance(x.get("result"), dict)), None)
         net_return = summary.get("mean_test_net_return")
