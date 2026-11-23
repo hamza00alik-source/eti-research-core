@@ -105,7 +105,7 @@ def test_worker_joins_matching_research_and_queues_hold_only_evidence_review():
                             "cost_assumptions_bps": {"fee": 6, "slippage": 2}}},
                 {"id": "model-1", "status": "completed", "requester": "eti.autonomy.model_training",
                  "target_capability": "model.train_research",
-                 "input": {"symbol": "SOL/USDT", "timeframe": "1h"},
+                 "input": {"symbol": "SOL/USDT", "venue": "mexc", "asset_class": "crypto", "market_type": "spot", "timeframe": "1h"},
                  "result": {"evaluation_passed": True, "registry": {"lifecycle": "candidate"}}},
                 {"id": "qwen-1", "status": "queued", "requester": "eti.autonomy.supervisor",
                  "target_capability": "queen.qwen_advisory",
